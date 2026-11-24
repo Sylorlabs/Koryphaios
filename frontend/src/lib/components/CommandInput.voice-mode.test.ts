@@ -501,22 +501,32 @@ describe('voice mode toggling and microphone control', () => {
     FakeAudioContext.emitAudio();
     // The release edge ends the hold, exactly like the keyboard keyup.
     nativeListeners.get('voice://fn-up')!();
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith('transcribe_local_voice', expect.anything()));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('transcribe_local_voice', expect.anything()),
+    );
     unmount();
     expect(nativeListeners.size).toBe(0);
   });
 
   it('enables the voice feature when its shortcut is pressed', async () => {
     installMicrophone();
-    apiFetch.mockImplementation(async (_url: string, options?: RequestInit) => new Response(JSON.stringify({
-      ok: true,
-      data: { ...VOICE_SETTINGS, voiceModeEnabled: options?.method === 'PUT' },
-    })));
+    apiFetch.mockImplementation(
+      async (_url: string, options?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            data: { ...VOICE_SETTINGS, voiceModeEnabled: options?.method === 'PUT' },
+          }),
+        ),
+    );
     const { unmount } = composer();
     await waitFor(() => expect(apiFetch).toHaveBeenCalled());
     pressVoiceToggle();
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
-    expect(apiFetch).toHaveBeenCalledWith('/api/voice/settings', expect.objectContaining({ method: 'PUT' }));
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/api/voice/settings',
+      expect.objectContaining({ method: 'PUT' }),
+    );
     unmount();
   });
 
@@ -534,7 +544,9 @@ describe('voice mode toggling and microphone control', () => {
     // A new press that lands while the previous capture is still transcribing
     // must be dropped, so the follow-up transcription belongs to one capture.
     pressVoiceToggle();
-    await waitFor(() => expect(invoke).toHaveBeenCalledWith('transcribe_local_voice', expect.anything()));
+    await waitFor(() =>
+      expect(invoke).toHaveBeenCalledWith('transcribe_local_voice', expect.anything()),
+    );
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'idle'));
     expect(transcribeCalls()).toBe(1);
     unmount();
@@ -576,9 +588,7 @@ describe('voice mode toggling and microphone control', () => {
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'idle'));
     pressVoiceToggle();
     await waitFor(() => expect(recorderPanel()).toHaveAttribute('data-state', 'recording'));
-    expect(
-      screen.queryByText('“Koryphaios” Would Like to Access the Microphone'),
-    ).toBeNull();
+    expect(screen.queryByText('“Koryphaios” Would Like to Access the Microphone')).toBeNull();
     unmount();
   });
 
@@ -586,7 +596,12 @@ describe('voice mode toggling and microphone control', () => {
     installMicrophone();
     invoke.mockImplementation(async (command: string) => {
       if (command === 'local_voice_model_status') {
-        return { installed: true, modelId: 'kory-local-voice', name: 'ggml-tiny.bin', format: 'Ggml' };
+        return {
+          installed: true,
+          modelId: 'kory-local-voice',
+          name: 'ggml-tiny.bin',
+          format: 'Ggml',
+        };
       }
       if (command === 'transcribe_local_voice') return { text: 'live words' };
       return undefined;

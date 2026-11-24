@@ -75,7 +75,8 @@ function isCurrentActionableReplay(
   }
   if (event.type === 'session.changes') {
     return (
-      !!reviewId && !!reviewRevision &&
+      !!reviewId &&
+      !!reviewRevision &&
       (event.payload as Partial<KorySessionChangesPayload>).reviewId === reviewId &&
       (event.payload as Partial<KorySessionChangesPayload>).reviewRevision === reviewRevision
     );
@@ -253,10 +254,7 @@ export async function handleWSMessage(
                 initialReview?.reviewId,
                 initialReview?.reviewRevision,
               ) &&
-              !(
-                persistedMessageIds &&
-                isReplayCoveredByPersistedParts(event, persistedMessageIds)
-              ),
+              !(persistedMessageIds && isReplayCoveredByPersistedParts(event, persistedMessageIds)),
             msg.replayHistory !== false,
           );
 
@@ -345,7 +343,8 @@ export async function handleWSMessage(
       case 'session.accept_changes':
         if (await assertSessionAccess(msg.sessionId)) {
           await kory.handleSessionResponse(msg.sessionId, true, {
-            reviewId: msg.reviewId, reviewRevision: msg.reviewRevision,
+            reviewId: msg.reviewId,
+            reviewRevision: msg.reviewRevision,
           });
         } else {
           serverLog.warn(
@@ -358,7 +357,8 @@ export async function handleWSMessage(
       case 'session.reject_changes':
         if (await assertSessionAccess(msg.sessionId)) {
           await kory.handleSessionResponse(msg.sessionId, false, {
-            reviewId: msg.reviewId, reviewRevision: msg.reviewRevision,
+            reviewId: msg.reviewId,
+            reviewRevision: msg.reviewRevision,
           });
         } else {
           serverLog.warn(
@@ -392,7 +392,10 @@ export async function handleWSMessage(
         const sessionId = typeof msg.sessionId === 'string' ? msg.sessionId : '';
         const terminalId = typeof msg.terminalId === 'string' ? msg.terminalId : '';
         if (!sessionId || !terminalId || !wsManager.isClientSubscribedTo(ws.data.id, sessionId)) {
-          serverLog.warn({ clientId: ws.data.id, type: msg.type }, 'Terminal command without chat subscription');
+          serverLog.warn(
+            { clientId: ws.data.id, type: msg.type },
+            'Terminal command without chat subscription',
+          );
           break;
         }
         const table = kory.peekSessionRuntime(sessionId)?.terminals;
@@ -405,7 +408,11 @@ export async function handleWSMessage(
           }
         } catch (err) {
           serverLog.warn(
-            { clientId: ws.data.id, terminalId, error: err instanceof Error ? err.message : String(err) },
+            {
+              clientId: ws.data.id,
+              terminalId,
+              error: err instanceof Error ? err.message : String(err),
+            },
             'Terminal command rejected',
           );
         }

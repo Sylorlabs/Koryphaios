@@ -20,19 +20,35 @@ async function openManageModels(page: Page) {
 test.beforeEach(async ({ page, request }) => {
   const auth = await createAuthSession(request);
   await injectAuthIntoPage(page, auth.bearerToken);
-  await page.route(/\/api\/providers\/available$/, (route) => route.fulfill({ json: {
-    ok: true,
-    data: [{ name: 'openai', authMode: 'api_key' }],
-  } }));
-  await page.route(/\/api\/providers(?:\?.*)?$/, (route) => route.fulfill({ json: {
-    ok: true,
-    data: [{
-      name: 'openai', enabled: true, authenticated: true, credentialDetected: true,
-      connectionState: 'verified', authMode: 'api_key',
-      models: models.map((model) => model.id), allAvailableModels: models,
-      selectedModels: ['model-1'], hideModelSelector: false,
-    }],
-  } }));
+  await page.route(/\/api\/providers\/available$/, (route) =>
+    route.fulfill({
+      json: {
+        ok: true,
+        data: [{ name: 'openai', authMode: 'api_key' }],
+      },
+    }),
+  );
+  await page.route(/\/api\/providers(?:\?.*)?$/, (route) =>
+    route.fulfill({
+      json: {
+        ok: true,
+        data: [
+          {
+            name: 'openai',
+            enabled: true,
+            authenticated: true,
+            credentialDetected: true,
+            connectionState: 'verified',
+            authMode: 'api_key',
+            models: models.map((model) => model.id),
+            allAvailableModels: models,
+            selectedModels: ['model-1'],
+            hideModelSelector: false,
+          },
+        ],
+      },
+    }),
+  );
 });
 
 test('Manage Models displays a scrollable catalog and reopens reliably', async ({ page }) => {
@@ -48,7 +64,9 @@ test('Manage Models displays a scrollable catalog and reopens reliably', async (
   await last.scrollIntoViewIfNeeded();
   await expect(last).toBeInViewport();
   const modelList = dialog.getByTestId('model-selection-list');
-  const maxScrollTop = await modelList.evaluate((element) => element.scrollHeight - element.clientHeight);
+  const maxScrollTop = await modelList.evaluate(
+    (element) => element.scrollHeight - element.clientHeight,
+  );
   expect(maxScrollTop).toBeGreaterThan(0);
   await modelList.hover();
   await page.mouse.wheel(0, 2_000);

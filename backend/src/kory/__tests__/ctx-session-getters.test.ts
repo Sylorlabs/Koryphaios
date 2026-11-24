@@ -149,27 +149,21 @@ describe('worker usage fold', () => {
     manager['emitUsageUpdate'] = emit;
 
     // Per-request snapshots: context grew to 12k, then the CLI compacted to 8k.
-    manager['updateUsageFromEvent'](
-      'sess-w',
-      workerId,
-      'mock-model',
-      'codex',
-      { type: 'usage_update', tokensIn: 10_000, tokensOut: 100 } as never,
-    );
-    manager['updateUsageFromEvent'](
-      'sess-w',
-      workerId,
-      'mock-model',
-      'codex',
-      { type: 'usage_update', tokensIn: 12_000, tokensOut: 250 } as never,
-    );
-    manager['updateUsageFromEvent'](
-      'sess-w',
-      workerId,
-      'mock-model',
-      'codex',
-      { type: 'usage_update', tokensIn: 8_000, tokensOut: 400 } as never,
-    );
+    manager['updateUsageFromEvent']('sess-w', workerId, 'mock-model', 'codex', {
+      type: 'usage_update',
+      tokensIn: 10_000,
+      tokensOut: 100,
+    } as never);
+    manager['updateUsageFromEvent']('sess-w', workerId, 'mock-model', 'codex', {
+      type: 'usage_update',
+      tokensIn: 12_000,
+      tokensOut: 250,
+    } as never);
+    manager['updateUsageFromEvent']('sess-w', workerId, 'mock-model', 'codex', {
+      type: 'usage_update',
+      tokensIn: 8_000,
+      tokensOut: 400,
+    } as never);
     let usage = manager['workers'].getUsage(workerId);
     // Math.max folding would keep 12k after the mid-turn compaction.
     expect(usage?.tokensIn).toBe(8_000);
@@ -177,20 +171,14 @@ describe('worker usage fold', () => {
 
     // The cumulative turn receipt (billing evidence) must never inflate the
     // occupancy meter.
-    manager['updateUsageFromEvent'](
-      'sess-w',
-      workerId,
-      'mock-model',
-      'codex',
-      {
-        type: 'usage_update',
-        tokensIn: 30_000,
-        tokensOut: 750,
-        estimated: true,
-        billingTokensIn: 30_000,
-        billingTokensOut: 750,
-      } as never,
-    );
+    manager['updateUsageFromEvent']('sess-w', workerId, 'mock-model', 'codex', {
+      type: 'usage_update',
+      tokensIn: 30_000,
+      tokensOut: 750,
+      estimated: true,
+      billingTokensIn: 30_000,
+      billingTokensOut: 750,
+    } as never);
     usage = manager['workers'].getUsage(workerId);
     expect(usage?.tokensIn).toBe(8_000);
     // A per-request sample already describes this turn — the cumulative

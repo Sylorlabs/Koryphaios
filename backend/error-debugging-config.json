@@ -27,15 +27,8 @@
     "filters": {
       "categories": [],
       "severities": [],
-      "excludeFiles": [
-        "node_modules/**",
-        "dist/**",
-        "build/**"
-      ],
-      "excludePatterns": [
-        "*.min.js",
-        "*.map"
-      ]
+      "excludeFiles": ["node_modules/**", "dist/**", "build/**"],
+      "excludePatterns": ["*.min.js", "*.map"]
     },
     "polling": {
       "interval": 1000,
@@ -146,10 +139,7 @@
     "enableCodeScanning": false,
     "reportingLevel": "medium-high",
     "autoFixVulnerabilities": false,
-    "excludePatterns": [
-      "test/**",
-      "tests/**"
-    ]
+    "excludePatterns": ["test/**", "tests/**"]
   },
   "detectors": {
     "enabled": true,
@@ -169,15 +159,8 @@
     "filters": {
       "categories": [],
       "severities": [],
-      "excludeFiles": [
-        "node_modules/**",
-        "dist/**",
-        "build/**"
-      ],
-      "excludePatterns": [
-        "*.min.js",
-        "*.map"
-      ]
+      "excludeFiles": ["node_modules/**", "dist/**", "build/**"],
+      "excludePatterns": ["*.min.js", "*.map"]
     },
     "polling": {
       "interval": 1000,

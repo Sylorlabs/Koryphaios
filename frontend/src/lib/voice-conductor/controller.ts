@@ -146,7 +146,18 @@ export function describeAgentStatus(status: string): string {
   return STATUS_PHRASE[status] ?? status.replace(/_/g, ' ');
 }
 
-const ORDINAL_NAMES = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
+const ORDINAL_NAMES = [
+  'first',
+  'second',
+  'third',
+  'fourth',
+  'fifth',
+  'sixth',
+  'seventh',
+  'eighth',
+  'ninth',
+  'tenth',
+];
 
 function targetLabel(target: AgentTarget): string {
   switch (target.kind) {
@@ -217,9 +228,7 @@ export function describeStatus(
   if (!workers.length) return `${manager} No workers have started in this chat.`;
   const active = workers.filter((w) => !isFinished(w.status));
   const finished = workers.length - active.length;
-  const parts = active.map(
-    (w) => `${workerLabel(w, workers)} is ${describeAgentStatus(w.status)}`,
-  );
+  const parts = active.map((w) => `${workerLabel(w, workers)} is ${describeAgentStatus(w.status)}`);
   const activeText = active.length
     ? `${active.length} ${active.length === 1 ? 'worker is' : 'workers are'} active: ${parts.join('; ')}.`
     : 'No workers are active.';
@@ -307,8 +316,7 @@ export function createConductorController(
   let hudTimer: unknown = null;
   let pending: { command: ResolvedCommand; timer: unknown; kind: 'confirm' | 'fallback' } | null =
     null;
-  let lastUndo: { label: string; run: () => Promise<void> | void; expiresAt: number } | null =
-    null;
+  let lastUndo: { label: string; run: () => Promise<void> | void; expiresAt: number } | null = null;
 
   function publish(next: Partial<ConductorState>) {
     state = { ...state, ...next };
@@ -347,7 +355,8 @@ export function createConductorController(
         const missing = needChat();
         if (missing) return missing;
         return {
-          title: intent.target.kind === 'all' ? 'Status' : `Status of ${targetLabel(intent.target)}`,
+          title:
+            intent.target.kind === 'all' ? 'Status' : `Status of ${targetLabel(intent.target)}`,
           destructive: false,
           run: async () => {
             const text = describeStatus(
@@ -371,7 +380,10 @@ export function createConductorController(
             destructive: true,
             run: async () => {
               await actions.cancelSession(sessionId);
-              return { title: intent.target.kind === 'all' ? 'Stopped all agents' : 'Stopped the manager', tone: 'success' };
+              return {
+                title: intent.target.kind === 'all' ? 'Stopped all agents' : 'Stopped the manager',
+                tone: 'success',
+              };
             },
           };
         }
@@ -430,7 +442,9 @@ export function createConductorController(
             if (!created) return { title: 'Could not create a chat', tone: 'error' };
             if (intent.topic) await actions.renameChat(created, intent.topic);
             return {
-              title: intent.topic ? `Started “${truncate(intent.topic, 60)}”` : 'Started a new chat',
+              title: intent.topic
+                ? `Started “${truncate(intent.topic, 60)}”`
+                : 'Started a new chat',
               tone: 'success',
               undo: {
                 label: 'Undo new chat',
@@ -478,7 +492,8 @@ export function createConductorController(
         };
 
       case 'note': {
-        if (!actions.notesEnabled()) return { error: 'Notes are turned off. Enable Notes in Settings.' };
+        if (!actions.notesEnabled())
+          return { error: 'Notes are turned off. Enable Notes in Settings.' };
         const note = actions.currentNote();
         if (note) {
           return {
@@ -486,7 +501,10 @@ export function createConductorController(
             destructive: false,
             run: async () => {
               const before = note.content;
-              const ok = await actions.updateNoteContent(note.id, appendToNoteContent(note, intent.text));
+              const ok = await actions.updateNoteContent(
+                note.id,
+                appendToNoteContent(note, intent.text),
+              );
               if (!ok) return { title: 'Could not update the note', tone: 'error' };
               return {
                 title: `Added to “${truncate(note.title, 40)}”`,
@@ -535,7 +553,11 @@ export function createConductorController(
           destructive: false,
           run: async () => {
             void actions.speak(reply.id, reply.text).catch(() => undefined);
-            return { title: 'Reading the last reply', detail: truncate(reply.text, 160), tone: 'info' };
+            return {
+              title: 'Reading the last reply',
+              detail: truncate(reply.text, 160),
+              tone: 'info',
+            };
           },
         };
       }
@@ -611,14 +633,22 @@ export function createConductorController(
     }
   }
 
-  function askToConfirm(command: ResolvedCommand, kind: 'confirm' | 'fallback', heard: string, detail?: string) {
+  function askToConfirm(
+    command: ResolvedCommand,
+    kind: 'confirm' | 'fallback',
+    heard: string,
+    detail?: string,
+  ) {
     clearPending();
     const windowMs = kind === 'confirm' ? CONFIRM_WINDOW_MS : FALLBACK_WINDOW_MS;
     const timer = clock.setTimeout(() => {
       if (pending?.timer !== timer) return;
       pending = null;
       if (kind === 'confirm') {
-        showHud({ tone: 'info', title: 'Not confirmed — nothing changed', heard, canUndo: false }, DONE_HUD_MS);
+        showHud(
+          { tone: 'info', title: 'Not confirmed — nothing changed', heard, canUndo: false },
+          DONE_HUD_MS,
+        );
       } else {
         publish({ hud: null });
       }
@@ -693,7 +723,10 @@ export function createConductorController(
       clearPending();
     }
     if (!heard) {
-      showHud({ tone: 'info', title: 'Listening — say a command after the wake phrase', canUndo: false }, DONE_HUD_MS);
+      showHud(
+        { tone: 'info', title: 'Listening — say a command after the wake phrase', canUndo: false },
+        DONE_HUD_MS,
+      );
       return;
     }
     // Capture the chat now: a confirmation that lands after the user switched
@@ -703,12 +736,18 @@ export function createConductorController(
 
     if (intent.type === 'undo') return undo();
     if (intent.type === 'confirm' || intent.type === 'deny') {
-      showHud({ tone: 'info', title: 'Nothing is waiting for confirmation', heard, canUndo: false }, DONE_HUD_MS);
+      showHud(
+        { tone: 'info', title: 'Nothing is waiting for confirmation', heard, canUndo: false },
+        DONE_HUD_MS,
+      );
       return;
     }
     if (intent.type === 'unknown') {
       if (!sessionId) {
-        showHud({ tone: 'warning', title: 'Not a command I know', detail: heard, heard, canUndo: false }, ERROR_HUD_MS);
+        showHud(
+          { tone: 'warning', title: 'Not a command I know', detail: heard, heard, canUndo: false },
+          ERROR_HUD_MS,
+        );
         return;
       }
       const message = intent.text;

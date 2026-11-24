@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { TurnTranscriptRecorder } from './TurnTranscriptRecorder';
-import { AgentFallbackChainRequestSchema, SessionFallbackChainRequestSchema } from '../../validation/schemas';
+import {
+  AgentFallbackChainRequestSchema,
+  SessionFallbackChainRequestSchema,
+} from '../../validation/schemas';
 
 const MANAGER = 'kory-manager';
 
@@ -49,7 +52,14 @@ describe('fallback hop folds into the persisted turn', () => {
     recorder.observe({
       sessionId: 's1',
       type: 'session.fallback.hop',
-      payload: { sessionId: 's1', messageId: 'm1', fromModel: 'a', toModel: 'b', reason: 'timeout', stepIndex: 0 },
+      payload: {
+        sessionId: 's1',
+        messageId: 'm1',
+        fromModel: 'a',
+        toModel: 'b',
+        reason: 'timeout',
+        stepIndex: 0,
+      },
       timestamp: 1,
       managerAgentId: MANAGER,
     });
@@ -58,7 +68,14 @@ describe('fallback hop folds into the persisted turn', () => {
 
   test('a hop with no active turn is passed through untouched', () => {
     const recorder = new TurnTranscriptRecorder();
-    const payload = { sessionId: 's1', messageId: '', fromModel: 'a', toModel: 'b', reason: 'timeout', stepIndex: 0 };
+    const payload = {
+      sessionId: 's1',
+      messageId: '',
+      fromModel: 'a',
+      toModel: 'b',
+      reason: 'timeout',
+      stepIndex: 0,
+    };
     const published = recorder.observe({
       sessionId: 's1',
       type: 'session.fallback.hop',
@@ -78,11 +95,15 @@ describe('fallback chain request validation', () => {
         chain: { steps: [{ provider: 'openai', model: 'gpt-5', reasoningLevel: 'high' }] },
       }).success,
     ).toBe(true);
-    expect(AgentFallbackChainRequestSchema.safeParse({ role: 'worker', chain: null }).success).toBe(true);
+    expect(AgentFallbackChainRequestSchema.safeParse({ role: 'worker', chain: null }).success).toBe(
+      true,
+    );
   });
 
   test('an unknown role or reasoning level is rejected', () => {
-    expect(AgentFallbackChainRequestSchema.safeParse({ role: 'reviewer', chain: null }).success).toBe(false);
+    expect(
+      AgentFallbackChainRequestSchema.safeParse({ role: 'reviewer', chain: null }).success,
+    ).toBe(false);
     expect(
       SessionFallbackChainRequestSchema.safeParse({
         chain: { steps: [{ provider: 'openai', model: 'gpt-5', reasoningLevel: 'extreme' }] },
@@ -98,7 +119,9 @@ describe('fallback chain request validation', () => {
 
   test('a step without a provider is rejected', () => {
     expect(
-      SessionFallbackChainRequestSchema.safeParse({ chain: { steps: [{ provider: '', model: 'gpt-5' }] } }).success,
+      SessionFallbackChainRequestSchema.safeParse({
+        chain: { steps: [{ provider: '', model: 'gpt-5' }] },
+      }).success,
     ).toBe(false);
   });
 });

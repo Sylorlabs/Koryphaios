@@ -35,12 +35,20 @@ afterEach(async () => {
  * A real manager with a durable SessionRun coordinator and a scripted provider.
  * `script` produces one provider call's events; it may act on the run mid-stream.
  */
-async function fixture(script: (ctx: { sessionId: string; manager: KoryManager; runs: SessionRunCoordinator }) => AsyncGenerator<ProviderEvent>) {
+async function fixture(
+  script: (ctx: {
+    sessionId: string;
+    manager: KoryManager;
+    runs: SessionRunCoordinator;
+  }) => AsyncGenerator<ProviderEvent>,
+) {
   const root = mkdtempSync(join(tmpdir(), 'run-settlement-'));
   const sessions = new SessionStore();
   const messages = new MessageStore();
   const session = await sessions.create('local-user', 'Run settlement', undefined, root);
-  await sessions.update(session.id, { agentOverrides: { criticMode: 'off', agentExecutionMode: 'single' } });
+  await sessions.update(session.id, {
+    agentOverrides: { criticMode: 'off', agentExecutionMode: 'single' },
+  });
   const provider = { name: 'openai', config: {} } as Provider;
   const runs = new SessionRunCoordinator(new SessionRunStore(), (_sessionId, message) => {
     wsBroker.publish('custom', message as WSMessage);
@@ -48,23 +56,44 @@ async function fixture(script: (ctx: { sessionId: string; manager: KoryManager; 
   let manager!: KoryManager;
   const providers = {
     resolveProvider: async () => provider,
-    getAvailable: () => [provider], getStatus: () => [], getConfigs: () => ({}),
-    get: () => undefined, isQuotaError: () => false,
+    getAvailable: () => [provider],
+    getStatus: () => [],
+    getConfigs: () => ({}),
+    get: () => undefined,
+    isQuotaError: () => false,
     executeWithRetry: async function* (_request: StreamRequest): AsyncGenerator<ProviderEvent> {
       yield* script({ sessionId: session.id, manager, runs });
     },
   } as unknown as ProviderRegistry;
   const tools = new ToolRegistry();
-  manager = new KoryManager(providers, tools, root, {} as KoryphaiosConfig, sessions, messages, undefined, undefined, runs);
+  manager = new KoryManager(
+    providers,
+    tools,
+    root,
+    {} as KoryphaiosConfig,
+    sessions,
+    messages,
+    undefined,
+    undefined,
+    runs,
+  );
   const internal = manager as any;
   manager.resolveActiveRouting = () => ({ model: 'gpt-4o', provider: 'openai' });
   internal.resolveSessionWorkingDirectory = async () => root;
-  tools.execute = mock(async () => ({ callId: 'x', name: 'noop', output: '', isError: false, durationMs: 0 }));
+  tools.execute = mock(async () => ({
+    callId: 'x',
+    name: 'noop',
+    output: '',
+    isError: false,
+    durationMs: 0,
+  }));
   fixtures.push({ manager, root });
   return { manager, session, runs };
 }
 
-async function captureBroker<T>(run: () => Promise<T>): Promise<{ result: T; published: WSMessage[] }> {
+async function captureBroker<T>(
+  run: () => Promise<T>,
+): Promise<{ result: T; published: WSMessage[] }> {
   const published: WSMessage[] = [];
   const broker = wsBroker as unknown as { publish: (channel: string, message: unknown) => void };
   const original = broker.publish;
@@ -92,18 +121,32 @@ function lifecycle(published: WSMessage[], sessionId: string) {
   return published
     .filter((m) => m.sessionId === sessionId)
     .filter((m) => {
-      if (m.type === 'turn.provider_completed' || m.type === 'run.settled' || m.type === 'run.state') return true;
-      return m.type === 'stream.delta' || (m.type === 'agent.status' && (m.payload as { agentId?: string }).agentId === MANAGER_AGENT);
+      if (
+        m.type === 'turn.provider_completed' ||
+        m.type === 'run.settled' ||
+        m.type === 'run.state'
+      )
+        return true;
+      return (
+        m.type === 'stream.delta' ||
+        (m.type === 'agent.status' && (m.payload as { agentId?: string }).agentId === MANAGER_AGENT)
+      );
     });
 }
 
-function indexOfType(events: WSMessage[], type: string, predicate: (m: WSMessage) => boolean = () => true) {
+function indexOfType(
+  events: WSMessage[],
+  type: string,
+  predicate: (m: WSMessage) => boolean = () => true,
+) {
   return events.findIndex((m) => m.type === type && predicate(m));
 }
 
 function terminalRunState(events: WSMessage[]) {
   return events.find(
-    (m) => m.type === 'run.state' && (m.payload as { snapshot: { status: string } }).snapshot.status === 'terminal',
+    (m) =>
+      m.type === 'run.state' &&
+      (m.payload as { snapshot: { status: string } }).snapshot.status === 'terminal',
   );
 }
 
@@ -127,7 +170,11 @@ describe('turn provider completion and run settlement', () => {
     expect((providerDone[0].payload as { runId: string }).runId).toBe(runId);
     expect(settled[0].payload).toMatchObject({ runId, outcome: 'completed' });
 
-    const doneStatus = indexOfType(events, 'agent.status', (m) => (m.payload as { status: string }).status === 'done');
+    const doneStatus = indexOfType(
+      events,
+      'agent.status',
+      (m) => (m.payload as { status: string }).status === 'done',
+    );
     const lastDelta = events.map((m) => m.type).lastIndexOf('stream.delta');
     const providerIdx = events.indexOf(providerDone[0]);
     const terminalIdx = events.indexOf(terminal!);

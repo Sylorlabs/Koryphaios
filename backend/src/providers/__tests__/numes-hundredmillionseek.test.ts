@@ -13,8 +13,7 @@ function config(name: 'numes' | 'hundredmillionseek'): ProviderConfig {
   return {
     name,
     apiKey: 'synthetic-test-key',
-    baseUrl:
-      name === 'numes' ? 'https://api.numes.ai/api/v1' : 'https://100milionseek.top/v1',
+    baseUrl: name === 'numes' ? 'https://api.numes.ai/api/v1' : 'https://100milionseek.top/v1',
     disabled: false,
   } as ProviderConfig;
 }
@@ -80,9 +79,7 @@ describe('HundredMillionSeekProvider catalog', () => {
 
     const provider = new HundredMillionSeekProvider(config('hundredmillionseek'));
     await provider.refreshModels(true);
-    expect(provider.listModels().map((model) => model.id)).toEqual([
-      'deepseek-v4.1-flash-free',
-    ]);
+    expect(provider.listModels().map((model) => model.id)).toEqual(['deepseek-v4.1-flash-free']);
   });
 
   it('leaves the catalog empty on an unreachable endpoint instead of guessing', async () => {

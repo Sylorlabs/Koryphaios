@@ -6,7 +6,10 @@ import { ACTIVE_AGENT_STATUSES, TERMINAL_AGENT_STATUSES } from '$lib/stores/run-
 import { apiUrl } from '$lib/utils/api-url';
 import { apiFetch, parseJsonResponse } from '$lib/api.svelte';
 import { onMount } from 'svelte';
-import { OPEN_AGENT_THREAD_EVENT, type AgentThreadNavigation } from '$lib/utils/agent-thread-navigation';
+import {
+  OPEN_AGENT_THREAD_EVENT,
+  type AgentThreadNavigation,
+} from '$lib/utils/agent-thread-navigation';
 
 export function useAgentRail() {
   let selectedAgentId = $state('');
@@ -15,12 +18,7 @@ export function useAgentRail() {
   let sessionAgentChats = $derived(
     agentStore
       .getSessionAgents(sessionStore.activeSessionId)
-      .filter(
-        (a) =>
-          !a.closed &&
-          a.identity.id !== 'kory-manager' &&
-          a.identity.role !== 'manager',
-      )
+      .filter((a) => !a.closed && a.identity.id !== 'kory-manager' && a.identity.role !== 'manager')
       .sort((a, b) => {
         const activeWeight = (status: typeof a.status) =>
           status !== 'done' && status !== 'idle' ? 1 : 0;

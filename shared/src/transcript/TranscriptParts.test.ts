@@ -12,8 +12,17 @@ const reasoning = (text: string, timestamp: number, thinkingTokens?: number): Tu
   thinkingTokens === undefined
     ? { type: 'reasoning', text, timestamp }
     : { type: 'reasoning', text, timestamp, thinkingTokens };
-const text = (value: string, timestamp: number): TurnEvent => ({ type: 'text', text: value, timestamp });
-const toolCall = (callId: string, name: string, input: Record<string, unknown>, timestamp: number): TurnEvent => ({
+const text = (value: string, timestamp: number): TurnEvent => ({
+  type: 'text',
+  text: value,
+  timestamp,
+});
+const toolCall = (
+  callId: string,
+  name: string,
+  input: Record<string, unknown>,
+  timestamp: number,
+): TurnEvent => ({
   type: 'tool_call',
   callId,
   name,
@@ -40,10 +49,14 @@ describe('reduceTurnParts reasoning', () => {
   test('appends deltas to an open reasoning part', () => {
     const parts = reduceTurnEvents([reasoning('a', 1), reasoning('b', 2)]);
     expect(parts).toEqual([{ kind: 'reasoning', text: 'ab', startedAt: 1 }]);
-  }); 
+  });
 
   test('keeps the maximum thinkingTokens across deltas', () => {
-    const parts = reduceTurnEvents([reasoning('', 1, 10), reasoning('x', 2, 4), reasoning('y', 3, 25)]);
+    const parts = reduceTurnEvents([
+      reasoning('', 1, 10),
+      reasoning('x', 2, 4),
+      reasoning('y', 3, 25),
+    ]);
     expect(parts).toEqual([{ kind: 'reasoning', text: 'xy', startedAt: 1, thinkingTokens: 25 }]);
   });
 
@@ -80,7 +93,10 @@ describe('reduceTurnParts text', () => {
 
 describe('reduceTurnParts tool calls', () => {
   test('closes open reasoning and pushes a tool part', () => {
-    const parts = reduceTurnEvents([reasoning('plan', 1), toolCall('c1', 'bash', { cmd: 'ls' }, 2)]);
+    const parts = reduceTurnEvents([
+      reasoning('plan', 1),
+      toolCall('c1', 'bash', { cmd: 'ls' }, 2),
+    ]);
     expect(parts).toEqual([
       { kind: 'reasoning', text: 'plan', startedAt: 1, endedAt: 2 },
       { kind: 'tool', callId: 'c1', name: 'bash', input: { cmd: 'ls' }, startedAt: 2 },
@@ -93,7 +109,13 @@ describe('reduceTurnParts tool calls', () => {
       toolCall('c1', 'shell', { cwd: '/tmp' }, 2),
     ]);
     expect(parts).toEqual([
-      { kind: 'tool', callId: 'c1', name: 'shell', input: { cmd: 'ls', cwd: '/tmp' }, startedAt: 1 },
+      {
+        kind: 'tool',
+        callId: 'c1',
+        name: 'shell',
+        input: { cmd: 'ls', cwd: '/tmp' },
+        startedAt: 1,
+      },
     ]);
   });
 
@@ -214,7 +236,9 @@ describe('legacyTurnParts', () => {
   });
 
   test('omits empty reasoning and empty content', () => {
-    expect(legacyTurnParts('answer', '', 1)).toEqual([{ kind: 'text', text: 'answer', startedAt: 1 }]);
+    expect(legacyTurnParts('answer', '', 1)).toEqual([
+      { kind: 'text', text: 'answer', startedAt: 1 },
+    ]);
     expect(legacyTurnParts('', undefined, 1)).toEqual([]);
     expect(legacyTurnParts('', 'why', 1)).toEqual([
       { kind: 'reasoning', text: 'why', startedAt: 1, endedAt: 1, timeUnknown: true },
@@ -227,16 +251,28 @@ describe('turnEventFromWSMessage', () => {
 
   test('stream.thinking maps to reasoning with optional thinkingTokens', () => {
     expect(
-      turnEventFromWSMessage({ type: 'stream.thinking', payload: { agentId: 'a', thinking: 'hm', thinkingTokens: 3 }, timestamp: ts }),
+      turnEventFromWSMessage({
+        type: 'stream.thinking',
+        payload: { agentId: 'a', thinking: 'hm', thinkingTokens: 3 },
+        timestamp: ts,
+      }),
     ).toEqual({ type: 'reasoning', text: 'hm', timestamp: ts, thinkingTokens: 3 });
     expect(
-      turnEventFromWSMessage({ type: 'stream.thinking', payload: { agentId: 'a', thinking: '' }, timestamp: ts }),
+      turnEventFromWSMessage({
+        type: 'stream.thinking',
+        payload: { agentId: 'a', thinking: '' },
+        timestamp: ts,
+      }),
     ).toEqual({ type: 'reasoning', text: '', timestamp: ts });
   });
 
   test('stream.delta maps to text', () => {
     expect(
-      turnEventFromWSMessage({ type: 'stream.delta', payload: { agentId: 'a', content: 'hi', model: 'm' }, timestamp: ts }),
+      turnEventFromWSMessage({
+        type: 'stream.delta',
+        payload: { agentId: 'a', content: 'hi', model: 'm' },
+        timestamp: ts,
+      }),
     ).toEqual({ type: 'text', text: 'hi', timestamp: ts });
   });
 
@@ -247,7 +283,13 @@ describe('turnEventFromWSMessage', () => {
         payload: { agentId: 'a', toolCall: { id: 'c1', name: 'bash', input: { cmd: 'ls' } } },
         timestamp: ts,
       }),
-    ).toEqual({ type: 'tool_call', callId: 'c1', name: 'bash', input: { cmd: 'ls' }, timestamp: ts });
+    ).toEqual({
+      type: 'tool_call',
+      callId: 'c1',
+      name: 'bash',
+      input: { cmd: 'ls' },
+      timestamp: ts,
+    });
   });
 
   test('stream.tool_result maps to tool_result', () => {
@@ -272,7 +314,13 @@ describe('turnEventFromWSMessage', () => {
   });
 
   test('stream.clear_content maps to clear_text', () => {
-    expect(turnEventFromWSMessage({ type: 'stream.clear_content', payload: { agentId: 'a' }, timestamp: ts })).toEqual({
+    expect(
+      turnEventFromWSMessage({
+        type: 'stream.clear_content',
+        payload: { agentId: 'a' },
+        timestamp: ts,
+      }),
+    ).toEqual({
       type: 'clear_text',
       timestamp: ts,
     });
@@ -286,7 +334,9 @@ describe('turnEventFromWSMessage', () => {
 
   test('unrelated types map to null', () => {
     expect(turnEventFromWSMessage({ type: 'stream.usage', payload: {}, timestamp: ts })).toBeNull();
-    expect(turnEventFromWSMessage({ type: 'agent.status', payload: { status: 'done' }, timestamp: ts })).toBeNull();
+    expect(
+      turnEventFromWSMessage({ type: 'agent.status', payload: { status: 'done' }, timestamp: ts }),
+    ).toBeNull();
   });
 
   test('malformed payloads map to null', () => {
@@ -295,12 +345,28 @@ describe('turnEventFromWSMessage', () => {
       { type: 'stream.thinking', payload: null, timestamp: ts },
       { type: 'stream.delta', payload: { content: undefined }, timestamp: ts },
       { type: 'stream.delta', payload: 'text', timestamp: ts },
-      { type: 'stream.tool_call', payload: { toolCall: { name: 'bash', input: {} } }, timestamp: ts },
+      {
+        type: 'stream.tool_call',
+        payload: { toolCall: { name: 'bash', input: {} } },
+        timestamp: ts,
+      },
       { type: 'stream.tool_call', payload: { toolCall: { id: '', name: 'bash' } }, timestamp: ts },
-      { type: 'stream.tool_call', payload: { toolCall: { id: 'c', name: 'bash', input: [1] } }, timestamp: ts },
+      {
+        type: 'stream.tool_call',
+        payload: { toolCall: { id: 'c', name: 'bash', input: [1] } },
+        timestamp: ts,
+      },
       { type: 'stream.tool_call', payload: { toolCall: null }, timestamp: ts },
-      { type: 'stream.tool_result', payload: { toolResult: { callId: 'c', name: 'bash' } }, timestamp: ts },
-      { type: 'stream.tool_result', payload: { toolResult: { callId: 'c', name: 'bash', output: 1 } }, timestamp: ts },
+      {
+        type: 'stream.tool_result',
+        payload: { toolResult: { callId: 'c', name: 'bash' } },
+        timestamp: ts,
+      },
+      {
+        type: 'stream.tool_result',
+        payload: { toolResult: { callId: 'c', name: 'bash', output: 1 } },
+        timestamp: ts,
+      },
       { type: 'stream.delta', payload: { content: 'x' }, timestamp: Number.NaN },
     ];
     for (const msg of bad) expect(turnEventFromWSMessage(msg)).toBeNull();

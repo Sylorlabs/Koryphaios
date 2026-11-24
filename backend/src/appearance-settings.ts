@@ -26,14 +26,7 @@ export type AppearanceThemePreset =
 export type AppearanceThemePresetV1 = AppearanceThemePreset | 'system';
 
 export type AppearanceAccent =
-  | 'gold'
-  | 'indigo'
-  | 'cyan'
-  | 'emerald'
-  | 'amber'
-  | 'rose'
-  | 'violet'
-  | 'custom';
+  'gold' | 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet' | 'custom';
 
 export type AppearanceFont =
   | 'inter'

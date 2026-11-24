@@ -25,18 +25,18 @@ Requirements are unchanged: PHP 8.1+, `ext-curl`, `ext-json`.
 Start from the symptom. Everything not listed here — and most things that
 are — works without edits.
 
-| Symptom after upgrading | Cause | Section |
-| --- | --- | --- |
-| `catch (\RuntimeException)` around HTTP client calls no longer catches JSON-RPC errors | HTTP errors are now typed `McpError` | [1](#1-http-client-errors-are-typed-mcperror-b1) |
-| A tool handler that throws `McpError` now produces a JSON-RPC error instead of an `isError` tool result | `McpError` is treated as a protocol error | [2](#2-mcperror-thrown-in-a-tool-handler-is-a-protocol-error-b2) |
-| Static analysis flags `callTool()` return-type assumptions | Return type widened to `CallToolResult\|CreateTaskResult` | [3](#3-calltool-may-return-a-task-handle-b3) |
-| Calls to `listTasks()` / `getTaskResult()` fatal with unknown method | Experimental v1 Tasks API removed (SEP-2663 redesign) | [4](#4-the-experimental-tasks-api-was-redesigned-b4-b8) |
-| OAuth with pre-registered credentials fails before any token request | Issuer binding is now required by default | [5](#5-pre-registered-oauth-credentials-need-an-issuer-b5) |
-| A tool is missing from `listTools()` on modern HTTP sessions | Its `x-mcp-header` annotations violate SEP-2243 | [6](#6-modern-http-clients-filter-invalid-x-mcp-header-tools-b6) |
-| A legacy HTTP `prompts/get` with an `ElicitationContext` callback errors `-32603` | Prompt-side input gathering is modern-only | [7](#7-elicitationcontext-in-legacy-http-promptsget-fails-loudly-b7) |
-| A fragile legacy server misbehaves at connect time | The client now probes `server/discover` first | [8](#8-connection-and-timeout-behavior-m1-m2) |
-| The client times out against a completely silent server | `readTimeout` now fires against silent peers too | [8](#8-connection-and-timeout-behavior-m1-m2) |
-| PSR-3 warnings about deprecated MCP features appear in logs | SEP-2596/SEP-2577 deprecation warnings | [11](#11-deprecated-mcp-features-and-runtime-warnings-m8) |
+| Symptom after upgrading                                                                                 | Cause                                                     | Section                                                              |
+| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------- |
+| `catch (\RuntimeException)` around HTTP client calls no longer catches JSON-RPC errors                  | HTTP errors are now typed `McpError`                      | [1](#1-http-client-errors-are-typed-mcperror-b1)                     |
+| A tool handler that throws `McpError` now produces a JSON-RPC error instead of an `isError` tool result | `McpError` is treated as a protocol error                 | [2](#2-mcperror-thrown-in-a-tool-handler-is-a-protocol-error-b2)     |
+| Static analysis flags `callTool()` return-type assumptions                                              | Return type widened to `CallToolResult\|CreateTaskResult` | [3](#3-calltool-may-return-a-task-handle-b3)                         |
+| Calls to `listTasks()` / `getTaskResult()` fatal with unknown method                                    | Experimental v1 Tasks API removed (SEP-2663 redesign)     | [4](#4-the-experimental-tasks-api-was-redesigned-b4-b8)              |
+| OAuth with pre-registered credentials fails before any token request                                    | Issuer binding is now required by default                 | [5](#5-pre-registered-oauth-credentials-need-an-issuer-b5)           |
+| A tool is missing from `listTools()` on modern HTTP sessions                                            | Its `x-mcp-header` annotations violate SEP-2243           | [6](#6-modern-http-clients-filter-invalid-x-mcp-header-tools-b6)     |
+| A legacy HTTP `prompts/get` with an `ElicitationContext` callback errors `-32603`                       | Prompt-side input gathering is modern-only                | [7](#7-elicitationcontext-in-legacy-http-promptsget-fails-loudly-b7) |
+| A fragile legacy server misbehaves at connect time                                                      | The client now probes `server/discover` first             | [8](#8-connection-and-timeout-behavior-m1-m2)                        |
+| The client times out against a completely silent server                                                 | `readTimeout` now fires against silent peers too          | [8](#8-connection-and-timeout-behavior-m1-m2)                        |
+| PSR-3 warnings about deprecated MCP features appear in logs                                             | SEP-2596/SEP-2577 deprecation warnings                    | [11](#11-deprecated-mcp-features-and-runtime-warnings-m8)            |
 
 ## 1. HTTP client errors are typed `McpError` (B1)
 
@@ -88,8 +88,8 @@ try {
 ## 2. `McpError` thrown in a tool handler is a protocol error (B2)
 
 In v1, an `Mcp\Shared\McpError` thrown inside an `McpServer` tool handler
-was converted into an `isError: true` tool *result*. In v2 it propagates as
-a JSON-RPC *protocol error* — consistent with how `McpServerException` has
+was converted into an `isError: true` tool _result_. In v2 it propagates as
+a JSON-RPC _protocol error_ — consistent with how `McpServerException` has
 always behaved. Handlers that want a tool-execution error (an `isError`
 result the model can read and react to) should throw any other exception
 type.
@@ -309,7 +309,7 @@ servers are unaffected — they have no `x-mcp-header` annotations.
 
 In v1, a prompt callback declaring an `ElicitationContext` parameter on the
 HTTP transport was injected but silently non-functional. In v2, a
-*legacy-era* HTTP `prompts/get` whose callback declares an
+_legacy-era_ HTTP `prompts/get` whose callback declares an
 `ElicitationContext` fails with `BadMethodCallException` (`-32603`):
 prompt-side input gathering is modern-only by design — the legacy
 suspend/resume store is tools-only.
@@ -348,7 +348,7 @@ try {
 ```
 
 **M2 — `readTimeout` fires against silent peers.** In v1 a configured
-client `readTimeout` only fired *between* messages; a peer that never sent
+client `readTimeout` only fired _between_ messages; a peer that never sent
 anything at all could hang the client forever. In v2 the timeout also
 covers the fully-silent case. Very slow servers that accidentally relied
 on the dead timeout may need a larger explicit `readTimeout`.
@@ -371,7 +371,7 @@ can be recognized.
   capabilities (e.g. `elicitation: {}`) between requests.
 - **M5 — `HttpServerTransport::start()` is idempotent.** A second call
   returns silently where v1 threw `RuntimeException('Transport already
-  started')` (required by the stateless revision's per-request ephemeral
+started')` (required by the stateless revision's per-request ephemeral
   sessions).
 - **M7 — response adaptation clones.**
   `ServerSession::adaptResponseForClient()` adapts a shallow copy, so a
@@ -404,19 +404,19 @@ minimum twelve-month window. The SDK mirrors the spec's registry as
 
 1. the affected `Types/` classes, capability slots, and feature APIs carry
    `@deprecated` docblocks (visible to IDEs and static analysis), and
-2. exercising a deprecated feature on a session whose *negotiated revision*
+2. exercising a deprecated feature on a session whose _negotiated revision_
    deprecates it emits **one PSR-3 `warning` per feature per session**
    through the logger you supplied (the default `NullLogger` discards
    them). A `2025-11-25` session exercising Sampling is exercising an
    Active feature and stays silent.
 
-| Feature | Deprecated in | By | Migration path |
-| --- | --- | --- | --- |
-| Roots | `2026-07-28` | SEP-2577 | Pass directories/files via tool parameters, resource URIs, or server configuration |
-| Sampling | `2026-07-28` | SEP-2577 | Integrate directly with LLM provider APIs |
-| Logging (`logging/setLevel`, log notifications) | `2026-07-28` | SEP-2577 | Log to stderr for stdio transports; use OpenTelemetry for observability |
-| `includeContext: "thisServer"\|"allServers"` sampling values | `2025-11-25` | SEP-2596 | Omit `includeContext` or use `"none"` |
-| OAuth Dynamic Client Registration | `2026-07-28` | spec PR #2858 | Use Client ID Metadata Documents (CIMD) |
+| Feature                                                      | Deprecated in | By            | Migration path                                                                     |
+| ------------------------------------------------------------ | ------------- | ------------- | ---------------------------------------------------------------------------------- |
+| Roots                                                        | `2026-07-28`  | SEP-2577      | Pass directories/files via tool parameters, resource URIs, or server configuration |
+| Sampling                                                     | `2026-07-28`  | SEP-2577      | Integrate directly with LLM provider APIs                                          |
+| Logging (`logging/setLevel`, log notifications)              | `2026-07-28`  | SEP-2577      | Log to stderr for stdio transports; use OpenTelemetry for observability            |
+| `includeContext: "thisServer"\|"allServers"` sampling values | `2025-11-25`  | SEP-2596      | Omit `includeContext` or use `"none"`                                              |
+| OAuth Dynamic Client Registration                            | `2026-07-28`  | spec PR #2858 | Use Client ID Metadata Documents (CIMD)                                            |
 
 ## 12. OAuth hardening inside existing flows (M9)
 

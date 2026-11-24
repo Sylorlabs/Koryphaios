@@ -19,7 +19,10 @@ export interface CliSandbox {
   dispose(): void;
 }
 
-export function createCliSandbox(binaries: string[], authFiles: Record<string, string> = {}): CliSandbox {
+export function createCliSandbox(
+  binaries: string[],
+  authFiles: Record<string, string> = {},
+): CliSandbox {
   const root = mkdtempSync(join(tmpdir(), 'kory-replay-'));
   const home = join(root, 'home');
   const binDir = join(root, 'bin');
@@ -38,7 +41,11 @@ export function createCliSandbox(binaries: string[], authFiles: Record<string, s
     writeFileSync(path, content);
   }
 
-  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE, PATH: process.env.PATH };
+  const saved = {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    PATH: process.env.PATH,
+  };
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   process.env.PATH = `${binDir}:${process.env.PATH ?? ''}`;

@@ -104,7 +104,8 @@ export class ScheduleMonitorTool implements Tool {
       },
       cron: {
         type: 'string',
-        description: 'For kind cron: five fields, minute hour day-of-month month day-of-week, local time.',
+        description:
+          'For kind cron: five fields, minute hour day-of-month month day-of-week, local time.',
       },
       at: {
         type: 'string',

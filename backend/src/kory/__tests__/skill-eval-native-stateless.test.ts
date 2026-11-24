@@ -17,7 +17,10 @@ import {
   createNativeStatelessTextPatchSkillEvalExecutor,
   MAX_NATIVE_SERIALIZED_REQUEST_BYTES,
 } from '../../eval/skills/skill-eval-native-stateless';
-import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
+import type {
+  SkillEvalExperimentV3,
+  SkillEvalScenarioV3,
+} from '../../eval/skills/skill-eval-harness';
 import {
   runPairedSkillEvaluationV3,
   type SkillEvalExecutionObservation,
@@ -26,7 +29,10 @@ import { loadV5SkillPackages } from '../skill-packages';
 import { CURRENT_SKILL_EVAL_CONTRACT_VERSION, listSkillEvaluationRuns } from '../skill-evaluations';
 import { selectEligibleSkillEvaluationEvidence } from '../../eval/skills/skill-eval-eligibility';
 import { skillEvalCampaignHarnessVersion } from '../../../../scripts/skill-v5-qualification-executor';
-import { snapshotSkillEvalWorkspace, textPatchPrompt } from '../../eval/skills/skill-eval-text-patch';
+import {
+  snapshotSkillEvalWorkspace,
+  textPatchPrompt,
+} from '../../eval/skills/skill-eval-text-patch';
 import { createExecutor } from '../../../../scripts/skill-v5-qualification-executor';
 
 const roots: string[] = [];
@@ -260,12 +266,19 @@ describe.skipIf(!isUnix())('native stateless text-patch executor (fake CLI only)
   });
   test('fake completed semantic-false arms remain eligible with protected actual transport archives', async () => {
     const lines = events('not a patch').trim().split('\n');
-    lines.splice(2, 0, JSON.stringify({
-      type: 'assistant', session_id: 'test-session', message: {
-        role: 'assistant', stop_reason: 'end_turn',
-        content: [{ type: 'redacted_thinking', data: privateData }],
-      },
-    }));
+    lines.splice(
+      2,
+      0,
+      JSON.stringify({
+        type: 'assistant',
+        session_id: 'test-session',
+        message: {
+          role: 'assistant',
+          stop_reason: 'end_turn',
+          content: [{ type: 'redacted_thinking', data: privateData }],
+        },
+      }),
+    );
     const actualStream = lines.join('\n') + '\n';
     const f = fixture({ stdout: actualStream });
     const original = loadV5SkillPackages().packages.find(
@@ -340,12 +353,22 @@ describe.skipIf(!isUnix())('native stateless text-patch executor (fake CLI only)
         const manifest = JSON.parse(manifestText);
         expect(manifest.nativeTextEventArchive).toMatchObject({
           location: canonicalizePath(archive.location),
-          sha256: archive.sha256, bytes: Buffer.byteLength(actualStream),
+          sha256: archive.sha256,
+          bytes: Buffer.byteLength(actualStream),
         });
         for (const arm of [result.withSkill, result.withoutSkill]) {
-          expect(arm.observation.nativeTextEventStream?.equals(Buffer.from(actualStream))).toBe(true);
-          expect(isContainedBy(manifest.nativeTextEventArchive.workspaceRoot, canonicalizePath(arm.workspace))).toBe(true);
-          expect(isContainedBy(canonicalizePath(arm.workspace), canonicalizePath(archive.location))).toBe(false);
+          expect(arm.observation.nativeTextEventStream?.equals(Buffer.from(actualStream))).toBe(
+            true,
+          );
+          expect(
+            isContainedBy(
+              manifest.nativeTextEventArchive.workspaceRoot,
+              canonicalizePath(arm.workspace),
+            ),
+          ).toBe(true);
+          expect(
+            isContainedBy(canonicalizePath(arm.workspace), canonicalizePath(archive.location)),
+          ).toBe(false);
         }
         expect(existsSync(join(result.withSkill.workspace, 'native-text-events.jsonl'))).toBe(
           false,
@@ -546,9 +569,11 @@ describe.skipIf(!isUnix())('native stateless text-patch executor (fake CLI only)
     'strict JSON content may contain literal Markdown fences as file data: %s',
     async (content) => {
       const f = fixture({
-        stdout: events(`<kory-eval-patch>${JSON.stringify([
-          { operation: 'write', path: 'result.txt', content },
-        ])}</kory-eval-patch>`),
+        stdout: events(
+          `<kory-eval-patch>${JSON.stringify([
+            { operation: 'write', path: 'result.txt', content },
+          ])}</kory-eval-patch>`,
+        ),
       });
       const result = await createNativeStatelessTextPatchSkillEvalExecutor().execute(
         input(f.workspace),
@@ -569,7 +594,9 @@ describe.skipIf(!isUnix())('native stateless text-patch executor (fake CLI only)
       { operation: 'write', path: 'result.txt', content },
     ])}</kory-eval-patch>`;
     const f = fixture({ stdout: events(output) });
-    const result = await createNativeStatelessTextPatchSkillEvalExecutor().execute(input(f.workspace));
+    const result = await createNativeStatelessTextPatchSkillEvalExecutor().execute(
+      input(f.workspace),
+    );
     expect(result.infrastructureFailure).toBeUndefined();
     expect(result.taskFailure).toBeUndefined();
     expect(readFileSync(join(f.workspace, 'result.txt'), 'utf8')).toBe(content);
@@ -581,7 +608,9 @@ describe.skipIf(!isUnix())('native stateless text-patch executor (fake CLI only)
       { operation: 'write', path: 'result.txt', content },
     ])}</kory-eval-patch>`;
     const f = fixture({ stdout: events(output) });
-    const result = await createNativeStatelessTextPatchSkillEvalExecutor().execute(input(f.workspace));
+    const result = await createNativeStatelessTextPatchSkillEvalExecutor().execute(
+      input(f.workspace),
+    );
     expect(result.infrastructureFailure).toBeUndefined();
     expect(result.taskFailure).toBeUndefined();
     expect(readFileSync(join(f.workspace, 'result.txt'), 'utf8')).toBe(content);

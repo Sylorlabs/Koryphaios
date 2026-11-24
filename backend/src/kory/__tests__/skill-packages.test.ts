@@ -164,7 +164,9 @@ describe('V5 skill packages', () => {
       broader: ['human-experience'],
     });
     expect(visualInterfaceDesign.instructions).toContain('When the task supplies screenshots');
-    expect(visualInterfaceDesign.instructions).toContain('similar defaults of generated design as prompts for justification');
+    expect(visualInterfaceDesign.instructions).toContain(
+      'similar defaults of generated design as prompts for justification',
+    );
     expect(visualInterfaceDesign.evaluation.routing).toHaveLength(16);
     expect(visualInterfaceDesign.evaluation.tasks).toHaveLength(2);
   });
@@ -331,8 +333,7 @@ describe('V5 skill packages', () => {
     // genuine source refresh cannot silently re-point this control at a
     // different side of the stale-after boundary.
     const verified = new Date(`${source.verifiedAt}T00:00:00.000Z`);
-    const atDays = (days: number) =>
-      new Date(verified.getTime() + days * 86_400_000);
+    const atDays = (days: number) => new Date(verified.getTime() + days * 86_400_000);
     expect(sourceFreshness(source, atDays(source.staleAfterDays))).toBe('fresh');
     expect(sourceFreshness(source, atDays(source.staleAfterDays + 1))).toBe('stale');
   });

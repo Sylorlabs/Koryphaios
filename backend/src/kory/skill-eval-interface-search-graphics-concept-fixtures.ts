@@ -390,7 +390,10 @@ const searchScorers = searchComponents.scorers.map((scorer) => ({
     if (!component.passed || component.integrityFailure) {
       return {
         ...component,
-        evidence: [...component.evidence, 'Elasticsearch runtime skipped because the component contract failed.'],
+        evidence: [
+          ...component.evidence,
+          'Elasticsearch runtime skipped because the component contract failed.',
+        ],
       };
     }
     const runtime = scorer.scenarioIds.includes('search-indexing-full-task-1-individual')
@@ -410,7 +413,4 @@ export const INTERFACE_SEARCH_GRAPHICS_SKILL_EVAL_MATERIALIZERS = [
   ...searchMaterializers,
   ...fixtures.materializers,
 ];
-export const INTERFACE_SEARCH_GRAPHICS_SKILL_EVAL_SCORERS = [
-  ...searchScorers,
-  ...fixtures.scorers,
-];
+export const INTERFACE_SEARCH_GRAPHICS_SKILL_EVAL_SCORERS = [...searchScorers, ...fixtures.scorers];

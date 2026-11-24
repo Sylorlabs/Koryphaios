@@ -35,21 +35,84 @@ interface DirectionContext {
 }
 
 export const DIRECTION_CONTEXTS: readonly DirectionContext[] = [
-  { id: 'min-light-en', width: 620, height: 520, appearance: 'light', locale: 'en', textScale: 1, empty: false, dense: false },
-  { id: 'default-light-en', width: 900, height: 700, appearance: 'light', locale: 'en', textScale: 1, empty: false, dense: false },
-  { id: 'wide-light-en', width: 1400, height: 900, appearance: 'light', locale: 'en', textScale: 1, empty: false, dense: true },
-  { id: 'default-dark-en', width: 900, height: 700, appearance: 'dark', locale: 'en', textScale: 1, empty: false, dense: false },
-  { id: 'min-dark-de-large', width: 620, height: 520, appearance: 'dark', locale: 'de', textScale: 1.35, empty: false, dense: true },
-  { id: 'empty-selection', width: 900, height: 700, appearance: 'light', locale: 'en', textScale: 1, empty: true, dense: false },
-  { id: 'dense-metadata', width: 900, height: 700, appearance: 'light', locale: 'en', textScale: 1, empty: false, dense: true },
+  {
+    id: 'min-light-en',
+    width: 620,
+    height: 520,
+    appearance: 'light',
+    locale: 'en',
+    textScale: 1,
+    empty: false,
+    dense: false,
+  },
+  {
+    id: 'default-light-en',
+    width: 900,
+    height: 700,
+    appearance: 'light',
+    locale: 'en',
+    textScale: 1,
+    empty: false,
+    dense: false,
+  },
+  {
+    id: 'wide-light-en',
+    width: 1400,
+    height: 900,
+    appearance: 'light',
+    locale: 'en',
+    textScale: 1,
+    empty: false,
+    dense: true,
+  },
+  {
+    id: 'default-dark-en',
+    width: 900,
+    height: 700,
+    appearance: 'dark',
+    locale: 'en',
+    textScale: 1,
+    empty: false,
+    dense: false,
+  },
+  {
+    id: 'min-dark-de-large',
+    width: 620,
+    height: 520,
+    appearance: 'dark',
+    locale: 'de',
+    textScale: 1.35,
+    empty: false,
+    dense: true,
+  },
+  {
+    id: 'empty-selection',
+    width: 900,
+    height: 700,
+    appearance: 'light',
+    locale: 'en',
+    textScale: 1,
+    empty: true,
+    dense: false,
+  },
+  {
+    id: 'dense-metadata',
+    width: 900,
+    height: 700,
+    appearance: 'light',
+    locale: 'en',
+    textScale: 1,
+    empty: false,
+    dense: true,
+  },
 ];
 
 const TOKENS = {
   source: 'measured from the supplied surface source, not invented',
   type: {
-    'title': { size: 15, weight: 'semibold' },
+    title: { size: 15, weight: 'semibold' },
     'sidebar-heading': { size: 12, weight: 'medium' },
-    'row': { size: 12, weight: 'regular' },
+    row: { size: 12, weight: 'regular' },
     'field-label': { size: 11, weight: 'regular' },
     'field-value': { size: 12, weight: 'regular' },
     'empty-state': { size: 13, weight: 'regular' },
@@ -167,7 +230,9 @@ whether its text is \`truncated\`.
 
 \`stateReviews\` must contain exactly one entry per supplied capture id: ${DIRECTION_CONTEXTS.map(
   (context) => context.id,
-).join(', ')}. In \`truncated\`, list the element ids that actually clip in that context, in ascending
+).join(
+  ', ',
+)}. In \`truncated\`, list the element ids that actually clip in that context, in ascending
 order, taken from the geometry file for that context. Do not list an element that fits, and do not
 omit one that clips.
 
@@ -238,10 +303,12 @@ export function materializeRealDirectionFixture(root: string, scenario?: string)
   writeFixtureFile(root, 'state-inventory.json', JSON.stringify(STATE_INVENTORY, null, 2) ?? '{}');
   writeFixtureFile(root, 'direction.json', '{\n  "status": "TODO"\n}\n');
   const buildError = buildSurface(root);
-  if (buildError) throw new Error(`visual direction fixture could not build its surface: ${buildError}`);
+  if (buildError)
+    throw new Error(`visual direction fixture could not build its surface: ${buildError}`);
   for (const context of DIRECTION_CONTEXTS) {
     const error = capture(root, context);
-    if (error) throw new Error(`visual direction fixture could not capture ${context.id}: ${error}`);
+    if (error)
+      throw new Error(`visual direction fixture could not capture ${context.id}: ${error}`);
     const geometry = readJsonArtifact<{ elements?: Array<{ id?: string; truncated?: boolean }> }>(
       root,
       `captures/${context.id}.png.json`,
@@ -249,11 +316,7 @@ export function materializeRealDirectionFixture(root: string, scenario?: string)
     writeFixtureFile(
       root,
       `geometry/${context.id}.json`,
-      JSON.stringify(
-        { context: context.id, elements: geometry?.elements ?? [] },
-        null,
-        2,
-      ),
+      JSON.stringify({ context: context.id, elements: geometry?.elements ?? [] }, null, 2),
     );
   }
   // The capture sidecar is also the geometry file the candidate reads, so keep one copy.
@@ -361,8 +424,13 @@ export function scoreRealDirectionFixture(
           existsSync(join(root, 'captures', `${context.id}.png`)) &&
           existsSync(join(root, 'geometry', `${context.id}.json`)),
       );
-    add('evaluator supplied source, tokens and captures', suppliedIntact,
-      suppliedIntact ? 'all seven captures and the source are present' : 'a supplied input is missing');
+    add(
+      'evaluator supplied source, tokens and captures',
+      suppliedIntact,
+      suppliedIntact
+        ? 'all seven captures and the source are present'
+        : 'a supplied input is missing',
+    );
 
     const direction = readJsonArtifact<DirectionArtifact>(root, 'direction.json');
     add(
@@ -371,8 +439,14 @@ export function scoreRealDirectionFixture(
       `surface=${direction?.surface ?? 'missing'}`,
     );
 
-    const token = (list: Array<{ token?: string; role?: string }> | undefined, names: readonly string[]) =>
-      !!list && names.every((name) => list.some((entry) => entry.token === name && (entry.role ?? '').trim().length >= 20));
+    const token = (
+      list: Array<{ token?: string; role?: string }> | undefined,
+      names: readonly string[],
+    ) =>
+      !!list &&
+      names.every((name) =>
+        list.some((entry) => entry.token === name && (entry.role ?? '').trim().length >= 20),
+      );
     const system = direction?.system;
     add(
       'type, spacing and color steps come from the supplied tokens',
@@ -386,8 +460,11 @@ export function scoreRealDirectionFixture(
     const hierarchyComplete = (
       ['primaryAction', 'secondaryControls', 'contentHierarchy', 'statusSignals'] as const
     ).every((key) => (hierarchy[key] ?? '').trim().length >= 20);
-    add('hierarchy separates primary action, controls, content and status', hierarchyComplete,
-      hierarchyComplete ? 'all four levels stated' : 'a hierarchy level is missing');
+    add(
+      'hierarchy separates primary action, controls, content and status',
+      hierarchyComplete,
+      hierarchyComplete ? 'all four levels stated' : 'a hierarchy level is missing',
+    );
 
     const motion = direction?.motion;
     const motionComplete =
@@ -397,8 +474,11 @@ export function scoreRealDirectionFixture(
         : motion?.introduced === true &&
           (motion.rationale ?? '').trim().length >= 40 &&
           (motion.reducedMotion ?? '').trim().length >= 40;
-    add('motion purpose and reduced motion behavior are explicit', motionComplete,
-      `introduced=${String(motion?.introduced)}`);
+    add(
+      'motion purpose and reduced motion behavior are explicit',
+      motionComplete,
+      `introduced=${String(motion?.introduced)}`,
+    );
 
     const boundary = direction?.boundary;
     add(
@@ -422,8 +502,11 @@ export function scoreRealDirectionFixture(
               (entry.rationale ?? '').trim().length >= 40,
           ),
         );
-      add('shared identity and per platform adaptation are separated', editorIdentity,
-        `shared=${identity?.shared?.length ?? 0} adapted=${adapted.map((entry) => entry.platform).join(',') || 'none'}`);
+      add(
+        'shared identity and per platform adaptation are separated',
+        editorIdentity,
+        `shared=${identity?.shared?.length ?? 0} adapted=${adapted.map((entry) => entry.platform).join(',') || 'none'}`,
+      );
     }
 
     // The strongest check: does each per context claim match a fresh render?
@@ -442,34 +525,40 @@ export function scoreRealDirectionFixture(
       }
       const claimed = [...(review.truncated ?? [])].sort();
       if (JSON.stringify(claimed) !== JSON.stringify(measured.ids)) {
-        mismatches.push(`${context.id}:claimed=${claimed.join('|') || 'none'}/measured=${measured.ids.join('|') || 'none'}`);
+        mismatches.push(
+          `${context.id}:claimed=${claimed.join('|') || 'none'}/measured=${measured.ids.join('|') || 'none'}`,
+        );
       }
     }
-    add('per context truncation claims match a fresh render', mismatches.length === 0,
-      mismatches.slice(0, 4).join(' ; ') || `${DIRECTION_CONTEXTS.length} contexts agree`);
+    add(
+      'per context truncation claims match a fresh render',
+      mismatches.length === 0,
+      mismatches.slice(0, 4).join(' ; ') || `${DIRECTION_CONTEXTS.length} contexts agree`,
+    );
 
     const status = (direction?.status ?? '').trim();
-    add('declared direction status', ['proposed', 'verified'].includes(status), `status=${status || 'missing'}`);
+    add(
+      'declared direction status',
+      ['proposed', 'verified'].includes(status),
+      `status=${status || 'missing'}`,
+    );
 
     // Keep the unused import honest: runBounded proves the toolchain reproduces a render.
     let rebuilt = true;
     try {
-      await runBounded(
-        'sh',
-        ['build.sh'],
-        root,
-        120_000,
-        {
-          ...process.env,
-          DEVELOPER_DIR:
-            process.env.DEVELOPER_DIR?.trim() || '/Applications/Xcode-beta.app/Contents/Developer',
-        },
-      );
+      await runBounded('sh', ['build.sh'], root, 120_000, {
+        ...process.env,
+        DEVELOPER_DIR:
+          process.env.DEVELOPER_DIR?.trim() || '/Applications/Xcode-beta.app/Contents/Developer',
+      });
     } catch {
       rebuilt = false;
     }
-    add('supplied surface still builds with the platform toolchain', rebuilt,
-      rebuilt ? 'built' : 'build failed');
+    add(
+      'supplied surface still builds with the platform toolchain',
+      rebuilt,
+      rebuilt ? 'built' : 'build failed',
+    );
 
     return finishChecks(checks.map((check) => ({ ...check, browser: true })));
   })();
@@ -479,11 +568,13 @@ export const VISUAL_DIRECTION_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministi
   {
     id: 'visual-interface-design/native-direction-editor@1',
     scenarioIds: [EDITOR_DIRECTION_SCENARIO],
-    score: ({ workingDirectory }) => scoreRealDirectionFixture(workingDirectory, EDITOR_DIRECTION_SCENARIO),
+    score: ({ workingDirectory }) =>
+      scoreRealDirectionFixture(workingDirectory, EDITOR_DIRECTION_SCENARIO),
   },
   {
     id: 'visual-interface-design/native-direction-ops@1',
     scenarioIds: [OPS_DIRECTION_SCENARIO],
-    score: ({ workingDirectory }) => scoreRealDirectionFixture(workingDirectory, OPS_DIRECTION_SCENARIO),
+    score: ({ workingDirectory }) =>
+      scoreRealDirectionFixture(workingDirectory, OPS_DIRECTION_SCENARIO),
   },
 ];

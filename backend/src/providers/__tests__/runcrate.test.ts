@@ -126,9 +126,9 @@ describe('Runcrate catalog mapping', () => {
     expect(provider.isChat(whisperRow, whisperRow.id)).toBe(false);
     // Image generation is not a chat model even though its prompt is text.
     expect(provider.isChat(fluxRow, fluxRow.id)).toBe(false);
-    expect(provider.isChat({ id: 'BAAI/bge-m3', output_modalities: ['embeddings'] }, 'BAAI/bge-m3')).toBe(
-      false,
-    );
+    expect(
+      provider.isChat({ id: 'BAAI/bge-m3', output_modalities: ['embeddings'] }, 'BAAI/bge-m3'),
+    ).toBe(false);
   });
 
   it('requires an rc_live_ key and points at the key page without one', () => {

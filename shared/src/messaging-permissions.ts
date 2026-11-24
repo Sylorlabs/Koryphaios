@@ -52,5 +52,8 @@ export function resolveMessagingPermission(
 ): MessagingPermissionLevel {
   const tier = tierKeyOf(settings.permissionMode);
   const roleKey = role === 'manager' ? 'manager' : 'subAgents';
-  return settings.messagingPermissionsByTier?.[tier]?.[roleKey] ?? DEFAULT_MESSAGING_PERMISSIONS[tier][roleKey];
+  return (
+    settings.messagingPermissionsByTier?.[tier]?.[roleKey] ??
+    DEFAULT_MESSAGING_PERMISSIONS[tier][roleKey]
+  );
 }

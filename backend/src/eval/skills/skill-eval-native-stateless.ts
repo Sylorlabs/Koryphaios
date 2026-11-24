@@ -68,9 +68,11 @@ function nativeEnvironment(home: string): NodeJS.ProcessEnv {
 
 function privateHome(workingDirectory?: string): string {
   const parent = canonicalizePath(tmpdir());
-  for (const root of [resolve(import.meta.dir, '../../../..'), process.cwd(), workingDirectory].filter(
-    (value): value is string => Boolean(value),
-  )) {
+  for (const root of [
+    resolve(import.meta.dir, '../../../..'),
+    process.cwd(),
+    workingDirectory,
+  ].filter((value): value is string => Boolean(value))) {
     if (isContainedBy(canonicalizePath(root), parent)) throw unavailable();
   }
   const home = canonicalizePath(mkdtempSync(join(parent, 'kory-native-stateless-')));

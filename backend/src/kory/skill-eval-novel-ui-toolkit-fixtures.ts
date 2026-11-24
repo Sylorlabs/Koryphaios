@@ -454,40 +454,48 @@ function safeArtifactPath(root: string, relativePath: string): string {
   return join(root, ...parts);
 }
 
-async function installCanvasCounters(page: Page, initialFillTextLimit: number | null = null): Promise<void> {
-  await page.addInitScript(({ initialFillTextLimit }) => {
-    const counters = { clearRect: 0, fillRect: 0, fillText: 0, stroke: 0, arc: 0 };
-    let measuringInitialPaint = initialFillTextLimit !== null;
-    const prototype = CanvasRenderingContext2D.prototype as unknown as Record<
-      string,
-      (...args: unknown[]) => unknown
-    >;
-    for (const name of Object.keys(counters) as Array<keyof typeof counters>) {
-      const original = prototype[name];
-      if (typeof original !== 'function') continue;
-      prototype[name] = function (this: CanvasRenderingContext2D, ...args: unknown[]) {
-        counters[name] += 1;
-        // Bound the initial canvas work before an unwindowed candidate can
-        // monopolize the browser thread with 20,000 paints and DOM projections.
-        // The observed count still fails the original virtualization check.
-        if (
-          name === 'fillText' && measuringInitialPaint &&
-          initialFillTextLimit !== null && counters.fillText > initialFillTextLimit
-        ) {
-          throw new Error(`Initial canvas paint exceeded ${initialFillTextLimit} labels`);
-        }
-        return Reflect.apply(original, this, args);
-      };
-    }
-    Object.defineProperty(window, '__koryCanvasReceipt', {
-      value: () => {
-        measuringInitialPaint = false;
-        return { ...counters };
-      },
-      writable: false,
-      configurable: false,
-    });
-  }, { initialFillTextLimit });
+async function installCanvasCounters(
+  page: Page,
+  initialFillTextLimit: number | null = null,
+): Promise<void> {
+  await page.addInitScript(
+    ({ initialFillTextLimit }) => {
+      const counters = { clearRect: 0, fillRect: 0, fillText: 0, stroke: 0, arc: 0 };
+      let measuringInitialPaint = initialFillTextLimit !== null;
+      const prototype = CanvasRenderingContext2D.prototype as unknown as Record<
+        string,
+        (...args: unknown[]) => unknown
+      >;
+      for (const name of Object.keys(counters) as Array<keyof typeof counters>) {
+        const original = prototype[name];
+        if (typeof original !== 'function') continue;
+        prototype[name] = function (this: CanvasRenderingContext2D, ...args: unknown[]) {
+          counters[name] += 1;
+          // Bound the initial canvas work before an unwindowed candidate can
+          // monopolize the browser thread with 20,000 paints and DOM projections.
+          // The observed count still fails the original virtualization check.
+          if (
+            name === 'fillText' &&
+            measuringInitialPaint &&
+            initialFillTextLimit !== null &&
+            counters.fillText > initialFillTextLimit
+          ) {
+            throw new Error(`Initial canvas paint exceeded ${initialFillTextLimit} labels`);
+          }
+          return Reflect.apply(original, this, args);
+        };
+      }
+      Object.defineProperty(window, '__koryCanvasReceipt', {
+        value: () => {
+          measuringInitialPaint = false;
+          return { ...counters };
+        },
+        writable: false,
+        configurable: false,
+      });
+    },
+    { initialFillTextLimit },
+  );
 }
 
 async function canvasCounters(page: Page): Promise<Record<string, number>> {
@@ -924,7 +932,10 @@ async function scorePalette(
         // Wait for an actual semantic projection rather than relying on a fixed
         // delay, while retaining the bounded failure for unrendered candidates.
         const options = page.locator('[data-command-semantics] [role="option"]');
-        await options.first().waitFor({ state: 'attached', timeout: 2_500 }).catch(() => undefined);
+        await options
+          .first()
+          .waitFor({ state: 'attached', timeout: 2_500 })
+          .catch(() => undefined);
 
         // A non-windowed 20,000-row candidate can publish "ready" and then
         // block its own main thread while it builds the DOM, so every read below

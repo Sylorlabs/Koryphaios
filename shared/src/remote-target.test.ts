@@ -25,8 +25,12 @@ describe('remote target contract', () => {
   });
 
   test('MCP bridge targets are local and backend-specific', () => {
-    expect(isLocalExecutionTarget({ kind: 'local', backendId: 'desktop-1' }, 'desktop-1')).toBe(true);
-    expect(isLocalExecutionTarget({ kind: 'local', backendId: 'desktop-2' }, 'desktop-1')).toBe(false);
+    expect(isLocalExecutionTarget({ kind: 'local', backendId: 'desktop-1' }, 'desktop-1')).toBe(
+      true,
+    );
+    expect(isLocalExecutionTarget({ kind: 'local', backendId: 'desktop-2' }, 'desktop-1')).toBe(
+      false,
+    );
     expect(
       isLocalExecutionTarget(
         { kind: 'linked-device', deviceId: 'phone-1', sessionId: 'chat-1' },

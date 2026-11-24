@@ -41,22 +41,30 @@ const PRIMARY = { model: 'opus', provider: 'anthropic' };
 
 describe('classifyFallbackFailure', () => {
   test('usage cap text is a usage limit even when wrapped as a 500', () => {
-    expect(classifyFallbackFailure('Internal error: Free usage limit reached', 500)).toBe('usage_limit');
+    expect(classifyFallbackFailure('Internal error: Free usage limit reached', 500)).toBe(
+      'usage_limit',
+    );
   });
 
   test('429 and rate wording are rate limits', () => {
     expect(classifyFallbackFailure('Too many requests', 429)).toBe('rate_limit');
-    expect(classifyFallbackFailure('rate limit exceeded for requests per minute')).toBe('rate_limit');
+    expect(classifyFallbackFailure('rate limit exceeded for requests per minute')).toBe(
+      'rate_limit',
+    );
   });
 
   test('timeouts are timeouts, by error name or text', () => {
-    const idle = Object.assign(new Error('Stream idle timeout after 60000ms'), { name: 'TimeoutError' });
+    const idle = Object.assign(new Error('Stream idle timeout after 60000ms'), {
+      name: 'TimeoutError',
+    });
     expect(classifyFallbackFailure(idle)).toBe('timeout');
     expect(classifyFallbackFailure('The request timed out')).toBe('timeout');
   });
 
   test('any other provider failure is a provider error', () => {
-    expect(classifyFallbackFailure('upstream returned 502 bad gateway', 502)).toBe('provider_error');
+    expect(classifyFallbackFailure('upstream returned 502 bad gateway', 502)).toBe(
+      'provider_error',
+    );
     expect(classifyFallbackFailure('The model returned an empty response.')).toBe('provider_error');
   });
 
@@ -160,7 +168,9 @@ describe('decideFallbackHop', () => {
   });
 
   test('a disabled trigger does not hop', () => {
-    const disabled = chainOf([STEP_A], { triggers: { usageLimit: false, rateLimit: true, providerError: true, timeout: true } });
+    const disabled = chainOf([STEP_A], {
+      triggers: { usageLimit: false, rateLimit: true, providerError: true, timeout: true },
+    });
     const decision = decideFallbackHop({
       state: stateFor(disabled),
       failure: { message: 'usage limit reached' },
@@ -252,7 +262,9 @@ describe('decideFallbackHop', () => {
     });
     expect(decision.kind).toBe('exhausted');
     if (decision.kind === 'exhausted') {
-      expect(decision.info.summary).toBe('Fallback chain skipped: no step is connected (openai:gpt-5, anthropic:sonnet).');
+      expect(decision.info.summary).toBe(
+        'Fallback chain skipped: no step is connected (openai:gpt-5, anthropic:sonnet).',
+      );
     }
   });
 
@@ -280,16 +292,30 @@ describe('decideFallbackHop', () => {
       return decision.sticky;
     };
     expect(hopWith('next_turn')).toBeUndefined();
-    expect(hopWith('never')).toMatchObject({ role: 'manager', activeIndex: 0, stepKey: 'openai:gpt-5' });
+    expect(hopWith('never')).toMatchObject({
+      role: 'manager',
+      activeIndex: 0,
+      stepKey: 'openai:gpt-5',
+    });
     expect(hopWith('after_reset')?.resetAfter).toBe(NOW + FALLBACK_RESET_COOLDOWN_MS);
   });
 });
 
 describe('beginFallbackTurnState', () => {
-  const sticky = { role: 'manager' as const, activeIndex: 1, stepKey: 'anthropic:sonnet', hoppedAt: NOW };
+  const sticky = {
+    role: 'manager' as const,
+    activeIndex: 1,
+    stepKey: 'anthropic:sonnet',
+    hoppedAt: NOW,
+  };
 
   test('next_turn always starts on the primary route', () => {
-    const began = beginFallbackTurnState({ role: 'manager', chain: chainOf([STEP_A, STEP_B]), sticky, now: NOW });
+    const began = beginFallbackTurnState({
+      role: 'manager',
+      chain: chainOf([STEP_A, STEP_B]),
+      sticky,
+      now: NOW,
+    });
     expect(began.state.activeIndex).toBe(-1);
     expect(began.sticky).toBeUndefined();
   });
@@ -307,8 +333,14 @@ describe('beginFallbackTurnState', () => {
   test('after_reset starts on the sticky step until the cooldown passes', () => {
     const chain = chainOf([STEP_A, STEP_B], { returnToPrimary: 'after_reset' });
     const withReset = { ...sticky, resetAfter: NOW + 100 };
-    expect(beginFallbackTurnState({ role: 'manager', chain, sticky: withReset, now: NOW }).state.activeIndex).toBe(1);
-    expect(beginFallbackTurnState({ role: 'manager', chain, sticky: withReset, now: NOW + 101 }).state.activeIndex).toBe(-1);
+    expect(
+      beginFallbackTurnState({ role: 'manager', chain, sticky: withReset, now: NOW }).state
+        .activeIndex,
+    ).toBe(1);
+    expect(
+      beginFallbackTurnState({ role: 'manager', chain, sticky: withReset, now: NOW + 101 }).state
+        .activeIndex,
+    ).toBe(-1);
   });
 
   test('a sticky index past the end of a shortened chain is ignored', () => {
@@ -359,7 +391,9 @@ describe('exhaustion hook', () => {
 
 describe('legacy and current step input', () => {
   test('a legacy provider:model step is split with the provider-key rules', () => {
-    expect(normalizeFallbackStepInput({ model: 'custom:alpha:model-x', reasoningLevel: 'high' })).toEqual({
+    expect(
+      normalizeFallbackStepInput({ model: 'custom:alpha:model-x', reasoningLevel: 'high' }),
+    ).toEqual({
       provider: 'custom:alpha',
       model: 'model-x',
       reasoningLevel: 'high',
@@ -374,9 +408,9 @@ describe('legacy and current step input', () => {
   });
 
   test('a list keeps only valid steps', () => {
-    expect(normalizeFallbackStepsInput([{ model: '' }, { model: 'anthropic:sonnet' }, 'nope'])).toEqual([
-      { provider: 'anthropic', model: 'sonnet' },
-    ]);
+    expect(
+      normalizeFallbackStepsInput([{ model: '' }, { model: 'anthropic:sonnet' }, 'nope']),
+    ).toEqual([{ provider: 'anthropic', model: 'sonnet' }]);
     expect(normalizeFallbackStepsInput(undefined)).toEqual([]);
   });
 });

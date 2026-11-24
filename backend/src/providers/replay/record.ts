@@ -43,7 +43,11 @@ export function createRecordingSpawn(realSpawn: SpawnFn, options: RecordingOptio
         ? data
         : data.split(JSON.stringify(lastRequestId)).join('{{id}}');
     child.stdout?.on('data', (chunk: Buffer) => {
-      frames.push({ t: elapsed(), stream: 'stdout', data: withIdToken(stdoutDecoder.write(chunk)) });
+      frames.push({
+        t: elapsed(),
+        stream: 'stdout',
+        data: withIdToken(stdoutDecoder.write(chunk)),
+      });
     });
     child.stderr?.on('data', (chunk: Buffer) => {
       frames.push({ t: elapsed(), stream: 'stderr', data: stderrDecoder.write(chunk) });
@@ -54,9 +58,12 @@ export function createRecordingSpawn(realSpawn: SpawnFn, options: RecordingOptio
     const stdin = child.stdin;
     if (stdin) {
       const originalWrite = stdin.write.bind(stdin) as (...args: unknown[]) => boolean;
-      (stdin as unknown as { write: (...args: unknown[]) => boolean }).write = (...args: unknown[]) => {
+      (stdin as unknown as { write: (...args: unknown[]) => boolean }).write = (
+        ...args: unknown[]
+      ) => {
         const chunk = args[0];
-        const text = typeof chunk === 'string' ? chunk : Buffer.isBuffer(chunk) ? chunk.toString('utf8') : '';
+        const text =
+          typeof chunk === 'string' ? chunk : Buffer.isBuffer(chunk) ? chunk.toString('utf8') : '';
         for (const line of text.split('\n')) {
           const request = requestOf(line);
           if (!request) continue;

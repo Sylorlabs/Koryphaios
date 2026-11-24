@@ -32,23 +32,33 @@ describe('skill evaluator scorer regressions', () => {
     const materializer = CORE_EXECUTION_SKILL_EVAL_MATERIALIZERS.find(
       (item) => item.id === 'debugging/empty-plugin-summary-crash@1',
     )!;
-    const scorer = CORE_EXECUTION_SKILL_EVAL_SCORERS.find(
-      (item) => item.scenarioIds.includes('debugging-full-task-1'),
+    const scorer = CORE_EXECUTION_SKILL_EVAL_SCORERS.find((item) =>
+      item.scenarioIds.includes('debugging-full-task-1'),
     )!;
     await materializer.materialize(root, { id: 'debugging-full-task-1' } as never);
     const summary = readFileSync(join(root, 'src/plugin-summary.ts'), 'utf8');
-    writeFixtureFile(root, 'src/plugin-summary.ts', summary.replace(
-      ".reduce((left, right) => left + ', ' + right)", ".join(', ')",
-    ));
-    writeFixtureFile(root, '.kory-eval/debugging-1.json', JSON.stringify({
-      observation: 'unavailable; commands were not run',
-      sourceDerivedCause: 'valid empty input reaches buildPluginSummary reduce without a seed; TypeError predicted',
-    }));
+    writeFixtureFile(
+      root,
+      'src/plugin-summary.ts',
+      summary.replace(".reduce((left, right) => left + ', ' + right)", ".join(', ')"),
+    );
+    writeFixtureFile(
+      root,
+      '.kory-eval/debugging-1.json',
+      JSON.stringify({
+        observation: 'unavailable; commands were not run',
+        sourceDerivedCause:
+          'valid empty input reaches buildPluginSummary reduce without a seed; TypeError predicted',
+      }),
+    );
     return { root, scorer };
   }
 
   function debuggingRegression(root: string) {
-    writeFixtureFile(root, 'tests/empty-recovery.test.ts', `import { expect, test } from 'bun:test';
+    writeFixtureFile(
+      root,
+      'tests/empty-recovery.test.ts',
+      `import { expect, test } from 'bun:test';
 import { parseConfig } from '../src/config';
 import { buildPluginSummary, normalizePlugins } from '../src/plugin-summary';
 test('empty regression and later valid parse/build after rejection', () => {
@@ -56,7 +66,8 @@ test('empty regression and later valid parse/build after rejection', () => {
   expect(() => parseConfig('{"plugins":null}')).toThrow(/array of strings/);
   expect(buildPluginSummary(normalizePlugins(parseConfig('{"plugins":[" next "]}').plugins))).toBe('[next]');
 });
-`);
+`,
+    );
   }
 
   test('debugging rejects unchanged starter tests and unobserved keyword report', async () => {
@@ -71,14 +82,29 @@ test('empty regression and later valid parse/build after rejection', () => {
 
   test('debugging rejects a parser poisoned by invalid input even with a new empty regression', async () => {
     const { root, scorer } = await debuggingCandidate();
-    writeFixtureFile(root, 'tests/empty.test.ts', `import { expect, test } from 'bun:test';
+    writeFixtureFile(
+      root,
+      'tests/empty.test.ts',
+      `import { expect, test } from 'bun:test';
 import { buildPluginSummary, normalizePlugins } from '../src/plugin-summary';
 test('empty summary regression', () => { expect(buildPluginSummary(normalizePlugins([]))).toBe(''); });
-`);
+`,
+    );
     const config = readFileSync(join(root, 'src/config.ts'), 'utf8');
-    writeFixtureFile(root, 'src/config.ts', 'let rejected = false;\n' + config
-      .replace('  const parsed =', '  if (rejected) throw new Error("recovery poisoned");\n  const parsed =')
-      .replace("    throw new Error('plugins", "    rejected = true;\n    throw new Error('plugins"));
+    writeFixtureFile(
+      root,
+      'src/config.ts',
+      'let rejected = false;\n' +
+        config
+          .replace(
+            '  const parsed =',
+            '  if (rejected) throw new Error("recovery poisoned");\n  const parsed =',
+          )
+          .replace(
+            "    throw new Error('plugins",
+            "    rejected = true;\n    throw new Error('plugins",
+          ),
+    );
     const result = await scorer.score({ workingDirectory: root } as never);
     expect(result.passed).toBe(false);
     expect(result.verification).toBeLessThan(1);
@@ -101,27 +127,43 @@ test('empty summary regression', () => { expect(buildPluginSummary(normalizePlug
   test('debugging discovers changed starter and colocated tests with unchanged candidate helpers', async () => {
     const { root, scorer } = await debuggingCandidate();
     const originalTest = readFileSync(join(root, 'tests/plugin-summary.test.ts'), 'utf8');
-    writeFixtureFile(root, 'tests/summary-helper.ts', `import { parseConfig } from '../src/config';
+    writeFixtureFile(
+      root,
+      'tests/summary-helper.ts',
+      `import { parseConfig } from '../src/config';
 import { buildPluginSummary, normalizePlugins } from '../src/plugin-summary';
 export function summary(raw: string) { return buildPluginSummary(normalizePlugins(parseConfig(raw).plugins)); }
-`);
-    writeFixtureFile(root, 'tests/plugin-summary.test.ts', `${originalTest}
+`,
+    );
+    writeFixtureFile(
+      root,
+      'tests/plugin-summary.test.ts',
+      `${originalTest}
 import { summary } from './summary-helper';
 test('empty regression through helper', () => expect(summary('{"plugins":[]}')).toBe(''));
-`);
-    writeFixtureFile(root, 'src/recovery.spec.ts', `import { expect, test } from 'bun:test';
+`,
+    );
+    writeFixtureFile(
+      root,
+      'src/recovery.spec.ts',
+      `import { expect, test } from 'bun:test';
 import { summary } from '../tests/summary-helper';
 test('colocated recovery', () => {
   expect(() => summary('{"plugins":null}')).toThrow(/array of strings/);
   expect(summary('{"plugins":[" next "]}')).toBe('[next]');
 });
-`);
+`,
+    );
     const before = readFileSync(join(root, 'tests/plugin-summary.test.ts'), 'utf8');
     const result = await scorer.score({ workingDirectory: root } as never);
     expect(result.passed, result.evidence.join('\n')).toBe(true);
-    expect(result.evidence.join('\n')).toContain('Candidate-authored regression files: src/recovery.spec.ts, tests/plugin-summary.test.ts.');
+    expect(result.evidence.join('\n')).toContain(
+      'Candidate-authored regression files: src/recovery.spec.ts, tests/plugin-summary.test.ts.',
+    );
     expect(readFileSync(join(root, 'tests/plugin-summary.test.ts'), 'utf8')).toBe(before);
-    const replayPaths = [...result.evidence.join('\n').matchAll(/\/[^\s()]*kory-debug-empty-replay-[^/\s()]+/gu)].map((match) => match[0]);
+    const replayPaths = [
+      ...result.evidence.join('\n').matchAll(/\/[^\s()]*kory-debug-empty-replay-[^/\s()]+/gu),
+    ].map((match) => match[0]);
     expect(replayPaths.length).toBeGreaterThan(0);
     for (const path of replayPaths) expect(existsSync(path)).toBe(false);
   });
@@ -130,13 +172,17 @@ test('colocated recovery', () => {
     const { root, scorer } = await debuggingCandidate();
     debuggingRegression(root);
     const before = readFileSync(join(root, 'src/plugin-summary.ts'), 'utf8');
-    writeFixtureFile(root, 'tests/mutating.test.ts', `import { expect, test } from 'bun:test';
+    writeFixtureFile(
+      root,
+      'tests/mutating.test.ts',
+      `import { expect, test } from 'bun:test';
 import { appendFileSync } from 'node:fs';
 test('mutates the owning source', () => {
   appendFileSync(new URL('../src/plugin-summary.ts', import.meta.url), '\\n// changed by candidate tests\\n');
   expect(true).toBe(true);
 });
-`);
+`,
+    );
     const result = await scorer.score({ workingDirectory: root } as never);
     expect(readFileSync(join(root, 'src/plugin-summary.ts'), 'utf8')).toBe(before);
     expect(result.passed).toBe(false);
@@ -148,19 +194,37 @@ test('mutates the owning source', () => {
     const { root, scorer } = await debuggingCandidate();
     debuggingRegression(root);
     const cli = readFileSync(join(root, 'src/cli.ts'), 'utf8');
-    writeFixtureFile(root, 'src/cli.ts', `if (process.env.KORY_EVAL_TEST_SECRET) throw new Error('ambient credential inherited');\n${cli}`);
-    const modulePath = new URL('../../eval/skills/skill-eval-core-execution-fixtures.ts', import.meta.url).pathname;
-    const probe = spawnSync(process.execPath, ['--no-env-file', '-e', `
+    writeFixtureFile(
+      root,
+      'src/cli.ts',
+      `if (process.env.KORY_EVAL_TEST_SECRET) throw new Error('ambient credential inherited');\n${cli}`,
+    );
+    const modulePath = new URL(
+      '../../eval/skills/skill-eval-core-execution-fixtures.ts',
+      import.meta.url,
+    ).pathname;
+    const probe = spawnSync(
+      process.execPath,
+      [
+        '--no-env-file',
+        '-e',
+        `
 import { CORE_EXECUTION_SKILL_EVAL_SCORERS } from ${JSON.stringify(modulePath)};
 const scorer = CORE_EXECUTION_SKILL_EVAL_SCORERS.find(item => item.id === ${JSON.stringify(scorer.id)});
 console.log(JSON.stringify(await scorer.score({ workingDirectory: ${JSON.stringify(root)} })));
-`], {
-      cwd: tmpdir(),
-      env: { PATH: process.env.PATH ?? '', KORY_EVAL_TEST_SECRET: 'synthetic-canary-not-a-real-credential' },
-      encoding: 'utf8',
-      timeout: 15_000,
-      maxBuffer: 1_000_000,
-    });
+`,
+      ],
+      {
+        cwd: tmpdir(),
+        env: {
+          PATH: process.env.PATH ?? '',
+          KORY_EVAL_TEST_SECRET: 'synthetic-canary-not-a-real-credential',
+        },
+        encoding: 'utf8',
+        timeout: 15_000,
+        maxBuffer: 1_000_000,
+      },
+    );
     expect(probe.error).toBeUndefined();
     expect(probe.status, probe.stderr).toBe(0);
     const result = JSON.parse(probe.stdout) as { passed: boolean; evidence: string[] };
@@ -175,17 +239,23 @@ console.log(JSON.stringify(await scorer.score({ workingDirectory: ${JSON.stringi
     const result = await scorer.score({ workingDirectory: root } as never);
     expect(result.passed).toBe(false);
     expect(result.verification).toBeLessThan(1);
-    expect(result.evidence.join('\n')).toContain('actual CLI after fix host replay: unavailable or failed');
+    expect(result.evidence.join('\n')).toContain(
+      'actual CLI after fix host replay: unavailable or failed',
+    );
   });
 
   test('debugging retains a real red failure even when later output exceeds the evidence excerpt', async () => {
     const { root, scorer } = await debuggingCandidate();
     debuggingRegression(root);
     const regression = readFileSync(join(root, 'tests/empty-recovery.test.ts'), 'utf8');
-    writeFixtureFile(root, 'tests/empty-recovery.test.ts', `${regression}
+    writeFixtureFile(
+      root,
+      'tests/empty-recovery.test.ts',
+      `${regression}
 import { afterAll } from 'bun:test';
 afterAll(() => { process.stderr.write('bounded diagnostic padding '.repeat(200)); });
-`);
+`,
+    );
     const result = await scorer.score({ workingDirectory: root } as never);
     expect(result.passed, result.evidence.join('\n')).toBe(true);
     expect(result.evidence.join('\n')).toContain('authored regression red/green: observed');
@@ -193,17 +263,45 @@ afterAll(() => { process.stderr.write('bounded diagnostic padding '.repeat(200))
 
   test('selected Bun tests remain bounded by discovery and cannot repeat or run arbitrary scripts', () => {
     const root = workspace();
-    writeFixtureFile(root, 'tests/selected.test.ts', `import { expect, test } from 'bun:test';
-test('selected', () => expect(true).toBe(true));\n`);
-    writeFixtureFile(root, 'tests/unselected.test.ts', `import { expect, test } from 'bun:test';
-test('unselected failure', () => expect(true).toBe(false));\n`);
-    writeFixtureFile(root, 'helper.ts', `import { expect, test } from 'bun:test';
-test('not a discovered test', () => expect(true).toBe(true));\n`);
-    expect(candidateBunTestFiles(root)).toEqual(['tests/selected.test.ts', 'tests/unselected.test.ts']);
-    expect(runCandidateBunTests(root, ['tests/selected.test.ts'])).toMatchObject({ completed: true, passed: true, exitStatus: 0 });
+    writeFixtureFile(
+      root,
+      'tests/selected.test.ts',
+      `import { expect, test } from 'bun:test';
+test('selected', () => expect(true).toBe(true));\n`,
+    );
+    writeFixtureFile(
+      root,
+      'tests/unselected.test.ts',
+      `import { expect, test } from 'bun:test';
+test('unselected failure', () => expect(true).toBe(false));\n`,
+    );
+    writeFixtureFile(
+      root,
+      'helper.ts',
+      `import { expect, test } from 'bun:test';
+test('not a discovered test', () => expect(true).toBe(true));\n`,
+    );
+    expect(candidateBunTestFiles(root)).toEqual([
+      'tests/selected.test.ts',
+      'tests/unselected.test.ts',
+    ]);
+    expect(runCandidateBunTests(root, ['tests/selected.test.ts'])).toMatchObject({
+      completed: true,
+      passed: true,
+      exitStatus: 0,
+    });
     expect(runCandidateBunTests(root)).toMatchObject({ completed: true, passed: false });
-    for (const selected of [[], ['helper.ts'], Array(101).fill('tests/selected.test.ts'), ['../escape.test.ts']]) {
-      expect(runCandidateBunTests(root, selected)).toMatchObject({ completed: false, passed: false, exitStatus: null });
+    for (const selected of [
+      [],
+      ['helper.ts'],
+      Array(101).fill('tests/selected.test.ts'),
+      ['../escape.test.ts'],
+    ]) {
+      expect(runCandidateBunTests(root, selected)).toMatchObject({
+        completed: false,
+        passed: false,
+        exitStatus: null,
+      });
     }
   });
 
@@ -214,15 +312,18 @@ test('not a discovered test', () => expect(true).toBe(true));\n`);
       const before = readFileSync(join(root, 'src/plugin-summary.ts'), 'utf8');
       if (budget === 'file-size') writeFixtureFile(root, 'oversized.txt', 'x'.repeat(2_000_001));
       if (budget === 'file-count') {
-        for (let index = 0; index < 201; index++) writeFixtureFile(root, `file-${index}.txt`, 'bounded');
+        for (let index = 0; index < 201; index++)
+          writeFixtureFile(root, `file-${index}.txt`, 'bounded');
       }
       if (budget === 'bytes') {
-        for (let index = 0; index < 3; index++) writeFixtureFile(root, `large-${index}.txt`, 'x'.repeat(1_500_000));
+        for (let index = 0; index < 3; index++)
+          writeFixtureFile(root, `large-${index}.txt`, 'x'.repeat(1_500_000));
       }
       if (budget === 'entry') {
         for (let index = 0; index < 401; index++) mkdirSync(join(root, `empty-${index}`));
       }
-      if (budget === 'depth') mkdirSync(join(root, ...Array(7).fill('nested')), { recursive: true });
+      if (budget === 'depth')
+        mkdirSync(join(root, ...Array(7).fill('nested')), { recursive: true });
       const result = await scorer.score({ workingDirectory: root } as never);
       expect(result.passed, budget).toBe(false);
       expect(result.verification, budget).toBeLessThan(1);
@@ -233,10 +334,14 @@ test('not a discovered test', () => expect(true).toBe(true));\n`);
 
   test('candidate test deadline terminates a process that ignores SIGTERM', () => {
     const root = workspace();
-    writeFixtureFile(root, 'tests/hanging.test.ts', `process.on('SIGTERM', () => {});
+    writeFixtureFile(
+      root,
+      'tests/hanging.test.ts',
+      `process.on('SIGTERM', () => {});
 setInterval(() => {}, 50);
 await new Promise(() => {});
-`);
+`,
+    );
     const start = Date.now();
     const result = runCandidateBunTests(root);
     expect(result).toMatchObject({ completed: false, passed: false, exitStatus: null });
@@ -259,8 +364,8 @@ await new Promise(() => {});
     const materializer = CORE_EXECUTION_SKILL_EVAL_MATERIALIZERS.find(
       (item) => item.id === 'debugging/cancel-complete-race@1',
     )!;
-    const scorer = CORE_EXECUTION_SKILL_EVAL_SCORERS.find(
-      (item) => item.scenarioIds.includes('debugging-full-task-2'),
+    const scorer = CORE_EXECUTION_SKILL_EVAL_SCORERS.find((item) =>
+      item.scenarioIds.includes('debugging-full-task-2'),
     )!;
     await materializer.materialize(root, { id: 'debugging-full-task-2' } as never);
     const initial = readFileSync(join(root, 'src/job-runner.ts'), 'utf8');
@@ -269,24 +374,38 @@ await new Promise(() => {});
       "this.providerResolved = true;\n    this.commitTerminal('completed');",
     );
     writeFixtureFile(root, 'src/job-runner.ts', fixed);
-    writeFixtureFile(root, '.kory-eval/debugging-2.json', JSON.stringify({
-      preFix: { 'complete-before-cancel': 'cancelled', 'cancel-before-complete': 'cancelled' },
-      hypothesis: 'The providerResolved marker delays terminal ownership and loses the transition',
-      owner: 'commitTerminal',
-      postFix: { 'complete-before-cancel': 'completed', 'cancel-before-complete': 'cancelled' },
-    }));
+    writeFixtureFile(
+      root,
+      '.kory-eval/debugging-2.json',
+      JSON.stringify({
+        preFix: { 'complete-before-cancel': 'cancelled', 'cancel-before-complete': 'cancelled' },
+        hypothesis:
+          'The providerResolved marker delays terminal ownership and loses the transition',
+        owner: 'commitTerminal',
+        postFix: { 'complete-before-cancel': 'completed', 'cancel-before-complete': 'cancelled' },
+      }),
+    );
     // A keyword list in a comment must never be treated as a behavioral assertion.
-    writeFixtureFile(root, 'tests/claimed-regression.test.ts', `import { expect, test } from 'bun:test';
+    writeFixtureFile(
+      root,
+      'tests/claimed-regression.test.ts',
+      `import { expect, test } from 'bun:test';
 // complete-before-cancel cancel-before-complete completed cancelled
 test('claim', () => { expect(true).toBe(true); });
-`);
+`,
+    );
     const commentsOnly = await scorer.score({ workingDirectory: root } as never);
     expect(scorer.id).toBe('debugging/cancel-complete-race-scorer@2');
     expect(commentsOnly.passed).toBe(false);
     expect(commentsOnly.verification).toBeLessThan(1);
-    expect(commentsOnly.evidence.join('\n')).toContain('authored race regression red/green: missing or failed');
+    expect(commentsOnly.evidence.join('\n')).toContain(
+      'authored race regression red/green: missing or failed',
+    );
 
-    writeFixtureFile(root, 'tests/claimed-regression.test.ts', `import { expect, test } from 'bun:test';
+    writeFixtureFile(
+      root,
+      'tests/claimed-regression.test.ts',
+      `import { expect, test } from 'bun:test';
 import { JobRunner, runSchedule } from '../src/job-runner';
 test('both deterministic schedules and terminal idempotence', () => {
   expect(runSchedule('complete-before-cancel')).toBe('completed');
@@ -297,7 +416,8 @@ test('both deterministic schedules and terminal idempotence', () => {
   runner.flushProviderCompletion();
   expect(runner.status()).toBe('completed');
 });
-`);
+`,
+    );
     const accepted = await scorer.score({ workingDirectory: root } as never);
     expect(accepted.passed, accepted.evidence.join('\n')).toBe(true);
     expect(accepted.verification).toBe(1);
@@ -321,9 +441,36 @@ test('both deterministic schedules and terminal idempotence', () => {
       },
       warmup: { seconds: 120, excluded: true },
       measuredRuns: [
-        { p95: 161, p99: 382, throughput: 399, errorRate: 0.18, cpu: 72, queue: false, generatorCpu: 43, correctness: true },
-        { p95: 166, p99: 371, throughput: 398, errorRate: 0.22, cpu: 74, queue: false, generatorCpu: 45, correctness: true },
-        { p95: 159, p99: 365, throughput: 400, errorRate: 0.17, cpu: 71, queue: false, generatorCpu: 42, correctness: true },
+        {
+          p95: 161,
+          p99: 382,
+          throughput: 399,
+          errorRate: 0.18,
+          cpu: 72,
+          queue: false,
+          generatorCpu: 43,
+          correctness: true,
+        },
+        {
+          p95: 166,
+          p99: 371,
+          throughput: 398,
+          errorRate: 0.22,
+          cpu: 74,
+          queue: false,
+          generatorCpu: 45,
+          correctness: true,
+        },
+        {
+          p95: 159,
+          p99: 365,
+          throughput: 400,
+          errorRate: 0.17,
+          cpu: 71,
+          queue: false,
+          generatorCpu: 42,
+          correctness: true,
+        },
       ],
       repeatVariance: { p99Range: 17 },
       gates: { p95: 180, p99: 350 },
@@ -404,7 +551,11 @@ test('sourceCount is present in the summary response', () => {
     const accepted = await scorer!.score({ workingDirectory: root } as never);
     expect(accepted.passed, accepted.evidence.join('\n')).toBe(true);
 
-    writeFixtureFile(root, 'src/skills.ts', `${source}\ninterface ParallelSkillMetadata { sourceCount: number }\n`);
+    writeFixtureFile(
+      root,
+      'src/skills.ts',
+      `${source}\ninterface ParallelSkillMetadata { sourceCount: number }\n`,
+    );
     const rejected = await scorer!.score({ workingDirectory: root } as never);
     expect(rejected.passed).toBe(false);
   });

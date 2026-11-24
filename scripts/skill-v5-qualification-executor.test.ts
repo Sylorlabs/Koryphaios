@@ -90,9 +90,9 @@ function fakeExecutor(
             ? 'opencode'
             : input.mode === 'local-llama-text-patch'
               ? 'local-llama'
-            : input.mode === 'native-stateless-text-patch'
-              ? 'native-cli'
-              : 'codex',
+              : input.mode === 'native-stateless-text-patch'
+                ? 'native-cli'
+                : 'codex',
     model: input.model,
     runtimeIdentity: `fixture-runtime:${input.mode}`,
     tools: [],
@@ -121,11 +121,18 @@ test('native stateless selection is explicit, uses its measured model, and never
   expect(fixture.probes()).toBe(0);
   const readiness = applySkillEvalExecutorReadiness(
     ['synthetic', 'repository', 'cli', 'browser'].map((kind) => ({
-      skill: 'test-skill', scenarioId: kind, startingState: 'red', materializerId: 'fixture',
-      deterministicScorerId: 'fixture', ready: true, reasons: [],
+      skill: 'test-skill',
+      scenarioId: kind,
+      startingState: 'red',
+      materializerId: 'fixture',
+      deterministicScorerId: 'fixture',
+      ready: true,
+      reasons: [],
     })),
     ['synthetic', 'repository', 'cli', 'browser'].map((kind) => ({
-      skill: 'test-skill', id: kind, environmentKind: kind as V5EvalEnvironmentKind,
+      skill: 'test-skill',
+      id: kind,
+      environmentKind: kind as V5EvalEnvironmentKind,
     })),
     selected,
   );
@@ -136,14 +143,24 @@ test('native stateless selection is explicit, uses its measured model, and never
 test('local llama selection does not use Codex and cannot contribute unverified promotion evidence', () => {
   const fixture = fixtureDependencies({ codexAvailable: false });
   const selected = selectSkillEvalExecutor(
-    { ...selectionOptions, mode: 'local-llama-text-patch' }, fixture.dependencies,
+    { ...selectionOptions, mode: 'local-llama-text-patch' },
+    fixture.dependencies,
   );
   expect(selected.descriptor.provider).toBe('local-llama');
   expect(selected.descriptor.model).toBe('qwen2.5-coder-14b-instruct-q4_k_m');
   expect(fixture.probes()).toBe(0);
   const readiness = applySkillEvalExecutorReadiness(
-    [{ skill: 'planning', scenarioId: 'task1', startingState: 'red',
-      materializerId: 'fixture', deterministicScorerId: 'fixture', ready: true, reasons: [] }],
+    [
+      {
+        skill: 'planning',
+        scenarioId: 'task1',
+        startingState: 'red',
+        materializerId: 'fixture',
+        deterministicScorerId: 'fixture',
+        ready: true,
+        reasons: [],
+      },
+    ],
     [{ skill: 'planning', id: 'task1', environmentKind: 'synthetic' }],
     selected,
   );
@@ -152,9 +169,11 @@ test('local llama selection does not use Codex and cannot contribute unverified 
 });
 
 test('explicit native unavailable route never falls back to Codex', () => {
-  const fixture = fixtureDependencies({ factory: () => {
-    throw new Error('Native stateless text-patch executor is unavailable: details redacted.');
-  } });
+  const fixture = fixtureDependencies({
+    factory: () => {
+      throw new Error('Native stateless text-patch executor is unavailable: details redacted.');
+    },
+  });
   const selected = resolveSkillEvalExecutor(
     { ...selectionOptions, mode: 'native-stateless-text-patch', dryRun: true },
     fixture.dependencies,
@@ -449,9 +468,7 @@ test('quarantined OpenCode execution cannot queue locally ready or external scen
       selected,
     );
     expect(rows.every((row) => !row.ready)).toBe(true);
-    expect(
-      rows.every((row) => row.reasons.join(' ').includes('isolation boundary')),
-    ).toBe(true);
+    expect(rows.every((row) => row.reasons.join(' ').includes('isolation boundary'))).toBe(true);
   }
   expect(original.every((row) => row.ready && row.reasons.length === 0)).toBe(true);
 });

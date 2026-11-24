@@ -61,20 +61,29 @@ describe('Reflection AI generic API-key settings flow', () => {
     const { providersStore } = await import('./providers.svelte');
     await providersStore.loadAvailableProviders();
 
-    expect(providersStore.providerList).toContainEqual(expect.objectContaining({
-      key: 'beam', label: 'Reflection AI', needsUrl: false,
-    }));
+    expect(providersStore.providerList).toContainEqual(
+      expect.objectContaining({
+        key: 'beam',
+        label: 'Reflection AI',
+        needsUrl: false,
+      }),
+    );
     expect(providersStore.getProviderDisplayLabel('beam')).toBe('Reflection AI');
     expect(providersStore.getProviderCaps('beam')).toMatchObject({
-      authMode: 'api_key', supportsApiKey: true, supportsAuthToken: false,
-      requiresBaseUrl: false, requiresDeployment: false,
+      authMode: 'api_key',
+      supportsApiKey: true,
+      supportsAuthToken: false,
+      requiresBaseUrl: false,
+      requiresDeployment: false,
     });
     expect(providersStore.usesBrowserAuth('beam')).toBe(false);
     expect(providersStore.usesLocalCliConnection('beam')).toBe(false);
   });
 
   it('loads the backend label, official key-page link, and icon for settings', async () => {
-    apiFetch.mockImplementation(() => Promise.resolve(json({ ok: true, data: [reflectionStatus()] })));
+    apiFetch.mockImplementation(() =>
+      Promise.resolve(json({ ok: true, data: [reflectionStatus()] })),
+    );
     const { providersStore } = await import('./providers.svelte');
     await providersStore.loadProvidersFromApi();
 
@@ -84,7 +93,9 @@ describe('Reflection AI generic API-key settings flow', () => {
       iconPath: '/provider-icons/reflection.svg',
     });
     expect(providersStore.getProviderCaps('beam')).toMatchObject({
-      supportsApiKey: true, supportsAuthToken: false, requiresBaseUrl: true,
+      supportsApiKey: true,
+      supportsAuthToken: false,
+      requiresBaseUrl: true,
       baseUrlPlaceholder: 'https://api.reflection.ai/openai/v1',
     });
   });
@@ -98,18 +109,24 @@ describe('Reflection AI generic API-key settings flow', () => {
   });
 
   it('submits the trimmed key through generic connect and clears it after verification', async () => {
-    apiFetch.mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(
-      json(init?.method === 'PUT' ? { ok: true } : { ok: true, data: [reflectionStatus(true)] }),
-    ));
+    apiFetch.mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        json(init?.method === 'PUT' ? { ok: true } : { ok: true, data: [reflectionStatus(true)] }),
+      ),
+    );
     const { providersStore } = await import('./providers.svelte');
     providersStore.keyInputs = { beam: '  test-reflection-key  ' };
 
     expect(await providersStore.connectProvider('beam')).toMatchObject({
-      ok: true, status: { name: 'beam', connectionState: 'verified' },
+      ok: true,
+      status: { name: 'beam', connectionState: 'verified' },
     });
     expect(apiFetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/providers/beam'),
-      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ apiKey: 'test-reflection-key' }) }),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ apiKey: 'test-reflection-key' }),
+      }),
       undefined,
     );
     expect(providersStore.keyInputs.beam).toBe('');
@@ -132,9 +149,11 @@ describe('Reflection AI generic API-key settings flow', () => {
   });
 
   it('submits an endpoint override alongside the key using the existing URL input', async () => {
-    apiFetch.mockImplementation((_url: string, init?: RequestInit) => Promise.resolve(
-      json(init?.method === 'PUT' ? { ok: true } : { ok: true, data: [reflectionStatus(true)] }),
-    ));
+    apiFetch.mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        json(init?.method === 'PUT' ? { ok: true } : { ok: true, data: [reflectionStatus(true)] }),
+      ),
+    );
     const { providersStore } = await import('./providers.svelte');
     await providersStore.loadProvidersFromApi();
     providersStore.keyInputs = { beam: 'test-reflection-key' };
@@ -146,7 +165,8 @@ describe('Reflection AI generic API-key settings flow', () => {
       expect.objectContaining({
         method: 'PUT',
         body: JSON.stringify({
-          apiKey: 'test-reflection-key', baseUrl: 'https://reflection-proxy.example/openai/v1',
+          apiKey: 'test-reflection-key',
+          baseUrl: 'https://reflection-proxy.example/openai/v1',
         }),
       }),
       undefined,

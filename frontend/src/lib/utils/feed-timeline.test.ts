@@ -139,9 +139,7 @@ describe('feed timeline reconciliation', () => {
       metadata: { phase: 'analyzing' },
     };
     const tool = entry('tool', 200, 'tool_call');
-    expect(operationalEntriesForReload([analyzing, tool]).map((item) => item.id)).toEqual([
-      'tool',
-    ]);
+    expect(operationalEntriesForReload([analyzing, tool]).map((item) => item.id)).toEqual(['tool']);
   });
 
   test('freezes worker reasoning when its next action arrives', () => {
@@ -210,12 +208,6 @@ describe('feed timeline reconciliation', () => {
 
     insertByChronology(lane, entry('skill', skillAt, 'skill'));
 
-    expect(lane.map((item) => item.id)).toEqual([
-      'skill',
-      'user',
-      'thinking',
-      'tool',
-      'answer',
-    ]);
+    expect(lane.map((item) => item.id)).toEqual(['skill', 'user', 'thinking', 'tool', 'answer']);
   });
 });

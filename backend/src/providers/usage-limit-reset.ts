@@ -18,11 +18,7 @@ const MAX_PROVIDER_RESET_AHEAD_MS = 7 * 24 * 60 * 60_000;
 const RESET_GRACE_MS = 60_000;
 
 export type UsageLimitResetSource =
-  | 'retry_after'
-  | 'reset_header'
-  | 'account_field'
-  | 'reset_text'
-  | 'backoff';
+  'retry_after' | 'reset_header' | 'account_field' | 'reset_text' | 'backoff';
 
 export interface UsageLimitReset {
   /** Epoch ms of the next automatic attempt. */
@@ -86,7 +82,10 @@ export function parseResetHeader(value: string | null | undefined, now: number):
 }
 
 /** Account quota reset fields are epoch seconds (Devin GetUserStatus, Freebuff account). */
-export function resetFromAccountUnix(unixSeconds: number | null | undefined, now: number): number | null {
+export function resetFromAccountUnix(
+  unixSeconds: number | null | undefined,
+  now: number,
+): number | null {
   if (typeof unixSeconds !== 'number' || !Number.isFinite(unixSeconds) || unixSeconds <= 0) {
     return null;
   }
@@ -120,7 +119,8 @@ const RESET_AT_CLOCK =
   /\b(?:resets?|reset|try again|available|retry)\s+(?:at|after)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i;
 const RESET_IN_DURATION =
   /\b(?:resets?|try again|retry|available)\s+in\s+((?:\d+\s*(?:hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\s*,?\s*(?:and\s+)?)+)/i;
-const ISO_TIMESTAMP = /\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)\b/;
+const ISO_TIMESTAMP =
+  /\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)\b/;
 const MONTH_DAY_TIME =
   /\b(?:resets?|try again)\s+(?:on\s+)?([A-Za-z]{3})\s+(\d{1,2}),?\s+(\d{4})?,?\s*(?:at\s+)?(\d{1,2}):(\d{2})\s*(am|pm)?/i;
 
@@ -150,7 +150,9 @@ export function parseResetFromText(text: string, now: number): number | null {
   const duration = RESET_IN_DURATION.exec(text);
   if (duration) {
     let ms = 0;
-    const parts = duration[1]!.matchAll(/(\d+)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/gi);
+    const parts = duration[1]!.matchAll(
+      /(\d+)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)\b/gi,
+    );
     for (const [, amountRaw, unit] of parts) {
       const amount = Number(amountRaw);
       const u = unit!.toLowerCase();

@@ -64,13 +64,18 @@ import { currentV5SkillEvaluationContracts } from '../../eval/skills/skill-eval-
 
 function currentFullTaskEvidence(skill: string, scenarioId: string, experimentId: string) {
   const pkg = V5_SKILL_PACKAGE_CATALOG.packages.find((item) => item.sidecar.name === skill)!;
-  const contract = currentV5SkillEvaluationContracts(pkg, CURRENT_SKILL_EVAL_CONTRACT_VERSION).get(scenarioId)!;
+  const contract = currentV5SkillEvaluationContracts(pkg, CURRENT_SKILL_EVAL_CONTRACT_VERSION).get(
+    scenarioId,
+  )!;
   return {
     protocolVersion: 3 as const,
     evaluationContractVersion: contract.evaluationContractVersion,
     evaluationContractHash: contract.evaluationContractHash,
-    materializerId: contract.materializerIds[0]!, deterministicScorerId: contract.scorerIds[0]!,
-    suiteId: 'current-contract-test-suite', scenarioId, experimentId,
+    materializerId: contract.materializerIds[0]!,
+    deterministicScorerId: contract.scorerIds[0]!,
+    suiteId: 'current-contract-test-suite',
+    scenarioId,
+    experimentId,
   };
 }
 import { SKILL_PLAYBOOKS } from '../skill-playbooks';
@@ -237,13 +242,9 @@ describe('local Koryphaios skills', () => {
 
     const activeByName = new Map(listSkills(root).map((skill) => [skill.name, skill]));
     const packageVersions = new Map(
-      [
-        ...V5_SKILL_PACKAGE_CATALOG.packages,
-        ...V5_SKILL_PACKAGE_CATALOG.runtimeControls,
-      ].map((skillPackage) => [
-        skillPackage.sidecar.name,
-        skillPackage.sidecar.version,
-      ]),
+      [...V5_SKILL_PACKAGE_CATALOG.packages, ...V5_SKILL_PACKAGE_CATALOG.runtimeControls].map(
+        (skillPackage) => [skillPackage.sidecar.name, skillPackage.sidecar.version],
+      ),
     );
     for (const name of names) {
       const skill = activeByName.get(name)!;
@@ -479,7 +480,7 @@ describe('local Koryphaios skills', () => {
     const pointerPlan = pointer.selected.find((item) => item.skill.name === 'plan-mode');
     expect(pointerPlan?.representation).toBe('minimal');
     expect(pointer.warnings.join(' ')).toContain(
-      'full guidance is already in this agent\'s context from load_skill_detail',
+      "full guidance is already in this agent's context from load_skill_detail",
     );
     expectLosslessOrderedSkillContext(pointer);
   });
@@ -2307,7 +2308,8 @@ recordSkillEvaluationRun(projectRoot, {
         recordedAt: `2026-07-18T00:00:0${index}.000Z`,
         protocolVersion: 2,
         ...(category === 'full-task'
-          ? currentFullTaskEvidence(skill.name, benchmarkCase.id, `candidate-${index}`) : {}),
+          ? currentFullTaskEvidence(skill.name, benchmarkCase.id, `candidate-${index}`)
+          : {}),
         variant: 'with-skill',
         caseCategory: category,
         comparisonId: `pair-${category}-${index}`,
@@ -2429,7 +2431,8 @@ recordSkillEvaluationRun(projectRoot, {
         recordedAt: `2026-07-18T00:01:0${index}.000Z`,
         protocolVersion: 2,
         ...(category === 'full-task'
-          ? currentFullTaskEvidence(skill.name, benchmarkCase.id, `baseline-${index}`) : {}),
+          ? currentFullTaskEvidence(skill.name, benchmarkCase.id, `baseline-${index}`)
+          : {}),
         variant: 'without-skill',
         caseCategory: category,
         comparisonId: `pair-${category}-${index}`,
@@ -2556,7 +2559,10 @@ recordSkillEvaluationRun(projectRoot, {
   });
 
   test('generic v2 uses the latest complete paired retry for skill-vs-no-skill uplift', () => {
-    const skill = { ...listSkills(root).find((item) => item.name === 'web-interface')!, name: 'generic-contract-test' };
+    const skill = {
+      ...listSkills(root).find((item) => item.name === 'web-interface')!,
+      name: 'generic-contract-test',
+    };
     const fullTask = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
     const base = {
       skill: skill.name,
@@ -2669,7 +2675,10 @@ recordSkillEvaluationRun(projectRoot, {
   });
 
   test('generic v3 does not carry a regression forward when the evaluator generation is superseded', () => {
-    const skill = { ...listSkills(root).find((item) => item.name === 'web-interface')!, name: 'generic-contract-test' };
+    const skill = {
+      ...listSkills(root).find((item) => item.name === 'web-interface')!,
+      name: 'generic-contract-test',
+    };
     const fullTask = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
     const base = {
       skill: skill.name,

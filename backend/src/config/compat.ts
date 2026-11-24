@@ -49,7 +49,10 @@ export function resolveBundleHash(): string | null {
         return cached;
       }
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Malformed compat-hash.json ignored');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Malformed compat-hash.json ignored',
+      );
     }
   }
 

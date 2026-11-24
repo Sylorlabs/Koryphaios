@@ -12,9 +12,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('$lib/stores/websocket.svelte', () => ({
   wsStore: {
-    get groupedFeed() { return mocks.feed; },
+    get groupedFeed() {
+      return mocks.feed;
+    },
     managerStatus: 'idle',
-    get isLoadingSession() { return mocks.isLoadingSession; },
+    get isLoadingSession() {
+      return mocks.isLoadingSession;
+    },
     removeEntries: mocks.removeEntries,
   },
 }));
@@ -97,7 +101,9 @@ describe('ManagerFeed suggestion controls', () => {
     mocks.isLoadingSession = true;
     render(ManagerFeed);
     expect(screen.getByRole('status').textContent).toContain('Loading chat');
-    expect(screen.queryByRole('button', { name: 'Load Map the codebase into composer' })).toBeNull();
+    expect(
+      screen.queryByRole('button', { name: 'Load Map the codebase into composer' }),
+    ).toBeNull();
   });
 
   it('starts bottom-anchored and covers the transcript until it has landed', async () => {
@@ -143,9 +149,7 @@ describe('ManagerFeed suggestion controls', () => {
     // Replayed events fold without touching the visible rows and merge in one
     // settle at the burst's end, so the reader is not kept behind a spinner
     // for the remainder of the log.
-    await waitFor(() =>
-      expect(container.querySelector('.chat-loading.cover')).toBeNull(),
-    );
+    await waitFor(() => expect(container.querySelector('.chat-loading.cover')).toBeNull());
   });
 
   it('keeps load and edit actions as sibling buttons with independent behavior', async () => {
@@ -204,6 +208,9 @@ describe('ManagerFeed home background', () => {
     // selected background.
     expect(screen.getByText('hello there')).toBeTruthy();
     expect(container.querySelector('.welcome-background-layer')).not.toBeNull();
-    expect(container.querySelector('.welcome-background')).toHaveAttribute('src', BACKGROUND.source);
+    expect(container.querySelector('.welcome-background')).toHaveAttribute(
+      'src',
+      BACKGROUND.source,
+    );
   });
 });

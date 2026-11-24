@@ -45,8 +45,7 @@ export function buildDelegationPromptContext(input: {
     .flatMap((status) => status.models.map((model) => `${status.name}:${model}`));
 
   const pools = WORKER_DOMAINS.map((domain) => {
-    const configured =
-      access[domain] ?? (domain === 'ui' ? access.frontend : undefined) ?? [];
+    const configured = access[domain] ?? (domain === 'ui' ? access.frontend : undefined) ?? [];
     return configured.length
       ? { domain, models: [...configured] }
       : { domain, models: [...availableModels], unrestricted: true };

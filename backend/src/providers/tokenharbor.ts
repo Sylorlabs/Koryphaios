@@ -50,9 +50,7 @@ function asPositiveInt(value: unknown): number | undefined {
 
 function asNonNegativeNumber(value: unknown): number | undefined {
   const parsed = typeof value === 'string' ? Number.parseFloat(value) : value;
-  return typeof parsed === 'number' && Number.isFinite(parsed) && parsed >= 0
-    ? parsed
-    : undefined;
+  return typeof parsed === 'number' && Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function asStringArray(value: unknown): string[] | undefined {
@@ -128,9 +126,7 @@ export class TokenHarborProvider extends OpenAIProvider {
         pricing: {
           prompt: inputPerM / 1_000_000,
           completion: outputPerM / 1_000_000,
-          ...(cacheReadPerM !== undefined
-            ? { input_cache_read: cacheReadPerM / 1_000_000 }
-            : {}),
+          ...(cacheReadPerM !== undefined ? { input_cache_read: cacheReadPerM / 1_000_000 } : {}),
           ...(cacheWritePerM !== undefined
             ? { input_cache_write: cacheWritePerM / 1_000_000 }
             : {}),

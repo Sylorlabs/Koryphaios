@@ -50,8 +50,10 @@ export interface SkillEvalFixtureMaterializer {
   matches: (scenario: SkillEvalScenarioV3) => boolean;
   materialize: (destination: string, scenario: SkillEvalScenarioV3) => void | Promise<void>;
   /** Trusted fixture-owned execution on the original source, before either arm is cloned/dispatched. */
-  captureBeforeCandidateDispatch?: (destination: string, scenario: SkillEvalScenarioV3) =>
-    { relativePath: string; text: string } | Promise<{ relativePath: string; text: string }>;
+  captureBeforeCandidateDispatch?: (
+    destination: string,
+    scenario: SkillEvalScenarioV3,
+  ) => { relativePath: string; text: string } | Promise<{ relativePath: string; text: string }>;
   /**
    * Ordered images the fixture hands to the candidate as model input, for scenarios whose
    * evidence is visual (a real desktop session, a rendered page). Paths are resolved against
@@ -129,24 +131,42 @@ const MAX_PUBLIC_CONTRACT_FILE_BYTES = 67_108_864;
 
 function snapshotTextFile(path: string): SkillEvalPublicContractFileSnapshot {
   const unavailable: SkillEvalPublicContractFileSnapshot = {
-    available: false, sha256: null, byteLength: 0, text: null, reason: 'not-present',
+    available: false,
+    sha256: null,
+    byteLength: 0,
+    text: null,
+    reason: 'not-present',
   };
   try {
     const stat = lstatSync(path);
-    if (!stat.isFile() || !Number.isSafeInteger(stat.size) || stat.size < 0 ||
-      stat.size > MAX_PUBLIC_CONTRACT_FILE_BYTES) return unavailable;
+    if (
+      !stat.isFile() ||
+      !Number.isSafeInteger(stat.size) ||
+      stat.size < 0 ||
+      stat.size > MAX_PUBLIC_CONTRACT_FILE_BYTES
+    )
+      return unavailable;
     const parentPath = dirname(path);
     const parent = lstatSync(parentPath);
     if (!parent.isDirectory() || parent.isSymbolicLink()) return unavailable;
     // Preserve legitimate platform aliases such as macOS /var via the one
     // canonicalisation helper, while pinning the actual materialized parent.
     const canonicalParent = canonicalizePath(parentPath);
-    const fd = openSync(join(canonicalParent, basename(path)),
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const fd = openSync(
+      join(canonicalParent, basename(path)),
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
     try {
       const before = fstatSync(fd);
-      if (!before.isFile() || before.dev !== stat.dev || before.ino !== stat.ino ||
-        before.size !== stat.size || before.mtimeMs !== stat.mtimeMs || before.ctimeMs !== stat.ctimeMs) return unavailable;
+      if (
+        !before.isFile() ||
+        before.dev !== stat.dev ||
+        before.ino !== stat.ino ||
+        before.size !== stat.size ||
+        before.mtimeMs !== stat.mtimeMs ||
+        before.ctimeMs !== stat.ctimeMs
+      )
+        return unavailable;
       // Never pathname-read or consume to EOF without a fixed bound: the file
       // can grow after fstat. The extra byte detects growth without admitting it.
       const buffer = Buffer.alloc(before.size + 1);
@@ -159,12 +179,25 @@ function snapshotTextFile(path: string): SkillEvalPublicContractFileSnapshot {
       const after = fstatSync(fd);
       const current = lstatSync(path);
       const parentAfter = lstatSync(parentPath);
-      if (offset !== before.size || after.size !== before.size ||
-        after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs ||
-        !current.isFile() || current.isSymbolicLink() || current.dev !== before.dev || current.ino !== before.ino ||
-        current.size !== before.size || current.mtimeMs !== before.mtimeMs || current.ctimeMs !== before.ctimeMs ||
-        !parentAfter.isDirectory() || parentAfter.isSymbolicLink() || parentAfter.dev !== parent.dev || parentAfter.ino !== parent.ino ||
-        canonicalizePath(parentPath) !== canonicalParent) return unavailable;
+      if (
+        offset !== before.size ||
+        after.size !== before.size ||
+        after.mtimeMs !== before.mtimeMs ||
+        after.ctimeMs !== before.ctimeMs ||
+        !current.isFile() ||
+        current.isSymbolicLink() ||
+        current.dev !== before.dev ||
+        current.ino !== before.ino ||
+        current.size !== before.size ||
+        current.mtimeMs !== before.mtimeMs ||
+        current.ctimeMs !== before.ctimeMs ||
+        !parentAfter.isDirectory() ||
+        parentAfter.isSymbolicLink() ||
+        parentAfter.dev !== parent.dev ||
+        parentAfter.ino !== parent.ino ||
+        canonicalizePath(parentPath) !== canonicalParent
+      )
+        return unavailable;
       const bytes = buffer.subarray(0, offset);
       const text = bytes.toString('utf8');
       if (!Buffer.from(text, 'utf8').equals(bytes)) return unavailable;
@@ -174,7 +207,9 @@ function snapshotTextFile(path: string): SkillEvalPublicContractFileSnapshot {
         byteLength: bytes.byteLength,
         text,
       };
-    } finally { closeSync(fd); }
+    } finally {
+      closeSync(fd);
+    }
   } catch {
     return unavailable;
   }
@@ -351,33 +386,36 @@ function workspaceEntries(root: string, current = root): string[] {
   const stat = lstatSync(current);
   if (stat.isSymbolicLink() || stat.isFile()) return [current];
   if (!stat.isDirectory()) return [];
-  return readdirSync(current)
-    // Harness-owned scratch is not candidate evidence. The codex executor creates
-    // `.kory-tmp` inside the workspace because the host temp dir is outside every
-    // writable sandbox root, and the iOS fixture tells a candidate to keep derived
-    // artifacts there. Capturing it turned one honest run into a 448 MB artifact that
-    // no blind review could open, because the artifact reader requires a bounded file.
-    // Installed dependencies and framework build output are derived state, not candidate
-    // source. A Next fixture that runs `bun install` and `next build` produced 368 MB of
-    // snapshots, which no blind review could open because the artifact reader requires a
-    // bounded regular file, and it buried the real candidate diff under thousands of
-    // `node_modules` entries. The scorer builds its own copy, so nothing it measures
-    // depends on these trees.
-    // A Rust build directory is derived state wherever it sits. It is nested inside the crate
-    // (`src-tauri/target`), so a name check at the workspace root never saw it: one desktop arm
-    // archived five to six gigabytes of object files, and a full disk then failed every later arm
-    // with ENOSPC before a candidate could run. The receipt records the packaged binary's hash, so
-    // nothing an evaluator reads depends on the build tree surviving the run.
-    .filter((name) =>
-      name !== '.git' &&
-      name !== '.kory-tmp' &&
-      name !== 'node_modules' &&
-      name !== '.next' &&
-      name !== '.turbo' &&
-      !(name === 'target' && existsSync(join(current, 'Cargo.toml')))
-    )
-    .sort()
-    .flatMap((name) => workspaceEntries(root, join(current, name)));
+  return (
+    readdirSync(current)
+      // Harness-owned scratch is not candidate evidence. The codex executor creates
+      // `.kory-tmp` inside the workspace because the host temp dir is outside every
+      // writable sandbox root, and the iOS fixture tells a candidate to keep derived
+      // artifacts there. Capturing it turned one honest run into a 448 MB artifact that
+      // no blind review could open, because the artifact reader requires a bounded file.
+      // Installed dependencies and framework build output are derived state, not candidate
+      // source. A Next fixture that runs `bun install` and `next build` produced 368 MB of
+      // snapshots, which no blind review could open because the artifact reader requires a
+      // bounded regular file, and it buried the real candidate diff under thousands of
+      // `node_modules` entries. The scorer builds its own copy, so nothing it measures
+      // depends on these trees.
+      // A Rust build directory is derived state wherever it sits. It is nested inside the crate
+      // (`src-tauri/target`), so a name check at the workspace root never saw it: one desktop arm
+      // archived five to six gigabytes of object files, and a full disk then failed every later arm
+      // with ENOSPC before a candidate could run. The receipt records the packaged binary's hash, so
+      // nothing an evaluator reads depends on the build tree surviving the run.
+      .filter(
+        (name) =>
+          name !== '.git' &&
+          name !== '.kory-tmp' &&
+          name !== 'node_modules' &&
+          name !== '.next' &&
+          name !== '.turbo' &&
+          !(name === 'target' && existsSync(join(current, 'Cargo.toml'))),
+      )
+      .sort()
+      .flatMap((name) => workspaceEntries(root, join(current, name)))
+  );
 }
 
 function workspaceHashes(root: string): Map<string, string> {
@@ -442,11 +480,11 @@ function persistArmEvidence(input: {
   );
   mkdirSync(artifactRoot, { recursive: true });
   const nativeStream = input.observation.nativeTextEventStream;
-  const nativeWorkspaceRoot = nativeStream === undefined
-    ? undefined
-    : canonicalizePath(dirname(input.baseRoot));
+  const nativeWorkspaceRoot =
+    nativeStream === undefined ? undefined : canonicalizePath(dirname(input.baseRoot));
   if (nativeWorkspaceRoot !== undefined) {
-    if (!Buffer.isBuffer(nativeStream)) throw new Error('Native text event stream must be raw bytes');
+    if (!Buffer.isBuffer(nativeStream))
+      throw new Error('Native text event stream must be raw bytes');
     if (isContainedBy(nativeWorkspaceRoot, canonicalizePath(artifactRoot))) {
       throw new Error('Native text event archive must be outside the evaluation workspace');
     }
@@ -487,17 +525,25 @@ function persistArmEvidence(input: {
   writeFileSync(outputPath, input.observation.output);
   const manifestPath = join(artifactRoot, 'run-manifest.json');
   const nativeTextArtifacts: SkillRuntimeArtifact[] = [];
-  let nativeTextEventArchive: {
-    location: string; sha256: string; bytes: number; workspaceRoot: string;
-  } | undefined;
+  let nativeTextEventArchive:
+    | {
+        location: string;
+        sha256: string;
+        bytes: number;
+        workspaceRoot: string;
+      }
+    | undefined;
   if (nativeStream !== undefined) {
     const location = join(artifactRoot, 'native-text-events.jsonl');
     writeFileSync(location, nativeStream, { mode: 0o600, flag: 'wx' });
     const archived = readFileSync(location);
-    if (!archived.equals(nativeStream)) throw new Error('Native text event archive changed during persistence');
+    if (!archived.equals(nativeStream))
+      throw new Error('Native text event archive changed during persistence');
     const sha256 = createHash('sha256').update(archived).digest('hex');
     nativeTextEventArchive = {
-      location: canonicalizePath(location), sha256, bytes: archived.byteLength,
+      location: canonicalizePath(location),
+      sha256,
+      bytes: archived.byteLength,
       workspaceRoot: nativeWorkspaceRoot!,
     };
     nativeTextArtifacts.push({ kind: 'report', location, sha256 });
@@ -584,10 +630,15 @@ function persistArmEvidence(input: {
   );
   return [
     ...nativeTextArtifacts,
-    ...(archivedPreDispatch ? [{
-      kind: 'report' as const, location: archivedPreDispatch.location,
-      sha256: archivedPreDispatch.sha256,
-    }] : []),
+    ...(archivedPreDispatch
+      ? [
+          {
+            kind: 'report' as const,
+            location: archivedPreDispatch.location,
+            sha256: archivedPreDispatch.sha256,
+          },
+        ]
+      : []),
     {
       kind: 'report',
       location: manifestPath,
@@ -672,7 +723,9 @@ export async function runPairedSkillEvaluationV3(input: {
   }
   if (input.regressionId) {
     const source = listOpenSkillRegressionSources(
-      input.projectRoot, input.skillPackage.sidecar.name, input.skillRevisionHash,
+      input.projectRoot,
+      input.skillPackage.sidecar.name,
+      input.skillRevisionHash,
     ).find((run) => run.id === input.regressionId);
     if (!source || (source.scenarioId ?? source.caseId) !== scenario.id) {
       throw new Error(`Cannot retest ${scenario.id}: regression source is not open for this task`);
@@ -720,8 +773,10 @@ export async function runPairedSkillEvaluationV3(input: {
     let preDispatchCapture: SkillEvalPreDispatchCapture | undefined;
     if (materializer.captureBeforeCandidateDispatch) {
       const capture = await materializer.captureBeforeCandidateDispatch(baseRoot, scenario);
-      if (!/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/u.test(capture.relativePath) ||
-        capture.relativePath.split('/').includes('..')) {
+      if (
+        !/^[a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)*$/u.test(capture.relativePath) ||
+        capture.relativePath.split('/').includes('..')
+      ) {
         throw new Error('Unsafe pre-dispatch observation path');
       }
       const snapshot = snapshotTextFile(join(baseRoot, capture.relativePath));
@@ -743,10 +798,15 @@ export async function runPairedSkillEvaluationV3(input: {
     const assertBaseUnchanged = () => {
       try {
         const current = lstatSync(baseRoot);
-        if (current.isDirectory() && !current.isSymbolicLink() &&
-          current.dev === baseIdentity.dev && current.ino === baseIdentity.ino &&
+        if (
+          current.isDirectory() &&
+          !current.isSymbolicLink() &&
+          current.dev === baseIdentity.dev &&
+          current.ino === baseIdentity.ino &&
           canonicalizePath(baseRoot) === canonicalBaseRoot &&
-          fingerprintSkillEvalWorkspace(baseRoot) === initialFingerprint) return;
+          fingerprintSkillEvalWorkspace(baseRoot) === initialFingerprint
+        )
+          return;
       } catch {
         // A missing or substituted baseline cannot become starting-state evidence.
       }
@@ -800,7 +860,13 @@ export async function runPairedSkillEvaluationV3(input: {
               integrityFailure: false,
               evidence: [observation.taskFailure],
             }
-          : await scorer.score({ scenario, experiment, workingDirectory, observation, preDispatchCapture });
+          : await scorer.score({
+              scenario,
+              experiment,
+              workingDirectory,
+              observation,
+              preDispatchCapture,
+            });
       if (score) {
         boundedUnit(score.quality);
         boundedUnit(score.verification);
@@ -831,48 +897,48 @@ export async function runPairedSkillEvaluationV3(input: {
         // solved nothing, and it stayed in the pass rate forever. The artifacts above are still
         // archived for diagnosis; only the evidence row is withheld.
         if (score)
-        recordSkillEvaluationRun(input.projectRoot, {
-          id: experiment.id,
-          skill: input.skillPackage.sidecar.name,
-          revisionHash: input.skillRevisionHash,
-          caseId: scenario.id,
-          provider: experiment.provider,
-          model: experiment.model,
-          harnessVersion: experiment.harnessVersion,
-          role: experiment.role,
-          evaluator: 'deterministic',
-          passed: score?.passed ?? false,
-          quality: score?.quality ?? 0,
-          verification: score?.verification ?? 0,
-          integrityFailure: score?.integrityFailure ?? false,
-          evidence: [...observation.evidence, ...(score?.evidence ?? [])],
-          recordedAt: new Date().toISOString(),
-          protocolVersion: 3,
-          variant: experiment.variant,
-          caseCategory: 'full-task',
-          ...(experiment.variant === 'with-skill' && input.regressionId
-            ? { regressionId: input.regressionId }
-            : {}),
-          comparisonId: pairId,
-          routing: {
-            expectedSelection: true,
-            selected: experiment.variant === 'with-skill',
-            selectedSkills:
-              experiment.variant === 'with-skill' ? [input.skillPackage.sidecar.name] : [],
-            expectedSkills: [],
-            forbiddenSkills: [],
-          },
-          suiteId,
-          scenarioId: scenario.id,
-          experimentId: experiment.id,
-          evaluationContractHash: input.evaluationContractHash,
-          evaluationContractVersion: input.evaluationContractVersion,
-          materializerId: materializer.id,
-          deterministicScorerId: scorer.id,
-          infrastructureFailure: observation.infrastructureFailure,
-          ...(observation.taskFailure ? { executionAborted: true } : {}),
-          artifacts: [...observation.artifacts, ...durableArtifacts],
-        });
+          recordSkillEvaluationRun(input.projectRoot, {
+            id: experiment.id,
+            skill: input.skillPackage.sidecar.name,
+            revisionHash: input.skillRevisionHash,
+            caseId: scenario.id,
+            provider: experiment.provider,
+            model: experiment.model,
+            harnessVersion: experiment.harnessVersion,
+            role: experiment.role,
+            evaluator: 'deterministic',
+            passed: score?.passed ?? false,
+            quality: score?.quality ?? 0,
+            verification: score?.verification ?? 0,
+            integrityFailure: score?.integrityFailure ?? false,
+            evidence: [...observation.evidence, ...(score?.evidence ?? [])],
+            recordedAt: new Date().toISOString(),
+            protocolVersion: 3,
+            variant: experiment.variant,
+            caseCategory: 'full-task',
+            ...(experiment.variant === 'with-skill' && input.regressionId
+              ? { regressionId: input.regressionId }
+              : {}),
+            comparisonId: pairId,
+            routing: {
+              expectedSelection: true,
+              selected: experiment.variant === 'with-skill',
+              selectedSkills:
+                experiment.variant === 'with-skill' ? [input.skillPackage.sidecar.name] : [],
+              expectedSkills: [],
+              forbiddenSkills: [],
+            },
+            suiteId,
+            scenarioId: scenario.id,
+            experimentId: experiment.id,
+            evaluationContractHash: input.evaluationContractHash,
+            evaluationContractVersion: input.evaluationContractVersion,
+            materializerId: materializer.id,
+            deterministicScorerId: scorer.id,
+            infrastructureFailure: observation.infrastructureFailure,
+            ...(observation.taskFailure ? { executionAborted: true } : {}),
+            artifacts: [...observation.artifacts, ...durableArtifacts],
+          });
       }
       return { experiment, workspace: workingDirectory, observation, score };
     };

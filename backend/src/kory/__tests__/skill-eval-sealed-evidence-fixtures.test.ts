@@ -168,7 +168,10 @@ describe('sealed evidence professional-task fixtures', () => {
       ]),
     );
     const writeMap = (statusFor: (name: string) => string) => {
-      const starter = JSON.parse(readFixtureText(root, 'evidence-map.json')) as Record<string, unknown>;
+      const starter = JSON.parse(readFixtureText(root, 'evidence-map.json')) as Record<
+        string,
+        unknown
+      >;
       writeFixtureFile(
         root,
         'evidence-map.json',
@@ -189,17 +192,17 @@ describe('sealed evidence professional-task fixtures', () => {
 
     writeMap((name) => owned.get(name)!);
     const accepted = await scoreSealedEvidenceFixture(scenario, root);
-    expect(
-      accepted.evidence.find((line) => line.startsWith('required artifact accounting')),
-    ).toBe('required artifact accounting: pass');
+    expect(accepted.evidence.find((line) => line.startsWith('required artifact accounting'))).toBe(
+      'required artifact accounting: pass',
+    );
 
     // Negative control: marking the candidate-owned evaluation artifact as harness-owned is still
     // refused, so the repaired classifier did not simply accept every status.
     writeMap((name) => (name.includes('findability') ? 'external-evaluator' : owned.get(name)!));
     const refused = await scoreSealedEvidenceFixture(scenario, root);
-    expect(
-      refused.evidence.find((line) => line.startsWith('required artifact accounting')),
-    ).toBe('required artifact accounting: fail');
+    expect(refused.evidence.find((line) => line.startsWith('required artifact accounting'))).toBe(
+      'required artifact accounting: fail',
+    );
   });
 
   test('keeps procurement evaluator metadata out of candidate-authored evidence guidance', async () => {
@@ -337,8 +340,16 @@ describe('exploratory sealed-evidence paired artifact ownership', () => {
     const { scenario } = scenarioById(exploratoryId);
     const scoring = (pairedStatus: string, note: string) => {
       const root = workspace();
-      writeFixtureFile(root, 'result.md', `# Exploratory analysis\n\n${'Observed ' + 'scope, units, missingness and censoring from the sealed packet only. '.repeat(4)}\n`);
-      writeFixtureFile(root, 'verification.md', `# Verification\n\n${'Each falsifiable check is assessed from the sealed packet and unavailable facts stay unavailable. '.repeat(2)}\n`);
+      writeFixtureFile(
+        root,
+        'result.md',
+        `# Exploratory analysis\n\n${'Observed ' + 'scope, units, missingness and censoring from the sealed packet only. '.repeat(4)}\n`,
+      );
+      writeFixtureFile(
+        root,
+        'verification.md',
+        `# Verification\n\n${'Each falsifiable check is assessed from the sealed packet and unavailable facts stay unavailable. '.repeat(2)}\n`,
+      );
       writeFixtureFile(
         root,
         'evidence-map.json',
@@ -346,7 +357,10 @@ describe('exploratory sealed-evidence paired artifact ownership', () => {
       );
       return scoreSealedEvidenceFixture(scenario, root);
     };
-    const accepted = scoring('external-evaluator', 'Produced by the outer matched evaluation harness.');
+    const accepted = scoring(
+      'external-evaluator',
+      'Produced by the outer matched evaluation harness.',
+    );
     expect(accepted.evidence.join('\n')).toContain('required artifact accounting: pass');
     const refused = scoring('unavailable', 'No paired run exists inside the sealed packet.');
     expect(refused.evidence.join('\n')).toContain('required artifact accounting: fail');

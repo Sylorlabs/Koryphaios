@@ -5,7 +5,10 @@ import { onboardingStore } from './onboarding.svelte';
 import { shortcutStore } from './shortcuts.svelte';
 import { welcomePreferencesStore } from './welcome-preferences.svelte';
 
-export function applyDesktopUiSettings(settings: DesktopUiSettings, replayWalkthrough = false): void {
+export function applyDesktopUiSettings(
+  settings: DesktopUiSettings,
+  replayWalkthrough = false,
+): void {
   welcomePreferencesStore.applyRemote(settings.welcome);
   shortcutStore.applyRemote(settings.shortcuts);
   onboardingStore.applyRemoteReplay(settings.onboardingReplayRevision, replayWalkthrough);

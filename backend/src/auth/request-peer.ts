@@ -26,7 +26,13 @@ function trustedProxy(address: string, entries: string[]): boolean {
     const [base, prefix] = entry.split('/');
     if (prefix === undefined) return normalizeIp(base) === ip;
     const bits = Number(prefix);
-    if (isIP(base) !== family || !Number.isInteger(bits) || bits < 0 || bits > (family === 4 ? 32 : 128)) return false;
+    if (
+      isIP(base) !== family ||
+      !Number.isInteger(bits) ||
+      bits < 0 ||
+      bits > (family === 4 ? 32 : 128)
+    )
+      return false;
     const block = new BlockList();
     block.addSubnet(base, bits, family === 4 ? 'ipv4' : 'ipv6');
     return block.check(ip, family === 4 ? 'ipv4' : 'ipv6');
@@ -41,7 +47,10 @@ export function canBootstrapLocalSession(request: Request, peer: string | null):
     return host === '127.0.0.1' || host === 'localhost' || host === '::1';
   }
   if (!isIP(normalizeIp(peer))) return false;
-  const proxies = (process.env.KORYPHAIOS_TRUSTED_PROXIES ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  const proxies = (process.env.KORYPHAIOS_TRUSTED_PROXIES ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   let client = normalizeIp(peer);
   if (trustedProxy(client, proxies)) {
     const forwarded = request.headers.get('x-forwarded-for');

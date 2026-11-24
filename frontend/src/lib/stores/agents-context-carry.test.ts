@@ -87,7 +87,12 @@ describe('context meter on a model switch', () => {
     expect(usage.cachedInputTokens).toBeUndefined();
     const segments = buildContextSegments(usage)!;
     expect(segments.map((segment) => segment.key)).toEqual([
-      'system', 'memory', 'skills', 'tools', 'chat', 'output',
+      'system',
+      'memory',
+      'skills',
+      'tools',
+      'chat',
+      'output',
     ]);
     expect(segments.reduce((sum, segment) => sum + segment.tokens, 0)).toBe(USED);
     expect(segments.reduce((sum, segment) => sum + segment.widthPercent, 0)).toBeCloseTo(
@@ -117,7 +122,9 @@ describe('context meter on a model switch', () => {
     ).toBe(true);
     const usage = agents.getContextUsage();
     expect(usage.used).toBe(USED);
-    expect(buildContextSegments(usage)!.find((segment) => segment.key === 'request')).toBeUndefined();
+    expect(
+      buildContextSegments(usage)!.find((segment) => segment.key === 'request'),
+    ).toBeUndefined();
     // An estimate is not a measurement: it does not lock out the saved snapshot.
     expect(agents.agentStore.managerUsageRevision).toBe(revision);
 

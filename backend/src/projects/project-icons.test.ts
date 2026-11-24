@@ -3,11 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProjectIconSpec } from '@koryphaios/shared';
-import {
-  readProjectIcon,
-  releaseReplacedProjectIcon,
-  storeProjectIcon,
-} from './project-icons';
+import { readProjectIcon, releaseReplacedProjectIcon, storeProjectIcon } from './project-icons';
 
 const roots: string[] = [];
 let previousDataDir: string | undefined;

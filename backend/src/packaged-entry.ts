@@ -15,10 +15,7 @@ export interface PackagedEntryImporters {
   mcpBridge?: () => Promise<{ runBridge: () => Promise<void> }>;
   hookBridge?: () => Promise<{
     main: () => Promise<void>;
-    encodeHookDecision: (
-      decision: { decision: string; reason: string },
-      format: string,
-    ) => unknown;
+    encodeHookDecision: (decision: { decision: string; reason: string }, format: string) => unknown;
   }>;
   server?: () => Promise<unknown>;
 }

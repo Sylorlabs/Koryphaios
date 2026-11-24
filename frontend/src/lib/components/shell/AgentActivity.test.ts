@@ -5,7 +5,9 @@ import type { AgentStatus } from '@koryphaios/shared';
 import AgentActivity from './AgentActivity.svelte';
 import type { AgentRailState } from './useAgentRail.svelte';
 
-const currentTools = vi.hoisted(() => new Map<string, { name: string; input?: Record<string, unknown> }>());
+const currentTools = vi.hoisted(
+  () => new Map<string, { name: string; input?: Record<string, unknown> }>(),
+);
 vi.mock('$lib/stores/agents.svelte', () => ({
   agentStore: {
     getAgentSteeringQueue: () => [],
@@ -125,7 +127,10 @@ describe('AgentActivity', () => {
   });
 
   it('shows what a running agent is doing right now: tool and short argument', async () => {
-    currentTools.set('runner', { name: 'bash', input: { command: 'bun run test src/lib/charts --reporter=dot' } });
+    currentTools.set('runner', {
+      name: 'bash',
+      input: { command: 'bun run test src/lib/charts --reporter=dot' },
+    });
     try {
       await openDetails(makeRail([makeAgent({ id: 'runner', status: 'tool_calling' })]));
       expect(within(rowOf('runner')).getByText(/^Running tool: bash · bun run test/)).toBeTruthy();
@@ -138,13 +143,20 @@ describe('AgentActivity', () => {
     await openDetails(
       makeRail([
         makeAgent({ id: 'critic', name: 'Critic', status: 'criticizing' }),
-        makeAgent({ id: 'reviewer', name: 'Review Specialist', status: 'tool_calling', parentAgentId: 'critic' }),
+        makeAgent({
+          id: 'reviewer',
+          name: 'Review Specialist',
+          status: 'tool_calling',
+          parentAgentId: 'critic',
+        }),
         makeAgent({ id: 'probe', name: 'Probe', status: 'thinking', parentAgentId: 'reviewer' }),
         makeAgent({ id: 'other', name: 'Other', status: 'thinking' }),
       ]),
     );
 
-    const order = [...document.querySelectorAll<HTMLElement>('[data-agent-id]')].map((row) => row.dataset.agentId);
+    const order = [...document.querySelectorAll<HTMLElement>('[data-agent-id]')].map(
+      (row) => row.dataset.agentId,
+    );
     expect(order).toEqual(['critic', 'reviewer', 'probe', 'other']);
     expect(rowOf('critic').dataset.depth).toBe('0');
     expect(rowOf('reviewer').dataset.depth).toBe('1');
@@ -161,7 +173,9 @@ describe('AgentActivity', () => {
         makeAgent({ id: 'ask', status: 'waiting_user' }),
       ]),
     );
-    const order = [...document.querySelectorAll<HTMLElement>('[data-agent-id]')].map((row) => row.dataset.agentId);
+    const order = [...document.querySelectorAll<HTMLElement>('[data-agent-id]')].map(
+      (row) => row.dataset.agentId,
+    );
     expect(order).toEqual(['ask', 'fail', 'run', 'done']);
   });
 
@@ -201,11 +215,15 @@ describe('AgentActivity', () => {
     await fireEvent.click(toggle);
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(within(rowOf('x')).getByText(longTask)).toBeTruthy();
-    expect(within(rowOf('x')).getByText(/stopped with an error before reporting a result/)).toBeTruthy();
+    expect(
+      within(rowOf('x')).getByText(/stopped with an error before reporting a result/),
+    ).toBeTruthy();
   });
 
   it('folds finished agents behind one disclosure when many have run', async () => {
-    const finished = Array.from({ length: 6 }, (_, i) => makeAgent({ id: `f${i}`, status: 'done' }));
+    const finished = Array.from({ length: 6 }, (_, i) =>
+      makeAgent({ id: `f${i}`, status: 'done' }),
+    );
     await openDetails(makeRail([makeAgent({ id: 'live', status: 'thinking' }), ...finished]));
 
     expect(document.querySelectorAll('[data-group="finished"]')).toHaveLength(3);
@@ -217,7 +235,9 @@ describe('AgentActivity', () => {
   });
 
   it('opens an agent chat from its row', async () => {
-    const rail = makeRail([makeAgent({ id: 'w', name: 'A very long worker name that will be truncated in the row' })]);
+    const rail = makeRail([
+      makeAgent({ id: 'w', name: 'A very long worker name that will be truncated in the row' }),
+    ]);
     await openDetails(rail);
     await fireEvent.click(screen.getByRole('button', { name: /^Open A very long worker name/ }));
     expect(rail.selectAgent).toHaveBeenCalledWith('w');

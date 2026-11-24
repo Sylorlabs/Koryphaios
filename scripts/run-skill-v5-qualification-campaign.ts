@@ -25,7 +25,11 @@ import {
 } from '../backend/src/kory/skill-evaluations';
 import { hasCompleteCurrentSkillPair } from '../backend/src/eval/skills/skill-eval-campaign-resume';
 import { assertPackagedEvalBackend } from './eval-backend-guard';
-import { applyPermissionMode, isEvalPermissionMode, restorePermissionMode } from './eval-permission';
+import {
+  applyPermissionMode,
+  isEvalPermissionMode,
+  restorePermissionMode,
+} from './eval-permission';
 import { skillEvaluationV5ContractHash } from '../backend/src/eval/skills/skill-eval-contract-hash';
 import {
   loadV5SkillPackages,
@@ -247,7 +251,9 @@ for (const skillPackage of selectedPackages) {
     : null;
   for (const task of skillPackage.evaluation.tasks) {
     if (requestedScenarios.size && !requestedScenarios.has(task.id)) continue;
-    const sources = openRegressionSources?.filter((run) => (run.scenarioId ?? run.caseId) === task.id);
+    const sources = openRegressionSources?.filter(
+      (run) => (run.scenarioId ?? run.caseId) === task.id,
+    );
     if (sources && !sources.length) continue;
     if (!readinessByScenario.get(task.id)?.ready) continue;
     const evaluationContractHash = contractHash(skillPackage, task);
@@ -270,7 +276,13 @@ for (const skillPackage of selectedPackages) {
       continue;
     }
     for (const source of sources ?? [undefined]) {
-      queued.push({ skillPackage, revision, task, evaluationContractHash, regressionId: source?.id });
+      queued.push({
+        skillPackage,
+        revision,
+        task,
+        evaluationContractHash,
+        regressionId: source?.id,
+      });
     }
   }
 }

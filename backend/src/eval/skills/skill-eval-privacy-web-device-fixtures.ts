@@ -327,10 +327,7 @@ test('hidden: postMessage/return/cookie boundaries fail closed',()=>{for(const m
     const spec = readJsonArtifact<{
       sourceSinkInventory?: unknown;
       postMessage?: { expectedOrigin?: unknown; outgoingTargetOrigin?: unknown };
-    }>(
-      workingDirectory,
-      '.kory-eval/dashboard-web.json',
-    );
+    }>(workingDirectory, '.kory-eval/dashboard-web.json');
     const mutationInventory = hasCookieMutationInventory(spec?.sourceSinkInventory);
     const expectedPaymentOrigin = (
       JSON.parse(WEB_CORPUS) as { dashboard: { paymentOrigin: string } }

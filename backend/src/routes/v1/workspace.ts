@@ -537,12 +537,11 @@ export const workspaceRoutes = new Elysia({ prefix: '/api/workspace' })
       }
     }
 
-    const platformOpener =
-      isMac()
-        ? (['open', [canonical]] as const)
-        : isWindows()
-          ? (['cmd', ['/c', 'start', '', canonical]] as const)
-          : (['xdg-open', [canonical]] as const);
+    const platformOpener = isMac()
+      ? (['open', [canonical]] as const)
+      : isWindows()
+        ? (['cmd', ['/c', 'start', '', canonical]] as const)
+        : (['xdg-open', [canonical]] as const);
     if (await trySpawnEditor(platformOpener[0], [...platformOpener[1]])) {
       return { ok: true, data: { path: canonical, line, openedWith: platformOpener[0] } };
     }

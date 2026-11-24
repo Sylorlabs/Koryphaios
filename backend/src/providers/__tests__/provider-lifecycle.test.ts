@@ -13,7 +13,13 @@ import { ClaudeCodeProvider, __resetClaudeCodeModelCacheForTesting } from '../cl
 import { CodexCliProvider } from '../codex-cli';
 import { OpenCodeCliProvider } from '../opencode-cli';
 import { ProviderRegistry } from '../registry';
-import { lifecycleCapabilities, type LifecycleCapabilities, type Provider, type ProviderEvent, type StreamRequest } from '../types';
+import {
+  lifecycleCapabilities,
+  type LifecycleCapabilities,
+  type Provider,
+  type ProviderEvent,
+  type StreamRequest,
+} from '../types';
 import { createReplaySpawn } from '../replay/replay-process';
 import { loadTranscript } from '../replay/transcript';
 import { createCliSandbox, type CliSandbox } from '../replay/__tests__/support';
@@ -123,23 +129,31 @@ describe('provider lifecycle capabilities', () => {
     expect(statuses.find((entry) => entry.name === 'opencode')?.lifecycle).toEqual(
       OPENCODE_CAPABILITIES,
     );
-    expect(statuses.find((entry) => entry.name === 'remote-lifecycle-undeclared')?.lifecycle).toEqual(
-      DEFAULT_CAPABILITIES,
-    );
+    expect(
+      statuses.find((entry) => entry.name === 'remote-lifecycle-undeclared')?.lifecycle,
+    ).toEqual(DEFAULT_CAPABILITIES);
   });
 });
 
 describe('argv guards behind resume=false', () => {
   test('codex runs every turn with --ephemeral and never resumes a thread', async () => {
     const transcript = loadTranscript(join(FIXTURES, 'codex-synthetic-turn.jsonl'));
-    const spawnChild = createReplaySpawn((_command, args) => (args.includes('exec') ? transcript : null));
-    const provider = new CodexCliProvider({ name: 'codex' } as ProviderConfig, spawnChild as never, sandbox.home);
+    const spawnChild = createReplaySpawn((_command, args) =>
+      args.includes('exec') ? transcript : null,
+    );
+    const provider = new CodexCliProvider(
+      { name: 'codex' } as ProviderConfig,
+      spawnChild as never,
+      sandbox.home,
+    );
     await collect(provider.streamResponse(request('gpt-5-codex')));
 
     const turn = spawnChild.calls.find((call) => call.args.includes('exec'));
     expect(turn).toBeDefined();
     expect(turn!.args).toContain('--ephemeral');
-    expect(turn!.args.some((arg) => arg === 'resume' || arg === '--resume' || arg === '--last')).toBe(false);
+    expect(
+      turn!.args.some((arg) => arg === 'resume' || arg === '--resume' || arg === '--last'),
+    ).toBe(false);
   });
 
   test('claude turn argv carries no resume or session-id flag', async () => {

@@ -66,7 +66,9 @@ interface Watch {
 /** Per-chat PR watches. Keyed by session id; a stopped watch removes itself. */
 const watches = new Map<string, Watch>();
 
-function linkOf(session: { gitWorkspace?: { selection?: { pullRequest?: { number: number; repository: string } } } }): PullRequestLink | null {
+function linkOf(session: {
+  gitWorkspace?: { selection?: { pullRequest?: { number: number; repository: string } } };
+}): PullRequestLink | null {
   const pr = session.gitWorkspace?.selection?.pullRequest;
   if (!pr || !Number.isSafeInteger(pr.number) || typeof pr.repository !== 'string') return null;
   return { repository: pr.repository, number: pr.number };
@@ -133,7 +135,10 @@ function refresh(watch: Watch): Promise<void> {
       watch.lastError = undefined;
       if (changed) publish(watch, next);
     } catch (error) {
-      watch.lastError = error instanceof Error ? error.message.slice(0, 400) : 'Could not read pull request status.';
+      watch.lastError =
+        error instanceof Error
+          ? error.message.slice(0, 400)
+          : 'Could not read pull request status.';
       serverLog.debug({ sessionId: watch.sessionId }, 'Pull request status read failed');
     } finally {
       watch.lastFetchAt = Date.now();
@@ -281,15 +286,24 @@ export async function sendPullRequestFeedbackToAgent(
   const status = view.status;
   const failing = status.checks.filter((check) => FAILING_STATES.has(check.state));
   const reviews = status.reviews
-    .filter((review) => (review.state === 'changes_requested' || review.state === 'commented') && review.body.length > 0)
+    .filter(
+      (review) =>
+        (review.state === 'changes_requested' || review.state === 'commented') &&
+        review.body.length > 0,
+    )
     .slice(-REVIEW_ITEM_LIMIT)
-    .map((review) => ({ ...review, body: boundLines(review.body.split('\n'), 40, PR_TEXT_LIMIT).lines.join('\n') }));
+    .map((review) => ({
+      ...review,
+      body: boundLines(review.body.split('\n'), 40, PR_TEXT_LIMIT).lines.join('\n'),
+    }));
   if (failing.length === 0 && reviews.length === 0) {
     throw new ValidationError('Nothing is failing or waiting for changes on this pull request.');
   }
 
   const logs = new Map<string, { text: string; truncated: boolean } | { error: string }>();
-  const runIds = [...new Set(failing.map((check) => check.runId).filter((id): id is string => Boolean(id)))];
+  const runIds = [
+    ...new Set(failing.map((check) => check.runId).filter((id): id is string => Boolean(id))),
+  ];
   for (const runId of runIds.slice(0, FAILED_CHECK_LOG_LIMIT)) {
     try {
       logs.set(runId, await readFailedRunLogTail(status.repository, runId));
@@ -309,7 +323,9 @@ export async function sendPullRequestFeedbackToAgent(
     userMessage,
   });
   if (submission.accepted === false) {
-    throw new ConflictError('The chat could not accept pull request feedback now. Try again in a moment.');
+    throw new ConflictError(
+      'The chat could not accept pull request feedback now. Try again in a moment.',
+    );
   }
   if (submission.accepted === true) {
     void submission.completion.catch(() => undefined);

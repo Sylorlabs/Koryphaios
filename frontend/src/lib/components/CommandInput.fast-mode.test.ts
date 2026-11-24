@@ -15,9 +15,8 @@ const { catalog } = vi.hoisted(() => ({
     name: 'devin',
     id: 'claude-opus-5-5',
     label: 'Claude Opus 5.5',
-    speedTiers: [
-      { id: 'fast', label: 'Fast', description: 'Test fast tier.' },
-    ] as ModelSpeedTier[] | undefined,
+    speedTiers: [{ id: 'fast', label: 'Fast', description: 'Test fast tier.' }] as
+      ModelSpeedTier[] | undefined,
   },
 }));
 
@@ -121,9 +120,7 @@ describe('composer speed-tier control', () => {
     const { rerender } = composer();
     await screen.findByTestId('composer-fast-control');
     await rerender({ selectedModel: 'devin:plain-model' });
-    await waitFor(() =>
-      expect(screen.queryByTestId('composer-fast-control')).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByTestId('composer-fast-control')).toBeNull());
   });
 
   it('selects a tier directly from the menu and persists it per provider:model', async () => {

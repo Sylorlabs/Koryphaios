@@ -72,9 +72,7 @@ describe('ProjectIconContextMenu', () => {
     });
 
     await fireEvent.click(screen.getByRole('menuitem', { name: /Delete chats/i }));
-    await waitFor(() =>
-      expect(onaction).toHaveBeenCalledWith('delete_project_chats:%2Fsolo'),
-    );
+    await waitFor(() => expect(onaction).toHaveBeenCalledWith('delete_project_chats:%2Fsolo'));
   });
 
   it('supports Escape dismissal and restores focus to the trigger', async () => {

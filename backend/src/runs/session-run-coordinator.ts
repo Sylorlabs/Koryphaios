@@ -22,10 +22,7 @@ import {
   type SessionRunRestartHandoff,
   type SessionTurnCommandRecord,
 } from './session-run-store';
-import {
-  RunResumptionStore,
-  type RunResumeRecord,
-} from './run-resumption-store';
+import { RunResumptionStore, type RunResumeRecord } from './run-resumption-store';
 
 /** Source-command prefix for host-authored continuations of interrupted runs. */
 export const RESTART_RESUME_SOURCE_PREFIX = 'resume:';

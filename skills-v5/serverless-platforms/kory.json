@@ -5,24 +5,13 @@
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "cloud",
-    "serverless",
-    "functions"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["cloud", "serverless", "functions"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 9000,
-  "broader": [
-    "network-service-backend"
-  ],
+  "broader": ["network-service-backend"],
   "facets": [],
-  "requires": [
-    "verification",
-    "reliability-verification"
-  ],
+  "requires": ["verification", "reliability-verification"],
   "conflicts": [],
   "activation": [
     "serverless function",
@@ -104,13 +93,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "event-driven-architecture"
-        ],
-        "tags": [
-          "ambiguous",
-          "neighbor-boundary"
-        ]
+        "adjacentSkills": ["event-driven-architecture"],
+        "tags": ["ambiguous", "neighbor-boundary"]
       },
       {
         "id": "serverless-platforms-ambiguous-2",
@@ -118,13 +102,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "network-service-backend"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["network-service-backend"],
+        "tags": ["ambiguous", "scope-control"]
       },
       {
         "id": "serverless-platforms-ambiguous-3",
@@ -132,13 +111,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "edge-cdn"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["edge-cdn"],
+        "tags": ["ambiguous", "scope-control"]
       }
     ],
     "adversarial": [
@@ -148,13 +122,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "technical-communication"
-        ],
-        "tags": [
-          "adversarial",
-          "quoted-decoy"
-        ]
+        "adjacentSkills": ["technical-communication"],
+        "tags": ["adversarial", "quoted-decoy"]
       },
       {
         "id": "serverless-platforms-adversarial-2",
@@ -162,13 +131,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "documents-communication"
-        ],
-        "tags": [
-          "adversarial",
-          "inert-evidence"
-        ]
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "inert-evidence"]
       },
       {
         "id": "serverless-platforms-adversarial-3",
@@ -176,13 +140,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "documents-communication"
-        ],
-        "tags": [
-          "adversarial",
-          "filename-decoy"
-        ]
+        "adjacentSkills": ["documents-communication"],
+        "tags": ["adversarial", "filename-decoy"]
       }
     ]
   },

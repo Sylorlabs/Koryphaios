@@ -55,7 +55,7 @@ value, compare arrays recursively in order, and compare objects recursively with
 key order ignored. Preserve the distinction between a missing field and an
 explicit `null`. The same structural comparison must be used when correlating a
 request with a result, an approval with an action, or evidence with a revision;
-  `===` is not a valid equality rule for object-valued JSON identifiers.
+`===` is not a valid equality rule for object-valued JSON identifiers.
 
 ### Label the evidence boundary and retain scenario traces
 
@@ -69,12 +69,12 @@ example, scorer result, or agent prose must not be relabeled as a live receipt.
 For every required negative or recovery path, retain one trace row with the
 event sequence, current revision/evidence generation, approval or scope
 decision, operation identity when relevant, budget charge, state transition,
-  terminal decision, observed result, and missing evidence field. Use
+terminal decision, observed result, and missing evidence field. Use
 `observedResult: null` and `executionStatus: unverified` when the runtime was not
-  executed. The package local trace fixture at
+executed. The package local trace fixture at
 [`evals/fixtures/trace-evidence.json`](evals/fixtures/trace-evidence.json)
 defines this boundary for denied approval, deployment races, timeout recovery,
-  no progress termination, unavailable oracles, events that only verify, invalidated
+no progress termination, unavailable oracles, events that only verify, invalidated
 health, delegation rejection, resume, stale memory, and conflicting evidence.
 
 For the registered pure execution state exercise, the deliverable must include

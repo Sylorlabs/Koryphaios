@@ -12,12 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { isAbsolute, join, normalize } from 'node:path';
-import {
-  hasUnexpectedMode,
-  hasUnexpectedOwner,
-  hostOS,
-  isContainedBy,
-} from '../runtime/platform';
+import { hasUnexpectedMode, hasUnexpectedOwner, hostOS, isContainedBy } from '../runtime/platform';
 
 /**
  * Verified against native Freebuff 0.2.12 (npm launcher 0.0.173):
@@ -237,11 +232,7 @@ function privateDirectory(path: string, create: boolean): void {
     }
   }
   const stat = lstatSync(path);
-  if (
-    !stat.isDirectory() ||
-    hasUnexpectedMode(stat, 0o700) ||
-    hasUnexpectedOwner(stat)
-  )
+  if (!stat.isDirectory() || hasUnexpectedMode(stat, 0o700) || hasUnexpectedOwner(stat))
     throw new Error('unsafe private directory');
 }
 

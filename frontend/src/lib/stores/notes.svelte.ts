@@ -803,7 +803,8 @@ async function resolveNoteTarget(target: NoteLinkTarget): Promise<string | null>
   /** Match exact catalog IDs, folder paths, or project source paths. */
   const matches = (): Note[] => {
     if ('id' in target) return _notes.filter((note) => note.id === target.id);
-    if ('title' in target) return _notes.filter((note) => note.title.toLowerCase() === target.title.toLowerCase());
+    if ('title' in target)
+      return _notes.filter((note) => note.title.toLowerCase() === target.title.toLowerCase());
     const path = target.path.replace(/^\//, '');
     return _notes.filter((note) => {
       const folderPath = `${note.folderPath.replace(/\/$/, '')}/${note.title}`.replace(/^\//, '');
@@ -817,9 +818,11 @@ async function resolveNoteTarget(target: NoteLinkTarget): Promise<string | null>
   if (!requestScopeIsCurrent(requestProject, requestGeneration)) return null;
   const found = matches();
   if (found.length !== 1) {
-    toastStore.error(found.length > 1
-      ? 'Several notes match this link. Use a note ID or a complete note path.'
-      : 'The linked note was not found in this project.');
+    toastStore.error(
+      found.length > 1
+        ? 'Several notes match this link. Use a note ID or a complete note path.'
+        : 'The linked note was not found in this project.',
+    );
     return null;
   }
   return found[0].id;
@@ -986,7 +989,10 @@ async function createChatFinding(input: ChatFindingInput): Promise<Note | null> 
 }
 
 /** Save presentation metadata without disturbing document revisions or drafts. */
-async function setNoteIcon(id: string, icon: import('@koryphaios/shared').NoteIcon | null): Promise<boolean> {
+async function setNoteIcon(
+  id: string,
+  icon: import('@koryphaios/shared').NoteIcon | null,
+): Promise<boolean> {
   const requestProject = projectStore.currentPath;
   const requestGeneration = _projectGeneration;
   const mutation = beginLocalMutation();
@@ -995,18 +1001,26 @@ async function setNoteIcon(id: string, icon: import('@koryphaios/shared').NoteIc
     if (!isDemoMode) {
       const response = await apiFetch(apiUrl(`/api/notes/${encodeURIComponent(id)}/icon`), {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...mutation.headers,
-          ...(requestProject ? { 'X-Koryphaios-Project': requestProject } : {}) },
+        headers: {
+          'Content-Type': 'application/json',
+          ...mutation.headers,
+          ...(requestProject ? { 'X-Koryphaios-Project': requestProject } : {}),
+        },
         body: JSON.stringify({ icon }),
       });
-      if (!response.ok) throw new Error(await responseMessage(response, 'Failed to save note icon'));
+      if (!response.ok)
+        throw new Error(await responseMessage(response, 'Failed to save note icon'));
     }
     succeeded = true;
     if (!requestScopeIsCurrent(requestProject, requestGeneration)) return false;
-    _notes = _notes.map((note) => note.id === id ? { ...note, icon: icon ?? undefined } : note);
+    _notes = _notes.map((note) => (note.id === id ? { ...note, icon: icon ?? undefined } : note));
     if (_currentNote?.id === id) _currentNote = { ..._currentNote, icon: icon ?? undefined };
-    _graphData = { ..._graphData, nodes: _graphData.nodes.map((node) =>
-      node.id === id ? { ...node, icon: icon ?? undefined } : node) };
+    _graphData = {
+      ..._graphData,
+      nodes: _graphData.nodes.map((node) =>
+        node.id === id ? { ...node, icon: icon ?? undefined } : node,
+      ),
+    };
     return true;
   } catch (error) {
     if (requestScopeIsCurrent(requestProject, requestGeneration))
@@ -2165,7 +2179,11 @@ async function flushRealtimeUpdates(): Promise<void> {
         continue;
       }
       if (!existing || existing.folderPath !== remote.folderPath) needsFolderRefresh = true;
-      if (currentBeforeRefresh && _currentNote?.id === id && remote.revision === currentBeforeRefresh.revision) {
+      if (
+        currentBeforeRefresh &&
+        _currentNote?.id === id &&
+        remote.revision === currentBeforeRefresh.revision
+      ) {
         _currentNote = { ..._currentNote, icon: remote.icon };
       }
       if (

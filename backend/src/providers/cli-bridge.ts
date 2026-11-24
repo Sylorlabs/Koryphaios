@@ -143,7 +143,13 @@ export interface CliTrajectoryStep {
   source: 'system' | 'user' | 'agent' | 'tool' | string;
   message?: string;
   reasoning?: string;
-  toolCalls?: Array<{ id?: string; name: string; input: Record<string, unknown>; output?: string; isError?: boolean }>;
+  toolCalls?: Array<{
+    id?: string;
+    name: string;
+    input: Record<string, unknown>;
+    output?: string;
+    isError?: boolean;
+  }>;
   modelName?: string;
   generationModel?: string;
   metrics?: Record<string, unknown>;

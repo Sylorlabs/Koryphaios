@@ -69,8 +69,20 @@ async function newChat(title = 'Merge source') {
 async function sourceWithFork(options: { attachment?: boolean } = {}) {
   const sourceId = await newChat();
   const store = new MessageStore();
-  await store.add(sourceId, { id: `base-u-${sourceId}`, sessionId: sourceId, role: 'user', content: 'shared history', createdAt: 2_000 });
-  await store.add(sourceId, { id: `base-a-${sourceId}`, sessionId: sourceId, role: 'assistant', content: 'shared reply', createdAt: 2_001 });
+  await store.add(sourceId, {
+    id: `base-u-${sourceId}`,
+    sessionId: sourceId,
+    role: 'user',
+    content: 'shared history',
+    createdAt: 2_000,
+  });
+  await store.add(sourceId, {
+    id: `base-a-${sourceId}`,
+    sessionId: sourceId,
+    role: 'assistant',
+    content: 'shared reply',
+    createdAt: 2_001,
+  });
   const { session } = forkChatCoordinatedSync(sourceId);
   await store.add(session.id, {
     id: `fork-u-${session.id}`,
@@ -78,24 +90,41 @@ async function sourceWithFork(options: { attachment?: boolean } = {}) {
     role: 'user',
     content: 'try the other approach',
     ...(options.attachment
-      ? { attachments: [{ type: 'image' as const, name: 'diagram.png', data: 'AAAA', mimeType: 'image/png' }] }
+      ? {
+          attachments: [
+            { type: 'image' as const, name: 'diagram.png', data: 'AAAA', mimeType: 'image/png' },
+          ],
+        }
       : {}),
     createdAt: 3_000,
   });
-  await store.add(session.id, { id: `fork-a-${session.id}`, sessionId: session.id, role: 'assistant', content: 'the other approach worked', createdAt: 3_001 });
+  await store.add(session.id, {
+    id: `fork-a-${session.id}`,
+    sessionId: session.id,
+    role: 'assistant',
+    content: 'the other approach worked',
+    createdAt: 3_001,
+  });
   return { sourceId, forkId: session.id, store };
 }
 
 /** Fork creation without the event harness, for fixtures. */
 function forkChatCoordinatedSync(sourceId: string) {
-  const { forkSessionAtMessage } = require('./session-fork-service') as typeof import('./session-fork-service');
+  const { forkSessionAtMessage } =
+    require('./session-fork-service') as typeof import('./session-fork-service');
   return forkSessionAtMessage({ sourceSessionId: sourceId });
 }
 
 describe('forkChatCoordinated', () => {
   it('creates the fork, prepares it, and publishes session.updated for the fork and session.forked on the source', async () => {
     const sourceId = await newChat('Coordinated source');
-    await new MessageStore().add(sourceId, { id: uniq('m'), sessionId: sourceId, role: 'user', content: 'hi', createdAt: 2_000 });
+    await new MessageStore().add(sourceId, {
+      id: uniq('m'),
+      sessionId: sourceId,
+      role: 'user',
+      content: 'hi',
+      createdAt: 2_000,
+    });
     const { deps, published, prepared } = harness();
 
     const outcome = await forkChatCoordinated({ sourceSessionId: sourceId }, deps);
@@ -108,17 +137,31 @@ describe('forkChatCoordinated', () => {
     const forked = published.find((event) => event.type === 'session.forked');
     expect(forked).toMatchObject({
       sessionId: sourceId,
-      payload: { sourceSessionId: sourceId, copiedMessageCount: 1, forkMessageId: outcome.forkMessageId },
+      payload: {
+        sourceSessionId: sourceId,
+        copiedMessageCount: 1,
+        forkMessageId: outcome.forkMessageId,
+      },
     });
   });
 
   it('refuses while the creation lease is held (delete-all in progress) and for an unknown source', async () => {
     const sourceId = await newChat();
-    await new MessageStore().add(sourceId, { id: uniq('m'), sessionId: sourceId, role: 'user', content: 'hi', createdAt: 2_000 });
+    await new MessageStore().add(sourceId, {
+      id: uniq('m'),
+      sessionId: sourceId,
+      role: 'user',
+      content: 'hi',
+      createdAt: 2_000,
+    });
     const blocked = harness({ tryAcquireCreationLease: () => null });
-    await expect(forkChatCoordinated({ sourceSessionId: sourceId }, blocked.deps)).rejects.toThrow(ConflictError);
+    await expect(forkChatCoordinated({ sourceSessionId: sourceId }, blocked.deps)).rejects.toThrow(
+      ConflictError,
+    );
     expect(blocked.published).toHaveLength(0);
-    await expect(forkChatCoordinated({ sourceSessionId: uniq('missing') }, harness().deps)).rejects.toThrow(NotFoundError);
+    await expect(
+      forkChatCoordinated({ sourceSessionId: uniq('missing') }, harness().deps),
+    ).rejects.toThrow(NotFoundError);
   });
 });
 
@@ -148,19 +191,32 @@ describe('mergeForkCoordinated', () => {
     const merged = published.find((event) => event.type === 'session.merged');
     expect(merged).toMatchObject({
       sessionId: sourceId,
-      payload: { sourceSessionId: sourceId, forkSessionId: forkId, mode: 'summary', messageId: outcome.messageId },
+      payload: {
+        sourceSessionId: sourceId,
+        forkSessionId: forkId,
+        mode: 'summary',
+        messageId: outcome.messageId,
+      },
     });
-    expect(published.filter((event) => event.type === 'session.updated').map((event) => event.sessionId).sort()).toEqual(
-      [forkId, sourceId].sort(),
-    );
+    expect(
+      published
+        .filter((event) => event.type === 'session.updated')
+        .map((event) => event.sessionId)
+        .sort(),
+    ).toEqual([forkId, sourceId].sort());
   });
 
   it('messages mode quotes only the fork new messages, in order, and notes skipped attachments', async () => {
     const { sourceId, forkId, store } = await sourceWithFork({ attachment: true });
-    const outcome = await mergeForkCoordinated({ forkSessionId: forkId, mode: 'messages' }, harness().deps);
+    const outcome = await mergeForkCoordinated(
+      { forkSessionId: forkId, mode: 'messages' },
+      harness().deps,
+    );
 
     const entry = (await store.getAll(sourceId)).find((m) => m.id === outcome.messageId)!;
-    expect(entry.content).toContain('User: try the other approach\n\nAssistant: the other approach worked');
+    expect(entry.content).toContain(
+      'User: try the other approach\n\nAssistant: the other approach worked',
+    );
     expect(entry.content).not.toContain('shared history');
     expect(entry.content).toContain('1 attachment from the fork was not copied.');
   });
@@ -170,20 +226,35 @@ describe('mergeForkCoordinated', () => {
     await mergeForkCoordinated({ forkSessionId: forkId, mode: 'summary' }, harness().deps);
     const count = (await store.getAll(sourceId)).length;
 
-    await expect(mergeForkCoordinated({ forkSessionId: forkId, mode: 'messages' }, harness().deps)).rejects.toThrow(ConflictError);
+    await expect(
+      mergeForkCoordinated({ forkSessionId: forkId, mode: 'messages' }, harness().deps),
+    ).rejects.toThrow(ConflictError);
     expect((await store.getAll(sourceId)).length).toBe(count);
   });
 
   it('refuses a fork with nothing new, a chat that is not a fork, and an invalid mode', async () => {
     const sourceId = await newChat();
     const store = new MessageStore();
-    await store.add(sourceId, { id: uniq('m'), sessionId: sourceId, role: 'user', content: 'x', createdAt: 2_000 });
+    await store.add(sourceId, {
+      id: uniq('m'),
+      sessionId: sourceId,
+      role: 'user',
+      content: 'x',
+      createdAt: 2_000,
+    });
     const { session } = forkChatCoordinatedSync(sourceId);
 
-    await expect(mergeForkCoordinated({ forkSessionId: session.id, mode: 'summary' }, harness().deps)).rejects.toThrow(ValidationError);
-    await expect(mergeForkCoordinated({ forkSessionId: sourceId, mode: 'summary' }, harness().deps)).rejects.toThrow(ValidationError);
     await expect(
-      mergeForkCoordinated({ forkSessionId: session.id, mode: 'everything' as 'summary' }, harness().deps),
+      mergeForkCoordinated({ forkSessionId: session.id, mode: 'summary' }, harness().deps),
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      mergeForkCoordinated({ forkSessionId: sourceId, mode: 'summary' }, harness().deps),
+    ).rejects.toThrow(ValidationError);
+    await expect(
+      mergeForkCoordinated(
+        { forkSessionId: session.id, mode: 'everything' as 'summary' },
+        harness().deps,
+      ),
     ).rejects.toThrow(ValidationError);
   });
 
@@ -194,14 +265,24 @@ describe('mergeForkCoordinated', () => {
     const busySource = harness({
       tryAcquireMutationBarrier: (id) => (id === sourceId ? null : { release() {} }),
     });
-    await expect(mergeForkCoordinated({ forkSessionId: forkId, mode: 'summary' }, busySource.deps)).rejects.toThrow(ConflictError);
+    await expect(
+      mergeForkCoordinated({ forkSessionId: forkId, mode: 'summary' }, busySource.deps),
+    ).rejects.toThrow(ConflictError);
 
     let released = 0;
     const busyFork = harness({
       tryAcquireMutationBarrier: (id) =>
-        id === forkId ? null : { release() { released += 1; } },
+        id === forkId
+          ? null
+          : {
+              release() {
+                released += 1;
+              },
+            },
     });
-    await expect(mergeForkCoordinated({ forkSessionId: forkId, mode: 'summary' }, busyFork.deps)).rejects.toThrow(ConflictError);
+    await expect(
+      mergeForkCoordinated({ forkSessionId: forkId, mode: 'summary' }, busyFork.deps),
+    ).rejects.toThrow(ConflictError);
     // The source barrier taken before the fork check is released again.
     expect(released).toBe(1);
 
@@ -212,21 +293,24 @@ describe('mergeForkCoordinated', () => {
 
   it('refuses while the source has a running turn, even when no barrier is visible', async () => {
     const { sourceId, forkId, store } = await sourceWithFork();
-    await db.insert(sessionTurnCommands).values({
-      commandKey: randomBytes(20).toString('hex'),
-      sessionId: sourceId,
-      source: 'user',
-      sourceCommandId: uniq('src'),
-      inputHash: randomBytes(32).toString('hex'),
-      userMessageId: 'command-user-placeholder',
-      responseMessageId: 'command-response-placeholder',
-      runId: uniq('run'),
-      status: 'active',
-      terminalReason: null,
-      createdAt: 2_000,
-      updatedAt: 2_000,
-      finishedAt: null,
-    }).catch(() => undefined);
+    await db
+      .insert(sessionTurnCommands)
+      .values({
+        commandKey: randomBytes(20).toString('hex'),
+        sessionId: sourceId,
+        source: 'user',
+        sourceCommandId: uniq('src'),
+        inputHash: randomBytes(32).toString('hex'),
+        userMessageId: 'command-user-placeholder',
+        responseMessageId: 'command-response-placeholder',
+        runId: uniq('run'),
+        status: 'active',
+        terminalReason: null,
+        createdAt: 2_000,
+        updatedAt: 2_000,
+        finishedAt: null,
+      })
+      .catch(() => undefined);
     // The fixture above is only a probe of the ledger shape; the real check uses a
     // properly derived id pair below.
     const commandKey = randomBytes(20).toString('hex');
@@ -246,7 +330,9 @@ describe('mergeForkCoordinated', () => {
       finishedAt: null,
     });
     const before = (await store.getAll(sourceId)).length;
-    await expect(buildForkMergeDigest({ forkSessionId: forkId, mode: 'summary' })).rejects.toThrow(ConflictError);
+    await expect(buildForkMergeDigest({ forkSessionId: forkId, mode: 'summary' })).rejects.toThrow(
+      ConflictError,
+    );
     expect((await store.getAll(sourceId)).length).toBe(before);
   });
 
@@ -274,6 +360,8 @@ describe('mergeForkCoordinated', () => {
   it('refuses to merge into a source that no longer exists', async () => {
     const { sourceId, forkId } = await sourceWithFork();
     await db.delete(sessions).where(eq(sessions.id, sourceId));
-    await expect(mergeForkCoordinated({ forkSessionId: forkId, mode: 'summary' }, harness().deps)).rejects.toThrow(ConflictError);
+    await expect(
+      mergeForkCoordinated({ forkSessionId: forkId, mode: 'summary' }, harness().deps),
+    ).rejects.toThrow(ConflictError);
   });
 });

@@ -98,27 +98,39 @@ test('only unprovisioned real-browser controls skip missing assets', () => {
     // Invalid explicit selections must fail, not silently become an automatic skip.
     expect(shouldSkipBrowserControl(blockers, { [name]: '' })).toBe(false);
   }
-  expect(shouldSkipBrowserControl(blockers, {
-    BUN_INSTALL_CACHE_DIR: '/explicit/cache', PLAYWRIGHT_BROWSERS_PATH: '/explicit/browsers',
-  })).toBe(false);
+  expect(
+    shouldSkipBrowserControl(blockers, {
+      BUN_INSTALL_CACHE_DIR: '/explicit/cache',
+      PLAYWRIGHT_BROWSERS_PATH: '/explicit/browsers',
+    }),
+  ).toBe(false);
 });
 
 test('Chromium readiness and launch use the identical selected executable without fallback', async () => {
   const root = cache();
   const executable = join(root, 'selected-chromium');
   const path = spyOn(chromium, 'executablePath').mockReturnValue(executable);
-  const launch = spyOn(chromium, 'launch').mockRejectedValue(new Error('Selected executable cannot launch'));
+  const launch = spyOn(chromium, 'launch').mockRejectedValue(
+    new Error('Selected executable cannot launch'),
+  );
   try {
-    expect(chromiumBlockers()).toEqual([`Real Playwright Chromium is unavailable at ${executable}`]);
+    expect(chromiumBlockers()).toEqual([
+      `Real Playwright Chromium is unavailable at ${executable}`,
+    ]);
     // Locator-only fixture. Launch stays mocked and no runtime evidence is credited.
     writeFileSync(executable, 'locator only');
     expect(chromiumBlockers()).toEqual([]);
     expect(chromiumLaunchOptions()).toEqual({ executablePath: executable, headless: true });
-    await expect(withRealChromium(async () => { throw new Error('Unexpected browser callback'); }))
-      .rejects.toThrow('Selected executable cannot launch');
+    await expect(
+      withRealChromium(async () => {
+        throw new Error('Unexpected browser callback');
+      }),
+    ).rejects.toThrow('Selected executable cannot launch');
     expect(launch).toHaveBeenCalledTimes(1);
     expect(launch.mock.calls[0]?.[0]).toEqual({
-      executablePath: executable, headless: true, timeout: 30_000,
+      executablePath: executable,
+      headless: true,
+      timeout: 30_000,
     });
   } finally {
     launch.mockRestore();

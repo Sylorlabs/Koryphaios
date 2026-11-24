@@ -179,79 +179,79 @@ maps each event name to its payload type, and the compiler checks that every eve
 Events marked `unknown` do not yet have a named payload type. Their shape is defined by the
 emitting code, not the contract.
 
-| Event                              | Payload                             |
-| ---------------------------------- | ----------------------------------- |
-| `device.event`                     | `unknown`                           |
-| `agent.spawned`                    | `AgentSpawnedPayload`               |
-| `agent.status`                     | `AgentStatusPayload`                |
-| `agent.completed`                  | `unknown`                           |
-| `agent.error`                      | `unknown`                           |
-| `agent.thread_message`             | `AgentThreadMessagePayload`         |
-| `agent.updated`                    | `AgentUpdatedPayload`               |
-| `agent.message`                    | `AgentMessageEventPayload`          |
-| `agent.steering_queue`             | `AgentSteeringQueuePayload`         |
-| `agent.heartbeat`                  | `AgentHeartbeatPayload`             |
-| `stream.delta`                     | `StreamDeltaPayload`                |
-| `stream.thinking`                  | `ThinkingPayload`                   |
-| `stream.tool_call`                 | `ToolCallPayload`                   |
-| `stream.tool_result`               | `StreamToolResultPayload`           |
-| `stream.usage`                     | `StreamUsagePayload`                |
-| `stream.complete`                  | `StreamCompletePayload`             |
-| `stream.clear_content`             | `StreamClearContentPayload`         |
-| `stream.file_delta`                | `StreamFileDeltaPayload`            |
-| `stream.file_complete`             | `StreamFileCompletePayload`         |
-| `context.detected`                 | `ContextDetectedPayload`            |
-| `session.created`                  | `SessionCreatedPayload`             |
-| `session.updated`                  | `SessionUpdatedPayload`             |
-| `session.deleted`                  | `unknown`                           |
-| `session.changes`                  | `KorySessionChangesPayload`         |
-| `session.changes_resolved`         | `KorySessionChangesResolvedPayload` |
-| `session.accept_changes`           | `unknown`                           |
-| `session.user_message`             | `unknown`                           |
-| `session.idle`                     | `SessionIdlePayload`                |
-| `session.actionable_waits`         | `SessionActionableWaitsPayload`     |
-| `session.actionable_waits.request` | `unknown`                           |
-| `session.timeline_rewritten`       | `SessionTimelineRewrittenPayload`   |
-| `session.replay_skipped`           | `unknown`                           |
-| `session.history_pruned`           | `SessionHistoryPrunedPayload`       |
-| `run.state`                        | `SessionRunStatePayload`            |
-| `turn.provider_completed`          | `TurnProviderCompletedPayload`      |
-| `run.settled`                      | `RunSettledPayload`                 |
-| `compaction.started`               | `unknown`                           |
-| `compaction.progress`              | `CompactionProgressPayload`         |
-| `compaction.completed`             | `unknown`                           |
-| `compaction.failed`                | `unknown`                           |
-| `permission.request`               | `unknown`                           |
-| `permission.response`              | `unknown`                           |
-| `provider.status`                  | `ProviderStatusPayload`             |
-| `provider.rate_limit`              | `RateLimitPayload`                  |
-| `system.error`                     | `ErrorPayload`                      |
-| `system.notification`              | `NotificationPayload`               |
-| `system.info`                      | `unknown`                           |
-| `system.config_updated`            | `unknown`                           |
-| `process.status`                   | `unknown`                           |
-| `process.started`                  | `unknown`                           |
-| `process.exited`                   | `unknown`                           |
-| `kory.thought`                     | `KoryThoughtPayload`                |
-| `kory.routing`                     | `KoryRoutingPayload`                |
-| `kory.skill`                       | `KorySkillPayload`                  |
-| `kory.verification`                | `KoryVerificationPayload`           |
-| `kory.task_breakdown`              | `KoryTaskBreakdownPayload`          |
-| `kory.ask_user`                    | `KoryAskUserPayload`                |
-| `kory.ask_user_resolved`           | `KoryAskUserResolvedPayload`        |
-| `notes.updated`                    | `unknown`                           |
-| `workspace.updated`                | `unknown`                           |
-| `desktop.ui.updated`               | `unknown`                           |
-| `goals.updated`                    | `unknown`                           |
-| `checklists.updated`               | `unknown`                           |
-| `native.command`                   | `NativeCommandPayload`              |
-| `session.forked`                   | `{ sessionId, forkSessionId }` (see docs/chat-forks.md) |
-| `session.merged`                   | `{ sessionId, forkSessionId, messageId }` |
+| Event                              | Payload                                                                     |
+| ---------------------------------- | --------------------------------------------------------------------------- |
+| `device.event`                     | `unknown`                                                                   |
+| `agent.spawned`                    | `AgentSpawnedPayload`                                                       |
+| `agent.status`                     | `AgentStatusPayload`                                                        |
+| `agent.completed`                  | `unknown`                                                                   |
+| `agent.error`                      | `unknown`                                                                   |
+| `agent.thread_message`             | `AgentThreadMessagePayload`                                                 |
+| `agent.updated`                    | `AgentUpdatedPayload`                                                       |
+| `agent.message`                    | `AgentMessageEventPayload`                                                  |
+| `agent.steering_queue`             | `AgentSteeringQueuePayload`                                                 |
+| `agent.heartbeat`                  | `AgentHeartbeatPayload`                                                     |
+| `stream.delta`                     | `StreamDeltaPayload`                                                        |
+| `stream.thinking`                  | `ThinkingPayload`                                                           |
+| `stream.tool_call`                 | `ToolCallPayload`                                                           |
+| `stream.tool_result`               | `StreamToolResultPayload`                                                   |
+| `stream.usage`                     | `StreamUsagePayload`                                                        |
+| `stream.complete`                  | `StreamCompletePayload`                                                     |
+| `stream.clear_content`             | `StreamClearContentPayload`                                                 |
+| `stream.file_delta`                | `StreamFileDeltaPayload`                                                    |
+| `stream.file_complete`             | `StreamFileCompletePayload`                                                 |
+| `context.detected`                 | `ContextDetectedPayload`                                                    |
+| `session.created`                  | `SessionCreatedPayload`                                                     |
+| `session.updated`                  | `SessionUpdatedPayload`                                                     |
+| `session.deleted`                  | `unknown`                                                                   |
+| `session.changes`                  | `KorySessionChangesPayload`                                                 |
+| `session.changes_resolved`         | `KorySessionChangesResolvedPayload`                                         |
+| `session.accept_changes`           | `unknown`                                                                   |
+| `session.user_message`             | `unknown`                                                                   |
+| `session.idle`                     | `SessionIdlePayload`                                                        |
+| `session.actionable_waits`         | `SessionActionableWaitsPayload`                                             |
+| `session.actionable_waits.request` | `unknown`                                                                   |
+| `session.timeline_rewritten`       | `SessionTimelineRewrittenPayload`                                           |
+| `session.replay_skipped`           | `unknown`                                                                   |
+| `session.history_pruned`           | `SessionHistoryPrunedPayload`                                               |
+| `run.state`                        | `SessionRunStatePayload`                                                    |
+| `turn.provider_completed`          | `TurnProviderCompletedPayload`                                              |
+| `run.settled`                      | `RunSettledPayload`                                                         |
+| `compaction.started`               | `unknown`                                                                   |
+| `compaction.progress`              | `CompactionProgressPayload`                                                 |
+| `compaction.completed`             | `unknown`                                                                   |
+| `compaction.failed`                | `unknown`                                                                   |
+| `permission.request`               | `unknown`                                                                   |
+| `permission.response`              | `unknown`                                                                   |
+| `provider.status`                  | `ProviderStatusPayload`                                                     |
+| `provider.rate_limit`              | `RateLimitPayload`                                                          |
+| `system.error`                     | `ErrorPayload`                                                              |
+| `system.notification`              | `NotificationPayload`                                                       |
+| `system.info`                      | `unknown`                                                                   |
+| `system.config_updated`            | `unknown`                                                                   |
+| `process.status`                   | `unknown`                                                                   |
+| `process.started`                  | `unknown`                                                                   |
+| `process.exited`                   | `unknown`                                                                   |
+| `kory.thought`                     | `KoryThoughtPayload`                                                        |
+| `kory.routing`                     | `KoryRoutingPayload`                                                        |
+| `kory.skill`                       | `KorySkillPayload`                                                          |
+| `kory.verification`                | `KoryVerificationPayload`                                                   |
+| `kory.task_breakdown`              | `KoryTaskBreakdownPayload`                                                  |
+| `kory.ask_user`                    | `KoryAskUserPayload`                                                        |
+| `kory.ask_user_resolved`           | `KoryAskUserResolvedPayload`                                                |
+| `notes.updated`                    | `unknown`                                                                   |
+| `workspace.updated`                | `unknown`                                                                   |
+| `desktop.ui.updated`               | `unknown`                                                                   |
+| `goals.updated`                    | `unknown`                                                                   |
+| `checklists.updated`               | `unknown`                                                                   |
+| `native.command`                   | `NativeCommandPayload`                                                      |
+| `session.forked`                   | `{ sessionId, forkSessionId }` (see docs/chat-forks.md)                     |
+| `session.merged`                   | `{ sessionId, forkSessionId, messageId }`                                   |
 | `session.fallback.hop`             | `{ sessionId, messageId, agentId?, fromModel, toModel, reason, stepIndex }` |
-| `session.review_comments`          | `{ sessionId, comments }`           |
-| `session.pull_request_status`      | `{ sessionId, status }`             |
-| `terminal.output`                  | `{ terminalId, seq, data }` (base64, live only) |
-| `terminal.exit`                    | `{ terminalId, exitCode, signal }`  |
+| `session.review_comments`          | `{ sessionId, comments }`                                                   |
+| `session.pull_request_status`      | `{ sessionId, status }`                                                     |
+| `terminal.output`                  | `{ terminalId, seq, data }` (base64, live only)                             |
+| `terminal.exit`                    | `{ terminalId, exitCode, signal }`                                          |
 
 Remote-protocol envelopes (`RemoteOperationEnvelope`, `RemoteReplayRequest`) are separate from
 these events and are defined in the same file.

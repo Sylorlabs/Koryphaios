@@ -68,8 +68,6 @@ describe('notification stack', () => {
     expect(screen.queryByRole('region', { name: 'Notifications' })).not.toBeNull();
 
     toastStore.dismissMany(toastStore.toasts.map((toast) => toast.id));
-    await waitFor(() =>
-      expect(screen.queryByRole('region', { name: 'Notifications' })).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Notifications' })).toBeNull());
   });
 });

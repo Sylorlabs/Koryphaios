@@ -1229,22 +1229,28 @@ describe('migration 0058 notes FTS rowid map', () => {
     expect(counts).toEqual({ notes: noteCount, map: noteCount, fts: noteCount });
     // One map row per note, and the FTS rowid set equals the map rowid set.
     expect(
-      database.query<{ c: number }, []>(
-        `SELECT COUNT(*) AS c FROM notes_fts_rowids
+      database
+        .query<{ c: number }, []>(
+          `SELECT COUNT(*) AS c FROM notes_fts_rowids
          WHERE note_id NOT IN (SELECT id FROM notes)`,
-      ).get()?.c,
+        )
+        .get()?.c,
     ).toBe(0);
     expect(
-      database.query<{ c: number }, []>(
-        `SELECT COUNT(*) AS c FROM notes_fts
+      database
+        .query<{ c: number }, []>(
+          `SELECT COUNT(*) AS c FROM notes_fts
          WHERE rowid NOT IN (SELECT fts_rowid FROM notes_fts_rowids)`,
-      ).get()?.c,
+        )
+        .get()?.c,
     ).toBe(0);
     expect(
-      database.query<{ c: number }, []>(
-        `SELECT COUNT(*) AS c FROM notes_fts_rowids
+      database
+        .query<{ c: number }, []>(
+          `SELECT COUNT(*) AS c FROM notes_fts_rowids
          WHERE fts_rowid NOT IN (SELECT rowid FROM notes_fts)`,
-      ).get()?.c,
+        )
+        .get()?.c,
     ).toBe(0);
   }
 
@@ -1340,11 +1346,9 @@ describe('migration 0058 notes FTS rowid map', () => {
     insertNote(database, 'dup', 'Dup title', 'originalcontent');
     insertNote(database, 'lost', 'Lost title', 'lostword');
     // The 0014 triggers indexed both rows.
-    expect(
-      database
-        .query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes_fts')
-        .get()?.c,
-    ).toBe(2);
+    expect(database.query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes_fts').get()?.c).toBe(
+      2,
+    );
 
     expect(await runner.applyMigration(migration('0058'))).toBe(true);
 
@@ -1358,19 +1362,15 @@ describe('migration 0058 notes FTS rowid map', () => {
       .map((row) => row.sql ?? '');
     for (const sql of triggerSql) expect(sql).not.toMatch(/notes_fts/i);
     expect(
-      database
-        .query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes_fts_rowids')
-        .get()?.c,
+      database.query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes_fts_rowids').get()?.c,
     ).toBe(0);
 
     // With the triggers gone, note writes stop touching FTS entirely — the
     // startup-hang write path is dead even before 0059 lands.
     insertNote(database, 'new', 'New title', 'newword');
-    expect(
-      database
-        .query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes_fts')
-        .get()?.c,
-    ).toBe(2);
+    expect(database.query<{ c: number }, []>('SELECT COUNT(*) AS c FROM notes_fts').get()?.c).toBe(
+      2,
+    );
 
     // After 0059 + the TypeScript backfill path (what compaction runs), every
     // note resolves through the map exactly once.
@@ -1417,7 +1417,9 @@ describe('migration 0059 file-backed notes', () => {
     expect(ftsSql).toContain('detail = column');
     // Contentless: no stored note_id/title/content payload.
     const ftsRow = database
-      .query<{ name: string }, []>(`SELECT name FROM sqlite_master WHERE name = 'notes_fts_content'`)
+      .query<{ name: string }, []>(
+        `SELECT name FROM sqlite_master WHERE name = 'notes_fts_content'`,
+      )
       .get();
     expect(ftsRow?.name).toBeUndefined();
 

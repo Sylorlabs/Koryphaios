@@ -11,11 +11,7 @@
  * - Worker and critic events are neither stamped nor folded.
  */
 
-import {
-  reduceTurnParts,
-  turnEventFromWSMessage,
-  type TranscriptPart,
-} from '@koryphaios/shared';
+import { reduceTurnParts, turnEventFromWSMessage, type TranscriptPart } from '@koryphaios/shared';
 
 interface ActiveTurn {
   messageId: string;
@@ -123,7 +119,9 @@ export function finalizeParts(
   // A persisted turn is over: reasoning a cancelled or failed turn left open
   // (no complete event) ends at persistence time, never renders as live.
   const closed = parts.map((part) =>
-    part.kind === 'reasoning' && part.endedAt === undefined ? { ...part, endedAt: createdAt } : part,
+    part.kind === 'reasoning' && part.endedAt === undefined
+      ? { ...part, endedAt: createdAt }
+      : part,
   );
   const textOf = (list: readonly TranscriptPart[]) =>
     list.map((part) => (part.kind === 'text' ? part.text : '')).join('');

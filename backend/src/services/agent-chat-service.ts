@@ -22,7 +22,12 @@ export async function createAgentChatSession(input: CreateAgentChatInput): Promi
   }
   let session: Session;
   try {
-    const created = await sessions.create('local-user', input.title, undefined, input.workingDirectory);
+    const created = await sessions.create(
+      'local-user',
+      input.title,
+      undefined,
+      input.workingDirectory,
+    );
     session =
       (await sessions.update(created.id, {
         createdByAgent: input.createdByAgent,

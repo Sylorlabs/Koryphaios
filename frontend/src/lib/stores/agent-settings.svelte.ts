@@ -9,7 +9,11 @@
 import { apiUrl } from '$lib/utils/api-url';
 import { toastStore } from './toast.svelte';
 import { apiFetch } from '$lib/api.svelte';
-import { defaultComputerUseSettings, resolveCriticMode, type ComputerUseSettings } from '@koryphaios/shared';
+import {
+  defaultComputerUseSettings,
+  resolveCriticMode,
+  type ComputerUseSettings,
+} from '@koryphaios/shared';
 
 // ============================================================================
 // Types

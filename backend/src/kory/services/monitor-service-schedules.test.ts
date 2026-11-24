@@ -97,7 +97,9 @@ describe('clock and one-shot monitors', () => {
 
     monitor.nextRunAt = Date.now() - 1;
     await runDueMonitorsNow();
-    expect(fake.turns).toEqual([{ sessionId: 'origin', sourceCommandId: `monitor-${monitor.id}-1` }]);
+    expect(fake.turns).toEqual([
+      { sessionId: 'origin', sourceCommandId: `monitor-${monitor.id}-1` },
+    ]);
     const after = getMonitor(monitor.id)!;
     expect(after.status).toBe('active');
     expect(after.nextRunAt).toBeGreaterThan(Date.now());
@@ -140,7 +142,9 @@ describe('clock and one-shot monitors', () => {
     // Simulate the host being off past the scheduled moment: the durable record
     // says the run is due an hour ago, then the host restarts.
     const { readFile: read, writeFile: write } = await import('node:fs/promises');
-    const file = JSON.parse(await read(path, 'utf-8')) as { monitors: Array<{ id: string; nextRunAt: number }> };
+    const file = JSON.parse(await read(path, 'utf-8')) as {
+      monitors: Array<{ id: string; nextRunAt: number }>;
+    };
     for (const entry of file.monitors) {
       if (entry.id === monitor.id) entry.nextRunAt = Date.now() - 3_600_000;
     }
@@ -202,7 +206,10 @@ describe('new-chat target', () => {
     getMonitor(monitor.id)!.nextRunAt = Date.now() - 1;
     await runDueMonitorsNow();
     expect(fake.chatsCreated).toHaveLength(2);
-    expect(fake.turns[1]).toEqual({ sessionId: 'chat-2', sourceCommandId: `monitor-${monitor.id}-2` });
+    expect(fake.turns[1]).toEqual({
+      sessionId: 'chat-2',
+      sourceCommandId: `monitor-${monitor.id}-2`,
+    });
   });
 
   test('a crash after the chat is created reuses that chat on retry instead of opening another', async () => {
@@ -225,7 +232,9 @@ describe('new-chat target', () => {
     getMonitor(monitor.id)!.nextRunAt = Date.now() - 1;
     await runDueMonitorsNow();
     expect(fake.chatsCreated).toHaveLength(1);
-    expect(fake.turns).toEqual([{ sessionId: 'chat-1', sourceCommandId: `monitor-${monitor.id}-1` }]);
+    expect(fake.turns).toEqual([
+      { sessionId: 'chat-1', sourceCommandId: `monitor-${monitor.id}-1` },
+    ]);
   });
 
   test('a new-chat monitor is refused when no chat factory is configured', async () => {
@@ -280,7 +289,11 @@ describe('persistence and the schedule listing', () => {
       schedule: { kind: 'daily', time: '07:45', weekdays: [1, 2, 3, 4, 5] },
       target: 'same_chat',
     });
-    expect(listAllMonitors().map((m) => m.target).sort()).toEqual(['new_chat', 'same_chat']);
+    expect(
+      listAllMonitors()
+        .map((m) => m.target)
+        .sort(),
+    ).toEqual(['new_chat', 'same_chat']);
   });
 
   test('a v1 record with only intervalMs still loads as an interval schedule', async () => {

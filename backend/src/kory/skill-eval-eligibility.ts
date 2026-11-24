@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import {
-  canonicalizePath, hasHardLinks, hasUnexpectedMode, hasUnexpectedOwner, isContainedBy,
+  canonicalizePath,
+  hasHardLinks,
+  hasUnexpectedMode,
+  hasUnexpectedOwner,
+  isContainedBy,
 } from '../runtime/platform';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { exactRecord, strictJson } from '../../../scripts/reviewer-json';
@@ -150,7 +154,8 @@ function nativeReceiptValid(
       // A pathname may become a FIFO or symlink after lstat; do not block or
       // follow it before the existing descriptor identity/protection checks.
       const fd = openSync(
-        artifact.location, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+        artifact.location,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
       );
       try {
         const opened = fstatSync(fd);
@@ -224,7 +229,10 @@ function nativeReceiptValid(
     )
       return false;
     const archive = exactRecord(manifest.nativeTextEventArchive, [
-      'location', 'sha256', 'bytes', 'workspaceRoot',
+      'location',
+      'sha256',
+      'bytes',
+      'workspaceRoot',
     ]);
     if (
       archive.location !== canonicalizePath(streams[0]!.location) ||
@@ -264,8 +272,10 @@ export function skillEvaluationExecutionExclusionReason(
     return OPENCODE_TEXT_PATCH_QUARANTINE_REASON;
   if (/(?:^|:)opencode-stateless-text-patch(?::|$)/u.test(run.harnessVersion))
     return OPENCODE_STATELESS_QUARANTINE_REASON;
-  if (/(?:^|:)local-llama-text-patch(?::|$)/u.test(run.harnessVersion) ||
-    (run.evaluator === 'deterministic' && run.provider === 'local-llama'))
+  if (
+    /(?:^|:)local-llama-text-patch(?::|$)/u.test(run.harnessVersion) ||
+    (run.evaluator === 'deterministic' && run.provider === 'local-llama')
+  )
     return LOCAL_LLAMA_TEXT_PATCH_QUARANTINE_REASON;
   if (
     (/(?:^|:)native-stateless-text-patch(?::|$)/u.test(run.harnessVersion) ||
@@ -290,47 +300,67 @@ function eligibleExecutionPairs(runs: readonly SkillEvaluationRun[]): Set<string
   const byPair = new Map<string, SkillEvaluationRun[]>();
   for (const run of runs) {
     if (
-      run.evaluator !== 'deterministic' || !run.comparisonId ||
-      run.integrityFailure || run.infrastructureFailure ||
+      run.evaluator !== 'deterministic' ||
+      !run.comparisonId ||
+      run.integrityFailure ||
+      run.infrastructureFailure ||
       skillEvaluationExecutionExclusionReason(run)
-    ) continue;
+    )
+      continue;
     const key = pairKey(run);
     byPair.set(key, [...(byPair.get(key) ?? []), run]);
   }
   const eligible = new Set<string>();
   for (const [key, candidates] of byPair) {
     for (const withSkill of candidates.filter((run) => run.variant === 'with-skill')) {
-      if (candidates.some((withoutSkill) =>
-        withoutSkill.variant === 'without-skill' &&
-        withoutSkill.protocolVersion === withSkill.protocolVersion &&
-        withoutSkill.caseId === withSkill.caseId &&
-        withoutSkill.caseCategory === withSkill.caseCategory &&
-        withoutSkill.suiteId === withSkill.suiteId &&
-        withoutSkill.provider === withSkill.provider &&
-        withoutSkill.model === withSkill.model &&
-        withoutSkill.harnessVersion === withSkill.harnessVersion &&
-        withoutSkill.evaluationContractVersion === withSkill.evaluationContractVersion &&
-        withoutSkill.evaluationContractHash === withSkill.evaluationContractHash &&
-        withoutSkill.materializerId === withSkill.materializerId &&
-        withoutSkill.deterministicScorerId === withSkill.deterministicScorerId
-      )) {
-        eligible.add(JSON.stringify([
-          key, withSkill.protocolVersion, withSkill.caseId, withSkill.caseCategory,
-          withSkill.suiteId, withSkill.evaluationContractVersion,
-          withSkill.evaluationContractHash, withSkill.materializerId,
-          withSkill.deterministicScorerId,
-        ]));
+      if (
+        candidates.some(
+          (withoutSkill) =>
+            withoutSkill.variant === 'without-skill' &&
+            withoutSkill.protocolVersion === withSkill.protocolVersion &&
+            withoutSkill.caseId === withSkill.caseId &&
+            withoutSkill.caseCategory === withSkill.caseCategory &&
+            withoutSkill.suiteId === withSkill.suiteId &&
+            withoutSkill.provider === withSkill.provider &&
+            withoutSkill.model === withSkill.model &&
+            withoutSkill.harnessVersion === withSkill.harnessVersion &&
+            withoutSkill.evaluationContractVersion === withSkill.evaluationContractVersion &&
+            withoutSkill.evaluationContractHash === withSkill.evaluationContractHash &&
+            withoutSkill.materializerId === withSkill.materializerId &&
+            withoutSkill.deterministicScorerId === withSkill.deterministicScorerId,
+        )
+      ) {
+        eligible.add(
+          JSON.stringify([
+            key,
+            withSkill.protocolVersion,
+            withSkill.caseId,
+            withSkill.caseCategory,
+            withSkill.suiteId,
+            withSkill.evaluationContractVersion,
+            withSkill.evaluationContractHash,
+            withSkill.materializerId,
+            withSkill.deterministicScorerId,
+          ]),
+        );
       }
     }
   }
   return eligible;
 }
 
-const reviewExecutionKey = (run: SkillEvaluationRun) => JSON.stringify([
-  pairKey(run), run.protocolVersion, run.caseId, run.caseCategory,
-  run.suiteId, run.evaluationContractVersion, run.evaluationContractHash,
-  run.materializerId, run.deterministicScorerId,
-]);
+const reviewExecutionKey = (run: SkillEvaluationRun) =>
+  JSON.stringify([
+    pairKey(run),
+    run.protocolVersion,
+    run.caseId,
+    run.caseCategory,
+    run.suiteId,
+    run.evaluationContractVersion,
+    run.evaluationContractHash,
+    run.materializerId,
+    run.deterministicScorerId,
+  ]);
 
 /** Derived view only: preserve original observations and their scores verbatim. */
 export function selectEligibleSkillEvaluationEvidence(runs: readonly SkillEvaluationRun[]): {
@@ -355,8 +385,8 @@ export function selectEligibleSkillEvaluationEvidence(runs: readonly SkillEvalua
         ? `Review of excluded execution pair ${run.comparisonId}: ${excludedPairs.get(pairKey(run))}`
         : null) ??
       ((run.protocolVersion === 2 || run.protocolVersion === 3) &&
-        (run.evaluator === 'blind-review' || run.evaluator === 'human-blind-review') &&
-        (!run.comparisonId || !executionPairs.has(reviewExecutionKey(run)))
+      (run.evaluator === 'blind-review' || run.evaluator === 'human-blind-review') &&
+      (!run.comparisonId || !executionPairs.has(reviewExecutionKey(run)))
         ? 'Blind review has no eligible matched execution pair with a recorded comparisonId.'
         : null);
     if (reason) excludedEvidence.push({ runId: run.id, reason });

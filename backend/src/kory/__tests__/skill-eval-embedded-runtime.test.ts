@@ -155,7 +155,8 @@ function workspace(scenario: 1 | 2, source: string | null): string {
   const directory = mkdtempSync(join(tmpdir(), `kory-embedded-${scenario}-`));
   workspaces.push(directory);
   embeddedMaterialize(directory, scenario);
-  if (source !== null) writeFileSync(join(directory, scenario === 1 ? 'config_store.c' : 'ring.c'), source);
+  if (source !== null)
+    writeFileSync(join(directory, scenario === 1 ? 'config_store.c' : 'ring.c'), source);
   return directory;
 }
 
@@ -184,7 +185,9 @@ describeIf('embedded firmware on an emulated Cortex-M4', () => {
   test('the brownout scenario fails a single-slot store and passes a two-page journal', () => {
     const starter = runEmbeddedScenario1(workspace(1, null));
     expect(starter.passed).toBe(false);
-    const starterFailures = starter.checks.filter((check) => !check.passed).map((check) => check.id);
+    const starterFailures = starter.checks
+      .filter((check) => !check.passed)
+      .map((check) => check.id);
     expect(starterFailures).toContain('brownout-sweep');
     expect(starterFailures).toContain('wear-rotation');
 
@@ -204,7 +207,9 @@ describeIf('embedded firmware on an emulated Cortex-M4', () => {
   test('the ring scenario fails a silent drop and passes a counted one', () => {
     const starter = runEmbeddedScenario2(workspace(2, null));
     expect(starter.passed).toBe(false);
-    const starterFailures = starter.checks.filter((check) => !check.passed).map((check) => check.id);
+    const starterFailures = starter.checks
+      .filter((check) => !check.passed)
+      .map((check) => check.id);
     expect(starterFailures).toEqual(['overflow-accounted']);
     const overflow = starter.checks.find((check) => check.id === 'overflow-accounted');
     expect(overflow?.detail).toContain('overruns=0');
@@ -223,9 +228,14 @@ describeIf('embedded firmware on an emulated Cortex-M4', () => {
   }, 600_000);
 
   test('the scorers are registered for exactly the two scenarios', () => {
-    expect(EMBEDDED_RUNTIME_SCORERS.map((scorer) => scorer.scenarioIds).flat().sort()).toEqual(
-      [EMBEDDED_SCENARIO_1, EMBEDDED_SCENARIO_2].sort(),
-    );
-    expect(EMBEDDED_RUNTIME_MATERIALIZERS.map((materializer) => materializer.realRuntime)).toEqual([true, true]);
+    expect(
+      EMBEDDED_RUNTIME_SCORERS.map((scorer) => scorer.scenarioIds)
+        .flat()
+        .sort(),
+    ).toEqual([EMBEDDED_SCENARIO_1, EMBEDDED_SCENARIO_2].sort());
+    expect(EMBEDDED_RUNTIME_MATERIALIZERS.map((materializer) => materializer.realRuntime)).toEqual([
+      true,
+      true,
+    ]);
   });
 });

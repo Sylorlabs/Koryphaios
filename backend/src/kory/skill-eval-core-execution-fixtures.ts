@@ -31,23 +31,37 @@ Keep this unrelated draft exactly as-is.
 function runDebugEmptyCli(root: string, privateHome: string) {
   writeFixtureFile(privateHome, 'bunfig.toml', '');
   writeFixtureFile(privateHome, 'setup.ts', `process.chdir(${JSON.stringify(root)});\n`);
-  return spawnSync(process.execPath, [
-    // Bun 1.3.14 silently skips script execution with `run --config`; the private cwd owns bunfig.
-    'run', '--no-env-file', '--preload', join(privateHome, 'setup.ts'), join(root, 'src/cli.ts'),
-    join(root, 'fixture/empty.json'),
-  ], {
-    // As with the test runner, start outside the candidate configuration tree.
-    cwd: privateHome,
-    env: {
-      PATH: process.env.PATH ?? '', HOME: privateHome,
-      XDG_CONFIG_HOME: join(privateHome, 'config'), XDG_CACHE_HOME: join(privateHome, 'cache'),
-      TMPDIR: privateHome, TEMP: privateHome, TMP: privateHome, NO_COLOR: '1', TERM: 'dumb',
+  return spawnSync(
+    process.execPath,
+    [
+      // Bun 1.3.14 silently skips script execution with `run --config`; the private cwd owns bunfig.
+      'run',
+      '--no-env-file',
+      '--preload',
+      join(privateHome, 'setup.ts'),
+      join(root, 'src/cli.ts'),
+      join(root, 'fixture/empty.json'),
+    ],
+    {
+      // As with the test runner, start outside the candidate configuration tree.
+      cwd: privateHome,
+      env: {
+        PATH: process.env.PATH ?? '',
+        HOME: privateHome,
+        XDG_CONFIG_HOME: join(privateHome, 'config'),
+        XDG_CACHE_HOME: join(privateHome, 'cache'),
+        TMPDIR: privateHome,
+        TEMP: privateHome,
+        TMP: privateHome,
+        NO_COLOR: '1',
+        TERM: 'dumb',
+      },
+      encoding: 'utf8',
+      timeout: 15_000,
+      killSignal: 'SIGKILL',
+      maxBuffer: 1_000_000,
     },
-    encoding: 'utf8',
-    timeout: 15_000,
-    killSignal: 'SIGKILL',
-    maxBuffer: 1_000_000,
-  });
+  );
 }
 
 function text(root: string, path: string): string {
@@ -135,7 +149,10 @@ Write \`.kory-eval/debugging-1.json\` with the pre-fix reproduction/error, hypot
 /** Replay candidate-authored checks without mutating the candidate or trusting report claims. */
 function replayDebugEmptyRegression(workingDirectory: string, hiddenSource: string) {
   let root: string | undefined;
-  let hidden = { passed: false, evidence: 'Hidden replay unavailable; no candidate code executed.' };
+  let hidden = {
+    passed: false,
+    evidence: 'Hidden replay unavailable; no candidate code executed.',
+  };
   const evidence: string[] = [
     'Execution owner: evaluation-harness. These are independent post-response replays, not historical or candidate-observed runs.',
     'Execution boundary: credential-stripped disposable processes, not an OS sandbox.',
@@ -150,7 +167,9 @@ function replayDebugEmptyRegression(workingDirectory: string, hiddenSource: stri
     const baseline = runDebugEmptyCli(starter, join(root, 'baseline-home'));
     const baselineOutput = `${baseline.stdout ?? ''}\n${baseline.stderr ?? ''}`.trim();
     const baselineObserved =
-      !baseline.error && baseline.status !== null && baseline.status !== 0 &&
+      !baseline.error &&
+      baseline.status !== null &&
+      baseline.status !== 0 &&
       /TypeError: reduce of empty array with no initial value/iu.test(baselineOutput);
     evidence.push(
       `Host starting CLI: bun run src/cli.ts fixture/empty.json; source=materialized starter; status=${String(baseline.status)}; reproduced=${baselineObserved}.\n${baselineOutput.slice(-2_000)}`,
@@ -184,7 +203,10 @@ function replayDebugEmptyRegression(workingDirectory: string, hiddenSource: stri
         const path = relativeDirectory ? `${relativeDirectory}/${name}` : name;
         const entry = lstatSync(join(workingDirectory, path));
         if (entry.isSymbolicLink()) throw new Error('Debugging replay cannot copy symlinks');
-        if (entry.isDirectory()) { copy(path, depth + 1); continue; }
+        if (entry.isDirectory()) {
+          copy(path, depth + 1);
+          continue;
+        }
         if (path === 'package.json' || path === 'bunfig.toml' || path === '.env') continue;
         const source = readFixtureText(workingDirectory, path);
         if (++files > 200 || (bytes += Buffer.byteLength(source)) > 4_000_000)
@@ -203,9 +225,13 @@ function replayDebugEmptyRegression(workingDirectory: string, hiddenSource: stri
     }
     const discoveredTests = candidateBunTestFiles(corrected);
     const unchanged = (destination: string, restoreOwner = false): boolean =>
-      [...snapshot].every(([path, source]) => fixtureTextEquals(destination, path,
-        restoreOwner && path === 'src/plugin-summary.ts' ? DEBUG_SUMMARY : source)) &&
-      candidateBunTestFiles(destination).join('\n') === discoveredTests.join('\n');
+      [...snapshot].every(([path, source]) =>
+        fixtureTextEquals(
+          destination,
+          path,
+          restoreOwner && path === 'src/plugin-summary.ts' ? DEBUG_SUMMARY : source,
+        ),
+      ) && candidateBunTestFiles(destination).join('\n') === discoveredTests.join('\n');
     const authoredTests = discoveredTests.filter((path) => {
       const source = readFixtureText(corrected, path);
       return !fixtureTextEquals(starter, path, source);
@@ -220,9 +246,17 @@ function replayDebugEmptyRegression(workingDirectory: string, hiddenSource: stri
     writeFixtureFile(regressionStarter, 'src/plugin-summary.ts', DEBUG_SUMMARY);
     const red = runCandidateBunTests(regressionStarter, authoredTests);
     snapshotUnchanged = unchanged(regressionStarter, true) && snapshotUnchanged;
-    const emptyReduceError = /TypeError: reduce of empty array with no initial value/iu.exec(red.output);
-    const regressionObserved = authoredTests.length > 0 && snapshotUnchanged && green.passed && red.completed &&
-      red.exitStatus !== null && red.exitStatus !== 0 && !!emptyReduceError;
+    const emptyReduceError = /TypeError: reduce of empty array with no initial value/iu.exec(
+      red.output,
+    );
+    const regressionObserved =
+      authoredTests.length > 0 &&
+      snapshotUnchanged &&
+      green.passed &&
+      red.completed &&
+      red.exitStatus !== null &&
+      red.exitStatus !== 0 &&
+      !!emptyReduceError;
     evidence.push(
       `Host authored regression green: bun test ${authoredTests.join(' ')}; source=candidate; status=${String(green.exitStatus)}.\n${green.evidence}`,
       `Host authored regression red: same tests, only src/plugin-summary.ts restored to starter; status=${String(red.exitStatus)}.\n${red.evidence}`,
@@ -230,7 +264,11 @@ function replayDebugEmptyRegression(workingDirectory: string, hiddenSource: stri
     );
     const cli = runDebugEmptyCli(corrected, join(root, 'corrected-home'));
     snapshotUnchanged = unchanged(corrected) && snapshotUnchanged;
-    const cliObserved = snapshotUnchanged && !cli.error && cli.status === 0 && /^plugins:\s*$/u.test(cli.stdout ?? '');
+    const cliObserved =
+      snapshotUnchanged &&
+      !cli.error &&
+      cli.status === 0 &&
+      /^plugins:\s*$/u.test(cli.stdout ?? '');
     hidden.passed = hidden.passed && snapshotUnchanged;
     evidence.push(`Replay snapshot integrity: ${snapshotUnchanged ? 'unchanged' : 'modified'}.`);
     evidence.push(
@@ -238,8 +276,16 @@ function replayDebugEmptyRegression(workingDirectory: string, hiddenSource: stri
     );
     return { hidden, baselineObserved, regressionObserved, cliObserved, evidence };
   } catch (error) {
-    evidence.push(`Host replay unavailable: ${error instanceof Error ? error.message : String(error)}.`);
-    return { hidden: { ...hidden, passed: false }, baselineObserved: false, regressionObserved: false, cliObserved: false, evidence };
+    evidence.push(
+      `Host replay unavailable: ${error instanceof Error ? error.message : String(error)}.`,
+    );
+    return {
+      hidden: { ...hidden, passed: false },
+      baselineObserved: false,
+      regressionObserved: false,
+      cliObserved: false,
+      evidence,
+    };
   } finally {
     if (root) rmSync(root, { recursive: true, force: true });
   }
@@ -280,8 +326,8 @@ test('hidden: non-empty, invalid, and later-valid parse/build recovery remain in
       /plugin-summary|buildpluginsummary/u.test(reportText) &&
       /empty|nonempty|non-empty/u.test(reportText) &&
       /repro|typeerror|starting/u.test(reportText);
-    const executionVerified = hidden.passed && replay.baselineObserved &&
-      replay.regressionObserved && replay.cliObserved;
+    const executionVerified =
+      hidden.passed && replay.baselineObserved && replay.regressionObserved && replay.cliObserved;
     const passed = executionVerified && userWork && causal;
     return {
       passed,
@@ -407,7 +453,8 @@ function replayDebugRaceRegression(workingDirectory: string, hiddenSource: strin
       if (depth > 6) throw new Error('Race replay depth budget exceeded');
       const directory = join(workingDirectory, relative);
       const stat = lstatSync(directory);
-      if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Unsafe race replay directory');
+      if (!stat.isDirectory() || stat.isSymbolicLink())
+        throw new Error('Unsafe race replay directory');
       const names: string[] = [];
       const handle = opendirSync(directory);
       try {
@@ -415,13 +462,18 @@ function replayDebugRaceRegression(workingDirectory: string, hiddenSource: strin
           if (++entries > 400) throw new Error('Race replay entry budget exceeded');
           names.push(entry.name);
         }
-      } finally { handle.closeSync(); }
+      } finally {
+        handle.closeSync();
+      }
       for (const name of names.sort()) {
         if (ignored.has(name)) continue;
         const path = relative ? `${relative}/${name}` : name;
         const stat = lstatSync(join(workingDirectory, path));
         if (stat.isSymbolicLink()) throw new Error('Race replay cannot copy symlinks');
-        if (stat.isDirectory()) { copy(path, depth + 1); continue; }
+        if (stat.isDirectory()) {
+          copy(path, depth + 1);
+          continue;
+        }
         if (path === 'package.json' || path === 'bunfig.toml' || path === '.env') continue;
         const content = readFixtureText(workingDirectory, path);
         if (++files > 200 || (bytes += Buffer.byteLength(content)) > 4_000_000)
@@ -437,11 +489,17 @@ function replayDebugRaceRegression(workingDirectory: string, hiddenSource: strin
     writeFixtureFile(corrected, 'package.json', packageSource);
     writeFixtureFile(regressionStarter, 'package.json', packageSource);
     const discovered = candidateBunTestFiles(corrected);
-    const authored = discovered.filter((path) => !fixtureTextEquals(starter, path, readFixtureText(corrected, path)));
+    const authored = discovered.filter(
+      (path) => !fixtureTextEquals(starter, path, readFixtureText(corrected, path)),
+    );
     const unchanged = (destination: string, restoreOwner = false) =>
-      [...snapshot].every(([path, content]) => fixtureTextEquals(destination, path,
-        restoreOwner && path === 'src/job-runner.ts' ? RACE_SOURCE : content)) &&
-      candidateBunTestFiles(destination).join('\n') === discovered.join('\n');
+      [...snapshot].every(([path, content]) =>
+        fixtureTextEquals(
+          destination,
+          path,
+          restoreOwner && path === 'src/job-runner.ts' ? RACE_SOURCE : content,
+        ),
+      ) && candidateBunTestFiles(destination).join('\n') === discovered.join('\n');
     evidence.push(`Candidate-authored race regression files: ${authored.join(', ') || 'missing'}.`);
 
     hidden = runHiddenBunTest(corrected, hiddenSource);
@@ -452,10 +510,18 @@ function replayDebugRaceRegression(workingDirectory: string, hiddenSource: strin
     const red = runCandidateBunTests(regressionStarter, authored);
     snapshotUnchanged = unchanged(regressionStarter, true) && snapshotUnchanged;
     // An authored assertion must detect the actual losing completed status, not an unrelated failure.
-    const mismatch = /completed/iu.test(red.output) && /cancelled/iu.test(red.output) &&
+    const mismatch =
+      /completed/iu.test(red.output) &&
+      /cancelled/iu.test(red.output) &&
       /expect\(|toBe|toEqual|AssertionError/iu.test(red.output);
-    const regressionObserved = authored.length > 0 && snapshotUnchanged && green.passed &&
-      red.completed && red.exitStatus !== null && red.exitStatus !== 0 && mismatch;
+    const regressionObserved =
+      authored.length > 0 &&
+      snapshotUnchanged &&
+      green.passed &&
+      red.completed &&
+      red.exitStatus !== null &&
+      red.exitStatus !== 0 &&
+      mismatch;
     hidden.passed = hidden.passed && snapshotUnchanged;
     evidence.push(
       `Host authored race regression green: status=${String(green.exitStatus)}.\n${green.evidence}`,
@@ -464,7 +530,9 @@ function replayDebugRaceRegression(workingDirectory: string, hiddenSource: strin
     );
     return { hidden, regressionObserved, evidence };
   } catch (error) {
-    evidence.push(`Host race replay unavailable: ${error instanceof Error ? error.message : String(error)}.`);
+    evidence.push(
+      `Host race replay unavailable: ${error instanceof Error ? error.message : String(error)}.`,
+    );
     return { hidden: { ...hidden, passed: false }, regressionObserved: false, evidence };
   } finally {
     if (root) rmSync(root, { recursive: true, force: true });
@@ -508,11 +576,21 @@ test('hidden: once completion wins, later cancellation cannot overwrite it', () 
       /cancel-before-complete/u.test(reportText) &&
       /completed/u.test(reportText) &&
       /cancelled/u.test(reportText);
-    const passed = replay.hidden.passed && noTimingHack && hasTwoOrderAssertions &&
-      replay.regressionObserved && causal;
+    const passed =
+      replay.hidden.passed &&
+      noTimingHack &&
+      hasTwoOrderAssertions &&
+      replay.regressionObserved &&
+      causal;
     return {
       passed,
-      quality: passed ? 1 : replay.hidden.passed && noTimingHack ? 0.75 : replay.hidden.passed ? 0.5 : 0,
+      quality: passed
+        ? 1
+        : replay.hidden.passed && noTimingHack
+          ? 0.75
+          : replay.hidden.passed
+            ? 0.5
+            : 0,
       verification: replay.hidden.passed && replay.regressionObserved ? 1 : 0,
       integrityFailure: false,
       evidence: [
@@ -710,8 +788,16 @@ test('hidden: exact non-default timeout reaches provider call', async () => {
 });
 `;
     const runtime = text(workingDirectory, 'src/runtime.ts');
-    const providerPreserved = fixtureTextEquals(workingDirectory, 'src/provider.ts', PROVIDER_SOURCE);
-    const schemaPreserved = fixtureTextEquals(workingDirectory, 'config/schema.json', CONFIG_SCHEMA);
+    const providerPreserved = fixtureTextEquals(
+      workingDirectory,
+      'src/provider.ts',
+      PROVIDER_SOURCE,
+    );
+    const schemaPreserved = fixtureTextEquals(
+      workingDirectory,
+      'config/schema.json',
+      CONFIG_SCHEMA,
+    );
     const noLiteral = !/runProvider\([^;]*\b30000\b/su.test(runtime);
     const noParallelTimeout = (runtime.match(/timeoutMs/gu)?.length ?? 0) <= 4;
     let hidden = { passed: false, evidence: 'Evaluator-owned hidden replay not executed.' };
@@ -725,12 +811,22 @@ test('hidden: exact non-default timeout reaches provider call', async () => {
         let fileCount = 0;
         let entryCount = 0;
         let byteCount = 0;
-        const excluded = new Set(['.git', '.kory-eval', 'node_modules', 'dist', 'build', 'coverage']);
+        const excluded = new Set([
+          '.git',
+          '.kory-eval',
+          'node_modules',
+          'dist',
+          'build',
+          'coverage',
+        ]);
         const copyFiles = (relativeDirectory: string, depth: number): void => {
           if (depth > 6) throw new Error('Timeout replay depth budget exceeded');
-          const dir = relativeDirectory ? join(workingDirectory, relativeDirectory) : workingDirectory;
+          const dir = relativeDirectory
+            ? join(workingDirectory, relativeDirectory)
+            : workingDirectory;
           const stat = lstatSync(dir);
-          if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Unsafe replay directory');
+          if (!stat.isDirectory() || stat.isSymbolicLink())
+            throw new Error('Unsafe replay directory');
           const handle = opendirSync(dir);
           const names: string[] = [];
           try {
@@ -746,7 +842,10 @@ test('hidden: exact non-default timeout reaches provider call', async () => {
             const path = relativeDirectory ? `${relativeDirectory}/${name}` : name;
             const entry = lstatSync(join(workingDirectory, path));
             if (entry.isSymbolicLink()) throw new Error('Timeout replay cannot copy symlinks');
-            if (entry.isDirectory()) { copyFiles(path, depth + 1); continue; }
+            if (entry.isDirectory()) {
+              copyFiles(path, depth + 1);
+              continue;
+            }
             if (path === 'package.json' || path === 'bunfig.toml' || path === '.env') continue;
             const content = readFixtureText(workingDirectory, path);
             if (++fileCount > 200 || (byteCount += Buffer.byteLength(content)) > 4_000_000)
@@ -757,23 +856,31 @@ test('hidden: exact non-default timeout reaches provider call', async () => {
         };
         copyFiles('', 0);
         writeFixtureFile(replayRoot, 'package.json', packageJson('kory-timeout-replay'));
-        const authoredTests = candidateBunTestFiles(replayRoot).filter((path) =>
-          path !== 'tests/runtime.test.ts' || !fixtureTextEquals(replayRoot!, path, TIMEOUT_TEST));
+        const authoredTests = candidateBunTestFiles(replayRoot).filter(
+          (path) =>
+            path !== 'tests/runtime.test.ts' || !fixtureTextEquals(replayRoot!, path, TIMEOUT_TEST),
+        );
         if (!authoredTests.length) {
-          regressionEvidence = 'candidate-authored regression red/green: missing updated or new test.';
+          regressionEvidence =
+            'candidate-authored regression red/green: missing updated or new test.';
         } else {
           hidden = runHiddenBunTest(replayRoot, hiddenSource);
           const green = runCandidateBunTests(replayRoot, authoredTests);
-          const greenUnchanged =
-            [...copied].every(([path, source]) => fixtureTextEquals(replayRoot!, path, source));
+          const greenUnchanged = [...copied].every(([path, source]) =>
+            fixtureTextEquals(replayRoot!, path, source),
+          );
           if (green.passed && greenUnchanged) {
             writeFixtureFile(replayRoot, 'src/runtime.ts', RUNTIME_SOURCE);
             const red = runCandidateBunTests(replayRoot, authoredTests);
-            const redUnchanged =
-              [...copied].every(([path, source]) => fixtureTextEquals(
-                replayRoot!, path, path === 'src/runtime.ts' ? RUNTIME_SOURCE : source,
-              ));
-            regression = red.completed && red.exitStatus !== null && red.exitStatus !== 0 && redUnchanged;
+            const redUnchanged = [...copied].every(([path, source]) =>
+              fixtureTextEquals(
+                replayRoot!,
+                path,
+                path === 'src/runtime.ts' ? RUNTIME_SOURCE : source,
+              ),
+            );
+            regression =
+              red.completed && red.exitStatus !== null && red.exitStatus !== 0 && redUnchanged;
             regressionEvidence = `candidate-authored regression red/green: ${regression ? 'observed' : 'not observed'}; source/test integrity: ${redUnchanged ? 'preserved' : 'modified'}.\nGreen:\n${green.evidence}\nRed:\n${red.evidence}`;
           } else {
             regressionEvidence = `candidate-authored regression red/green: green suite ${green.passed ? 'passed' : 'failed'}; source/test integrity: ${greenUnchanged ? 'preserved' : 'modified'}.\n${green.evidence}`;

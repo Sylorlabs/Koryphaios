@@ -31,17 +31,13 @@ function insertMirrorRows(count: number): string[] {
 
 function projectDocumentCount(): number {
   return db
-    .query<{ c: number }, []>(
-      `SELECT COUNT(*) AS c FROM notes WHERE id LIKE 'project-document:%'`,
-    )
+    .query<{ c: number }, []>(`SELECT COUNT(*) AS c FROM notes WHERE id LIKE 'project-document:%'`)
     .get()!.c;
 }
 
 function compactionStep(): string {
   const row = db
-    .query<{ value: string }, [string]>(
-      `SELECT value FROM notes_compaction_state WHERE key = ?`,
-    )
+    .query<{ value: string }, [string]>(`SELECT value FROM notes_compaction_state WHERE key = ?`)
     .get('compaction');
   return row ? (JSON.parse(row.value) as { step: string }).step : '(missing)';
 }

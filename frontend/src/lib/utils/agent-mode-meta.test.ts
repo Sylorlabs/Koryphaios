@@ -13,9 +13,7 @@ describe('agent mode metadata', () => {
   });
 
   it('keeps distinct titles so the pill tooltip is unambiguous', () => {
-    const titles = new Set(
-      ['multi', 'single', 'auto'].map((mode) => agentModeMetaFor(mode).title),
-    );
+    const titles = new Set(['multi', 'single', 'auto'].map((mode) => agentModeMetaFor(mode).title));
     expect(titles.size).toBe(3);
   });
 });

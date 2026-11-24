@@ -12,12 +12,7 @@ import { validateNoteCanvas, type NoteAppearances } from '@koryphaios/shared';
 import { NotFoundError } from '../errors/types';
 import { PROJECT_ROOT } from '../runtime/paths';
 import { queryNoteBase, listNoteBases } from './note-bases-service';
-import {
-  getNote,
-  getNoteBacklinks,
-  listNoteRelationships,
-  listNotes,
-} from './notes-service';
+import { getNote, getNoteBacklinks, listNoteRelationships, listNotes } from './notes-service';
 
 /** Safety bounds: appearance discovery must stay a metadata scan. */
 const MAX_CANVASES_SCANNED = 200;
@@ -95,11 +90,7 @@ export async function listNoteAppearances(
   const baseSummaries = listNoteBases(projectRoot, {}).slice(0, MAX_BASES_SCANNED);
   if (baseSummaries.length === MAX_BASES_SCANNED) truncated = true;
   for (const base of baseSummaries) {
-    const result = await queryNoteBase(
-      base.id,
-      { limit: MAX_BASE_ROWS_SAMPLED },
-      projectRoot,
-    );
+    const result = await queryNoteBase(base.id, { limit: MAX_BASE_ROWS_SAMPLED }, projectRoot);
     if (result.hasMore) truncated = true;
     if (result.rows.some((row) => row.id === id)) {
       bases.push({ baseId: base.id, name: base.name, revision: base.revision });

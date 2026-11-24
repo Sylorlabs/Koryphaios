@@ -162,12 +162,13 @@ describe('automatic compaction retry and cooldown', () => {
       scheduleAuto(harness.manager, harness.sessionId);
       await waitFor(() => harness.providerCalls() >= 3);
       // Give the scheduler a beat to record the cooldown after the last attempt.
-      await waitFor(() =>
-        (
-          harness.manager as unknown as {
-            runtimes: { peek(id: string): { lastAutoCompactFailureAt?: number } | undefined };
-          }
-        ).runtimes.peek(harness.sessionId)?.lastAutoCompactFailureAt !== undefined,
+      await waitFor(
+        () =>
+          (
+            harness.manager as unknown as {
+              runtimes: { peek(id: string): { lastAutoCompactFailureAt?: number } | undefined };
+            }
+          ).runtimes.peek(harness.sessionId)?.lastAutoCompactFailureAt !== undefined,
       );
       expect(harness.providerCalls()).toBe(3);
       expect(harness.committed()).toBeUndefined();

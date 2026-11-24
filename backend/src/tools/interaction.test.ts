@@ -7,23 +7,36 @@ import type { SkillAssignment } from '../kory/skill-assignment';
 describe('request_critic_review', () => {
   test('records the manager reason for the turn-level Auto decision', async () => {
     let requestedReason: string | undefined;
-    const result = await new RequestCriticReviewTool().run({
-      sessionId: 'session', workingDirectory: '/tmp',
-      requestCriticReview: (reason) => { requestedReason = reason; },
-    }, {
-      id: 'review-call', name: 'request_critic_review',
-      input: { reason: 'The factual claim needs an independent source check.' },
-    });
+    const result = await new RequestCriticReviewTool().run(
+      {
+        sessionId: 'session',
+        workingDirectory: '/tmp',
+        requestCriticReview: (reason) => {
+          requestedReason = reason;
+        },
+      },
+      {
+        id: 'review-call',
+        name: 'request_critic_review',
+        input: { reason: 'The factual claim needs an independent source check.' },
+      },
+    );
     expect(result.isError).toBe(false);
     expect(requestedReason).toBe('The factual claim needs an independent source check.');
   });
 
   test('fails closed when the manager decision callback is unavailable', async () => {
-    const result = await new RequestCriticReviewTool().run({
-      sessionId: 'session', workingDirectory: '/tmp',
-    }, {
-      id: 'review-call', name: 'request_critic_review', input: { reason: 'Check this claim.' },
-    });
+    const result = await new RequestCriticReviewTool().run(
+      {
+        sessionId: 'session',
+        workingDirectory: '/tmp',
+      },
+      {
+        id: 'review-call',
+        name: 'request_critic_review',
+        input: { reason: 'Check this claim.' },
+      },
+    );
     expect(result.isError).toBe(true);
     expect(result.output).toContain('unavailable');
   });
@@ -31,9 +44,25 @@ describe('request_critic_review', () => {
 
 describe('delegate_to_worker skill assignment', () => {
   test('passes model and reasoning with normalized worker and critic skill pins', async () => {
-    let received: { task: string; domain?: string; skills?: SkillAssignment; model?: string; reasoningLevel?: string; worktree?: boolean } | undefined;
+    let received:
+      | {
+          task: string;
+          domain?: string;
+          skills?: SkillAssignment;
+          model?: string;
+          reasoningLevel?: string;
+          worktree?: boolean;
+        }
+      | undefined;
     const ctx = {
-      delegateToWorker: async (task: string, domain?: string, skills?: SkillAssignment, model?: string, reasoningLevel?: string, worktree?: boolean) => {
+      delegateToWorker: async (
+        task: string,
+        domain?: string,
+        skills?: SkillAssignment,
+        model?: string,
+        reasoningLevel?: string,
+        worktree?: boolean,
+      ) => {
         received = { task, domain, skills, model, reasoningLevel, worktree };
         return 'completed';
       },
@@ -115,9 +144,7 @@ describe('manager worker controls', () => {
         agentId: 'worker-1',
         model: 'openai:gpt-test',
         reasoningLevel: 'high',
-        fallbacks: [
-          { model: 'openai:gpt-fallback', reasoningLevel: 'medium' },
-        ],
+        fallbacks: [{ model: 'openai:gpt-fallback', reasoningLevel: 'medium' }],
       },
     });
     expect(result.isError).toBe(false);
@@ -126,9 +153,7 @@ describe('manager worker controls', () => {
       agentId: 'worker-1',
       model: 'openai:gpt-test',
       reasoningLevel: 'high',
-      fallbacks: [
-        { model: 'openai:gpt-fallback', reasoningLevel: 'medium' },
-      ],
+      fallbacks: [{ model: 'openai:gpt-fallback', reasoningLevel: 'medium' }],
     });
   });
 });

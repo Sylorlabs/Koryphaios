@@ -633,10 +633,7 @@ function scoreCommitment(result: FinopsResult | null): Array<[string, boolean]> 
       ),
     ],
     ['monitoring remains hypothetical', str(monitoring, 'status') === 'hypothetical-not-purchased'],
-    [
-      'monitor coverage recomputed',
-      approximately(num(monitoring, 'commitCoverage'), coverage),
-    ],
+    ['monitor coverage recomputed', approximately(num(monitoring, 'commitCoverage'), coverage)],
     [
       'monitor utilization recomputed',
       approximately(num(monitoring, 'commitUtilization'), utilization),

@@ -89,6 +89,9 @@ export function cleanupSocket(projectRoot: string): void {
     if (existsSync(infoPath)) unlinkSync(infoPath);
   } catch (err) {
     // Advisory metadata file; a concurrent remover or stale handle is harmless.
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to remove socket-info.json; continuing');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Failed to remove socket-info.json; continuing',
+    );
   }
 }

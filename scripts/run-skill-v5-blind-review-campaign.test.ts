@@ -281,7 +281,13 @@ function makeHarness() {
   mkdirSync(binDir);
   const tempDir = join(root, 'tmp');
   mkdirSync(tempDir);
-  for (const name of ['bun', 'codex', 'generic-reviewer', 'reviewer-control', 'kory-native-stateless-reviewer']) {
+  for (const name of [
+    'bun',
+    'codex',
+    'generic-reviewer',
+    'reviewer-control',
+    'kory-native-stateless-reviewer',
+  ]) {
     const path = join(binDir, name);
     writeFileSync(path, fakeProgram);
     chmodSync(path, 0o755);
@@ -334,7 +340,14 @@ function makeHarness() {
     );
   }
 
-  function calls(): Array<{ name: string; args: string[]; cwd: string; archiveDirectory?: string; nativeModel?: string; nativeSandbox?: string }> {
+  function calls(): Array<{
+    name: string;
+    args: string[];
+    cwd: string;
+    archiveDirectory?: string;
+    nativeModel?: string;
+    nativeSandbox?: string;
+  }> {
     return existsSync(callLog)
       ? readFileSync(callLog, 'utf8')
           .trim()
@@ -356,7 +369,10 @@ afterEach(() => {
   for (const path of testRoots.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
-const nativeArgs = ['--reviewer-adapter=kory-native-stateless-reviewer', '--reviewer-model=native-fixture-model'];
+const nativeArgs = [
+  '--reviewer-adapter=kory-native-stateless-reviewer',
+  '--reviewer-model=native-fixture-model',
+];
 test('native campaign stages exact output and four private archives with validate-only opt-in', () => {
   const harness = makeHarness();
   const result = harness.run({ args: nativeArgs });
@@ -364,14 +380,18 @@ test('native campaign stages exact output and four private archives with validat
   const summary = harness.summary(result.stdout);
   expect(summary.reviewed).toBe(1);
   expect(summary.persisted).toBe(0);
-  const native = harness.calls().find(call => call.name === 'kory-native-stateless-reviewer')!;
+  const native = harness.calls().find((call) => call.name === 'kory-native-stateless-reviewer')!;
   expect(native.nativeModel).toBe('native-fixture-model');
   expect(native.nativeSandbox).toBe('macos-private-roots');
   expect(native.cwd).toBe(canonicalizePath(native.cwd));
   expect(dirname(native.archiveDirectory!)).toBe(native.cwd);
   expect(lstatSync(native.archiveDirectory!).mode & 0o777).toBe(0o700);
-  expect(harness.calls().some(call => call.name === 'codex' || call.name === 'reviewer-control')).toBe(false);
-  const validator = harness.calls().find(call => call.args.some(arg => arg.startsWith('--validate-only=')))!;
+  expect(
+    harness.calls().some((call) => call.name === 'codex' || call.name === 'reviewer-control'),
+  ).toBe(false);
+  const validator = harness
+    .calls()
+    .find((call) => call.args.some((arg) => arg.startsWith('--validate-only=')))!;
   expect(validator.args).toContain('--allow-native-stage');
   expect(validator.archiveDirectory).toBe('');
   const envelope = JSON.parse(readFileSync(summary.stagedReviews[0].envelopePath, 'utf8'));
@@ -379,7 +399,10 @@ test('native campaign stages exact output and four private archives with validat
   expect(stage.schemaVersion).toBe(1);
   expect(stage.stageOnly).toBe(true);
   const completion = JSON.parse(readFileSync(stage.hostReceipt.path, 'utf8'));
-  const raw = readFileSync(stage.rawEvents.path, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  const raw = readFileSync(stage.rawEvents.path, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
   expect(envelope.reviews[0].output).toBe(raw.at(-1).result);
   expect(envelope.reviews[0].output).toBe(completion.output);
   expect(envelope.reviews[0].output.endsWith('\n')).toBe(true);
@@ -393,27 +416,38 @@ test('native campaign stages exact output and four private archives with validat
   }
   expect(result.stdout + result.stderr).not.toContain('OPAQUE_NOT_OUTPUT_PROVIDER_SECRET');
   expect(readFileSync(stage.rawEvents.path, 'utf8')).toContain('OPAQUE_NOT_OUTPUT_PROVIDER_SECRET');
-  expect(readFileSync(stage.hostReceipt.path, 'utf8')).not.toContain('OPAQUE_NOT_OUTPUT_PROVIDER_SECRET');
+  expect(readFileSync(stage.hostReceipt.path, 'utf8')).not.toContain(
+    'OPAQUE_NOT_OUTPUT_PROVIDER_SECRET',
+  );
   expect(existsSync(harness.ingestLog)).toBe(false);
 });
 
-test.each(['missing-raw', 'wrong-request', 'tools', 'wrong-model', 'wrong-profile', 'normalize-output', 'exit-error'])(
-  'native campaign rejects %s without validation, exposure or ingestion', mode => {
-    const harness = makeHarness();
-    const result = harness.run({ args: nativeArgs, env: { V5_TEST_NATIVE: mode } });
-    expect(result.status).toBe(1);
-    const summary = harness.summary(result.stdout);
-    expect(summary.reviewed).toBe(0);
-    expect(summary.persisted).toBe(0);
-    expect(harness.calls().some(call => call.args.some(arg => arg.startsWith('--validate-only=')))).toBe(false);
-    expect(result.stdout + result.stderr).not.toContain('OPAQUE_NOT_OUTPUT_PROVIDER_SECRET');
-    expect(result.stdout + result.stderr).not.toContain('PRIVATE_NATIVE_DIAGNOSTIC');
-    expect(existsSync(harness.ingestLog)).toBe(false);
-  },
-);
+test.each([
+  'missing-raw',
+  'wrong-request',
+  'tools',
+  'wrong-model',
+  'wrong-profile',
+  'normalize-output',
+  'exit-error',
+])('native campaign rejects %s without validation, exposure or ingestion', (mode) => {
+  const harness = makeHarness();
+  const result = harness.run({ args: nativeArgs, env: { V5_TEST_NATIVE: mode } });
+  expect(result.status).toBe(1);
+  const summary = harness.summary(result.stdout);
+  expect(summary.reviewed).toBe(0);
+  expect(summary.persisted).toBe(0);
+  expect(
+    harness.calls().some((call) => call.args.some((arg) => arg.startsWith('--validate-only='))),
+  ).toBe(false);
+  expect(result.stdout + result.stderr).not.toContain('OPAQUE_NOT_OUTPUT_PROVIDER_SECRET');
+  expect(result.stdout + result.stderr).not.toContain('PRIVATE_NATIVE_DIAGNOSTIC');
+  expect(existsSync(harness.ingestLog)).toBe(false);
+});
 
 test.each(['rawEvents', 'hostReceipt', 'sealedPrompt', 'kernelProfile'])(
-  'native campaign rechecks %s after read-only import validation', file => {
+  'native campaign rechecks %s after read-only import validation',
+  (file) => {
     const harness = makeHarness();
     const result = harness.run({ args: nativeArgs, env: { V5_TEST_MUTATE_ARCHIVE: file } });
     expect(result.status).toBe(1);
@@ -425,10 +459,13 @@ test.each(['rawEvents', 'hostReceipt', 'sealedPrompt', 'kernelProfile'])(
 
 test('native campaign isolates retries into distinct per-attempt archives', () => {
   const harness = makeHarness();
-  const result = harness.run({ args: [...nativeArgs, '--max-reviewer-attempts=2'], env: { V5_TEST_NATIVE: 'retry' } });
+  const result = harness.run({
+    args: [...nativeArgs, '--max-reviewer-attempts=2'],
+    env: { V5_TEST_NATIVE: 'retry' },
+  });
   expect(result.status).toBe(0);
   expect(harness.summary(result.stdout).reviewed).toBe(1);
-  const attempts = harness.calls().filter(call => call.name === 'kory-native-stateless-reviewer');
+  const attempts = harness.calls().filter((call) => call.name === 'kory-native-stateless-reviewer');
   expect(attempts).toHaveLength(2);
   expect(attempts[0].archiveDirectory).not.toBe(attempts[1].archiveDirectory);
   expect(dirname(attempts[0].archiveDirectory!)).toBe(dirname(attempts[1].archiveDirectory!));
@@ -512,7 +549,10 @@ test('stages a provider-neutral adapter only when it supplies bound identity and
 
 test('resolves a relative reviewer adapter from the project before entering private review cwd', () => {
   const harness = makeHarness();
-  const adapter = relative(resolve(import.meta.dir, '..'), join(harness.binDir, 'generic-reviewer'));
+  const adapter = relative(
+    resolve(import.meta.dir, '..'),
+    join(harness.binDir, 'generic-reviewer'),
+  );
   const result = harness.run({ args: [`--reviewer-adapter=${adapter}`] });
 
   expect(result.status).toBe(0);

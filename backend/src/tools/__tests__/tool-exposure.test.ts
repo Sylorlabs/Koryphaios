@@ -200,9 +200,10 @@ describe('tool input validation', () => {
     };
     // The exact form a flash model sent four times in a row during the live
     // skill-feeder smoke test.
-    expect(
-      await validateToolInputAgainstSchema(schema, { skills: '["response-style"]' }),
-    ).toEqual({ valid: true, value: { skills: ['response-style'] } });
+    expect(await validateToolInputAgainstSchema(schema, { skills: '["response-style"]' })).toEqual({
+      valid: true,
+      value: { skills: ['response-style'] },
+    });
   });
 
   test('rescues a bare string where string items are expected', async () => {
@@ -222,10 +223,7 @@ describe('tool input validation', () => {
       type: 'object',
       properties: {
         skills: {
-          anyOf: [
-            { type: 'array', items: { type: 'string' } },
-            { type: 'number' },
-          ],
+          anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'number' }],
         },
       },
       required: ['skills'],

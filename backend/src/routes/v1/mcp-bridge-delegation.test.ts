@@ -24,8 +24,10 @@ describe('MCP bridge delegation', () => {
           getToolDefsForRole: (role: string) => registry.getToolDefsForRole(role as never),
           isAllowedForRole: (name: string, role: string) =>
             registry.isAllowedForRole(name, role as never),
-          execute: (ctx: unknown, call: { name: string; input: Record<string, unknown>; id: string }) =>
-            registry.execute(ctx as never, call as never),
+          execute: (
+            ctx: unknown,
+            call: { name: string; input: Record<string, unknown>; id: string },
+          ) => registry.execute(ctx as never, call as never),
         },
         sessions: {
           get: async (id: string) =>
@@ -39,8 +41,8 @@ describe('MCP bridge delegation', () => {
           requestToolApproval: async () => 'Allow',
           hasActiveSessionExecution: () => true,
           tryAcquireSessionMutationBarrier: () => null,
-        isWorkspaceRebindPending: () => false,
-        markWorkspaceMutatedThisTurn: () => undefined,
+          isWorkspaceRebindPending: () => false,
+          markWorkspaceMutatedThisTurn: () => undefined,
           runWorkerPipeline,
           renameSession: async () => 'renamed',
         },
@@ -58,7 +60,9 @@ describe('MCP bridge delegation', () => {
         })
         .use(mcpBridgeRoutes);
 
-      const authorization = buildLocalBearerToken(localAuth.createSession([`mcp:${sessionId}:manager`]));
+      const authorization = buildLocalBearerToken(
+        localAuth.createSession([`mcp:${sessionId}:manager`]),
+      );
       const response = await app.handle(
         new Request('http://localhost/api/v1/mcp-bridge/execute', {
           method: 'POST',

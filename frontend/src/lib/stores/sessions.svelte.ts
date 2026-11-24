@@ -1,7 +1,12 @@
 // Session management store — Svelte 5 runes
 // Handles CRUD, rename, search, date grouping, message history
 
-import type { Session, SessionAgentOverrides, CreateGitWorkspaceRequest, SessionRunSnapshot } from '@koryphaios/shared';
+import type {
+  Session,
+  SessionAgentOverrides,
+  CreateGitWorkspaceRequest,
+  SessionRunSnapshot,
+} from '@koryphaios/shared';
 import { runStateStore } from './run-state.svelte';
 import { toastStore } from './toast.svelte';
 import { projectStore } from './project.svelte';
@@ -275,17 +280,21 @@ async function fetchSessionsRequest(): Promise<boolean> {
         // The same revision guard as WS delivery prevents a delayed HTTP
         // response from overwriting a more recent live failure/status.
         runStateStore.applyEvent({
-          type: 'run.state', sessionId: snapshot.sessionId,
-          timestamp: snapshot.updatedAt, payload: { snapshot, transition: null },
+          type: 'run.state',
+          sessionId: snapshot.sessionId,
+          timestamp: snapshot.updatedAt,
+          payload: { snapshot, transition: null },
         });
       }
       const storedSessionId = hasRestoredInitialSession ? '' : loadLastSession();
       hasRestoredInitialSession = true;
-      selectSession(resolveSessionSelection({
-        storedSessionId,
-        currentActiveId: activeSessionId,
-        sessionIds: sessions.map((s) => s.id),
-      }));
+      selectSession(
+        resolveSessionSelection({
+          storedSessionId,
+          currentActiveId: activeSessionId,
+          sessionIds: sessions.map((s) => s.id),
+        }),
+      );
       // Selection invariants live in resolveSessionSelection (session-selection.ts):
       // stored restore wins, vanished actives clear, empty stays empty.
 
@@ -440,11 +449,14 @@ async function createSessionRequest(
  */
 async function forkSession(sourceSessionId: string, messageId: string): Promise<string | null> {
   try {
-    const res = await apiFetch(apiUrl(`/api/sessions/${encodeURIComponent(sourceSessionId)}/fork`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messageId }),
-    });
+    const res = await apiFetch(
+      apiUrl(`/api/sessions/${encodeURIComponent(sourceSessionId)}/fork`),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messageId }),
+      },
+    );
     const text = await res.text();
     const data = parseResponseBody(text);
     const session = (data as { data?: Session }).data;
@@ -456,7 +468,11 @@ async function forkSession(sourceSessionId: string, messageId: string): Promise<
     sessions = upsertSession(sessions, session, sortActive);
     selectSession(session.id);
     saveLastSession(activeSessionId);
-    if (projectStore.workspaceRoot && projectStore.scope === 'project' && !session.workingDirectory) {
+    if (
+      projectStore.workspaceRoot &&
+      projectStore.scope === 'project' &&
+      !session.workingDirectory
+    ) {
       projectStore.setScope('all');
     }
     return session.id;
@@ -700,7 +716,10 @@ async function deleteAllSessions(): Promise<boolean> {
       return false;
     }
 
-    const erased = [...sessions.filter((session) => !session.id.startsWith('linked-')), ...archivedSessions];
+    const erased = [
+      ...sessions.filter((session) => !session.id.startsWith('linked-')),
+      ...archivedSessions,
+    ];
     for (const session of erased) {
       deletedSessionIds.add(session.id);
       notifySessionUnsubscribed(session.id);
@@ -935,7 +954,11 @@ export const sessionStore = {
   getMessagePageInfo(messages: DisplayMessage[]): MessagePageInfo | undefined {
     return messagePageInfo.get(messages);
   },
-  copyMessageDisplayMetadata(target: DisplayMessage[], source: DisplayMessage[], page?: MessagePageInfo) {
+  copyMessageDisplayMetadata(
+    target: DisplayMessage[],
+    source: DisplayMessage[],
+    page?: MessagePageInfo,
+  ) {
     const boundary = messageDisplayBoundaries.get(source);
     if (boundary) messageDisplayBoundaries.set(target, boundary);
     const sourcePage = page ?? messagePageInfo.get(source);

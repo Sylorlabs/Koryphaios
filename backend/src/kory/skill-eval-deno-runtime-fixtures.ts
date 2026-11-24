@@ -37,7 +37,9 @@ export function denoEvalBinary(): string {
 function denoOpenSSL3(): string {
   for (const binary of openssl3ExecutableCandidates()) {
     const observed = spawnSync(binary, ['version'], {
-      encoding: 'utf8', timeout: 2_000, env: environment(),
+      encoding: 'utf8',
+      timeout: 2_000,
+      env: environment(),
     });
     if (observed.status === 0 && observed.stdout.startsWith('OpenSSL 3.')) return binary;
   }
@@ -50,14 +52,23 @@ function loopbackAvailability(): string | null {
   const key = JSON.stringify([process.execPath, process.env.PATH]);
   if (loopbackProbe?.key === key && Date.now() - loopbackProbe.at < 60_000)
     return loopbackProbe.error;
-  const probe = spawnSync(process.execPath, ['-e', `
+  const probe = spawnSync(
+    process.execPath,
+    [
+      '-e',
+      `
     const net = require('node:net');
     const server = net.createServer();
     server.once('error', (error) => { console.error(error.code || error.message); process.exit(2); });
     server.listen(0, '127.0.0.1', () => server.close(() => process.exit(0)));
-  `], { encoding: 'utf8', timeout: 2_000, env: environment() });
-  const error = probe.status === 0 ? null
-    : `Deno permission fixture requires bindable local loopback HTTPS: ${(probe.error?.message ?? probe.stderr ?? probe.signal ?? `exit ${probe.status}`).trim().slice(0, 160)}`;
+  `,
+    ],
+    { encoding: 'utf8', timeout: 2_000, env: environment() },
+  );
+  const error =
+    probe.status === 0
+      ? null
+      : `Deno permission fixture requires bindable local loopback HTTPS: ${(probe.error?.message ?? probe.stderr ?? probe.signal ?? `exit ${probe.status}`).trim().slice(0, 160)}`;
   loopbackProbe = { key, at: Date.now(), error };
   return error;
 }
@@ -85,14 +96,16 @@ export function denoPermissionReadiness(
   platform: string = hostOS(),
 ): string[] {
   const live = !probe;
-  const observed = probe ?? ((tool: string) => {
-    const result = spawnSync(
-      tool === 'deno' ? denoEvalBinary() : tool === 'openssl' ? denoOpenSSL3() : tool,
-      tool === 'openssl' ? ['version'] : ['--version'],
-      { encoding: 'utf8', timeout: 2_000, env: environment() },
-    );
-    return result.status === 0 ? result.stdout.trim().split('\n')[0]! : 'unavailable';
-  });
+  const observed =
+    probe ??
+    ((tool: string) => {
+      const result = spawnSync(
+        tool === 'deno' ? denoEvalBinary() : tool === 'openssl' ? denoOpenSSL3() : tool,
+        tool === 'openssl' ? ['version'] : ['--version'],
+        { encoding: 'utf8', timeout: 2_000, env: environment() },
+      );
+      return result.status === 0 ? result.stdout.trim().split('\n')[0]! : 'unavailable';
+    });
   const reasons: string[] = [];
   if (!['darwin', 'linux'].includes(platform))
     reasons.push('Deno permission fixture currently requires POSIX paths and local Git.');

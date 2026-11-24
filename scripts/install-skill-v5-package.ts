@@ -42,7 +42,10 @@ const skills = argv
   .map((argument) => argument.slice('--skill='.length).trim())
   .filter(Boolean);
 const targetRoot =
-  argv.find((argument) => argument.startsWith('--root='))?.slice('--root='.length).trim() ?? 'project';
+  argv
+    .find((argument) => argument.startsWith('--root='))
+    ?.slice('--root='.length)
+    .trim() ?? 'project';
 const dryRun = argv.includes('--dry-run');
 if (skills.length === 0) throw new Error('Pass at least one --skill=<name>');
 if (targetRoot !== 'project' && targetRoot !== 'personal') {

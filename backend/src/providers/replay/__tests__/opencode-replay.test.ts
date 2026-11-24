@@ -34,8 +34,13 @@ async function collect(events: AsyncIterable<ProviderEvent>): Promise<ProviderEv
 describe('opencode replay through OpenCodeCliProvider (ACP)', () => {
   test('normalizes a recorded ACP session into ordered reasoning, tool, text and completion events', async () => {
     const transcript = loadTranscript(FIXTURE);
-    const spawnChild = createReplaySpawn((_command, args) => (args[0] === 'acp' ? transcript : null));
-    const provider = new OpenCodeCliProvider({ name: 'opencode' } as ProviderConfig, spawnChild as never);
+    const spawnChild = createReplaySpawn((_command, args) =>
+      args[0] === 'acp' ? transcript : null,
+    );
+    const provider = new OpenCodeCliProvider(
+      { name: 'opencode' } as ProviderConfig,
+      spawnChild as never,
+    );
 
     const request: StreamRequest = {
       model: 'opencode/test-model',
@@ -70,8 +75,14 @@ describe('opencode replay through OpenCodeCliProvider (ACP)', () => {
       type: 'thinking_delta',
       thinking: 'main.ts is the entry point, so I will summarise it.',
     });
-    expect(events[3]).toEqual({ type: 'content_delta', content: '`main.ts` starts the HTTP server ' });
-    expect(events[4]).toEqual({ type: 'content_delta', content: 'and wires in the routes from `routes.ts`.' });
+    expect(events[3]).toEqual({
+      type: 'content_delta',
+      content: '`main.ts` starts the HTTP server ',
+    });
+    expect(events[4]).toEqual({
+      type: 'content_delta',
+      content: 'and wires in the routes from `routes.ts`.',
+    });
     expect(events[5]).toMatchObject({ type: 'usage_update', tokensIn: 3100 });
     expect(events[6]).toMatchObject({
       type: 'usage_update',
@@ -83,8 +94,13 @@ describe('opencode replay through OpenCodeCliProvider (ACP)', () => {
 
   test('sends the ACP requests the transcript expects, with the prompt and session id', async () => {
     const transcript = loadTranscript(FIXTURE);
-    const spawnChild = createReplaySpawn((_command, args) => (args[0] === 'acp' ? transcript : null));
-    const provider = new OpenCodeCliProvider({ name: 'opencode' } as ProviderConfig, spawnChild as never);
+    const spawnChild = createReplaySpawn((_command, args) =>
+      args[0] === 'acp' ? transcript : null,
+    );
+    const provider = new OpenCodeCliProvider(
+      { name: 'opencode' } as ProviderConfig,
+      spawnChild as never,
+    );
     await collect(
       provider.streamResponse({
         model: 'opencode/test-model',

@@ -143,7 +143,8 @@ end
 
 function runJava(root: string, hiddenSource: string): { passed: boolean; evidence: string } {
   const toolchain = javaToolchainExecutables();
-  if (!toolchain) return { passed: false, evidence: 'Matching javac and java executables not found' };
+  if (!toolchain)
+    return { passed: false, evidence: 'Matching javac and java executables not found' };
   const build = join(root, '.kory-hidden-java');
   rmSync(build, { recursive: true, force: true });
   mkdirSync(build, { recursive: true });
@@ -400,11 +401,9 @@ function rubyRegression(root: string, path: string, requirements: RegExp[]): boo
       !requirements.every((pattern) => pattern.test(source))
     )
       return false;
-    return runRuby(
-      root,
-      `require_relative ${JSON.stringify(path)}\nputs 'KORY_RUBY_OK'\n`,
-      { gems: true },
-    ).passed;
+    return runRuby(root, `require_relative ${JSON.stringify(path)}\nputs 'KORY_RUBY_OK'\n`, {
+      gems: true,
+    }).passed;
   } catch {
     return false;
   }

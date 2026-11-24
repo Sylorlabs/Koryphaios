@@ -5,10 +5,7 @@ import { tmpdir } from 'node:os';
 import { serverLog } from '../logger';
 import { canonicalizePath } from '../runtime/platform';
 import type { ProviderContentBlock } from './types';
-import {
-  createPrivateCliBinaryArtifact,
-  type PrivateCliArtifact,
-} from './private-cli-transport';
+import { createPrivateCliBinaryArtifact, type PrivateCliArtifact } from './private-cli-transport';
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -30,12 +27,18 @@ function pruneStaleCache(now = Date.now()): void {
         if (now - statSync(path).mtimeMs > CACHE_MAX_AGE_MS) unlinkSync(path);
       } catch (err: unknown) {
         // A concurrent invocation may already have removed the file.
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: stale cache entry already removed');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'cli-attachments: stale cache entry already removed',
+        );
       }
     }
   } catch (err: unknown) {
     // Cache cleanup is best effort; attachment creation still reports failures.
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: cache cleanup best-effort failed');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'cli-attachments: cache cleanup best-effort failed',
+    );
   }
 }
 
@@ -57,17 +60,26 @@ export function materializeCliImage(
     try {
       statSync(path);
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: cached file missing — writing new copy');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'cli-attachments: cached file missing — writing new copy',
+      );
       writeFileSync(path, bytes, { mode: 0o600, flag: 'wx' });
     }
     try {
       return canonicalizePath(path);
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: canonicalization failed');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'cli-attachments: canonicalization failed',
+      );
       return path;
     }
   } catch (err: unknown) {
-    serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: image materialization failed');
+    serverLog.debug(
+      { err: err instanceof Error ? err.message : String(err) },
+      'cli-attachments: image materialization failed',
+    );
     return null;
   }
 }
@@ -139,7 +151,10 @@ export function createCliAttachmentScope(): CliAttachmentScope {
       try {
         canonical = canonicalizePath(artifact.path);
       } catch (err: unknown) {
-        serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'cli-attachments: canonicalization failed');
+        serverLog.debug(
+          { err: err instanceof Error ? err.message : String(err) },
+          'cli-attachments: canonicalization failed',
+        );
       }
       pathsByContent.set(key, canonical);
       return canonical;

@@ -23,7 +23,8 @@ export class ScrollbackRing {
   constructor(private readonly capacity: number = TERMINAL_SCROLLBACK_BYTES) {}
 
   append(seq: number, bytes: Uint8Array): void {
-    const kept = bytes.byteLength > this.capacity ? bytes.subarray(bytes.byteLength - this.capacity) : bytes;
+    const kept =
+      bytes.byteLength > this.capacity ? bytes.subarray(bytes.byteLength - this.capacity) : bytes;
     this.chunks.push({ seq, bytes: kept });
     this.size += kept.byteLength;
     while (this.size > this.capacity && this.chunks.length > 1) {
@@ -34,7 +35,12 @@ export class ScrollbackRing {
   }
 
   /** Concatenated retained bytes plus the sequence range they cover. */
-  snapshot(lastSeq: number): { bytes: Uint8Array; fromSeq: number; throughSeq: number; truncated: boolean } {
+  snapshot(lastSeq: number): {
+    bytes: Uint8Array;
+    fromSeq: number;
+    throughSeq: number;
+    truncated: boolean;
+  } {
     const out = new Uint8Array(this.size);
     let offset = 0;
     for (const chunk of this.chunks) {
@@ -77,7 +83,9 @@ export function clampRows(value: number): number {
 
 /** The environment a user shell starts with: the backend's own environment
  *  plus terminal capability hints. Nothing is stripped; this is the user's shell. */
-export function terminalEnvironment(extra?: Record<string, string | undefined>): Record<string, string> {
+export function terminalEnvironment(
+  extra?: Record<string, string | undefined>,
+): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries({ ...process.env, ...extra })) {
     if (typeof value === 'string') env[key] = value;
@@ -106,8 +114,16 @@ export class TerminalSession {
   private readonly ring = new ScrollbackRing();
   private readonly publish: (message: WSMessage) => void;
   private readonly now: () => number;
-  private terminal: { write(data: string | Uint8Array): number; resize(cols: number, rows: number): void; close(): void } | null = null;
-  private proc: { kill(signal?: number | NodeJS.Signals): void; exited: Promise<number>; signalCode?: string | null } | null = null;
+  private terminal: {
+    write(data: string | Uint8Array): number;
+    resize(cols: number, rows: number): void;
+    close(): void;
+  } | null = null;
+  private proc: {
+    kill(signal?: number | NodeJS.Signals): void;
+    exited: Promise<number>;
+    signalCode?: string | null;
+  } | null = null;
 
   constructor(options: TerminalSessionOptions) {
     this.id = options.id;
@@ -148,7 +164,10 @@ export class TerminalSession {
         this.onExit(null, null);
       },
     );
-    terminalLog.info({ terminalId: this.id, sessionId: this.sessionId, scope: this.scope }, 'Terminal started');
+    terminalLog.info(
+      { terminalId: this.id, sessionId: this.sessionId, scope: this.scope },
+      'Terminal started',
+    );
   }
 
   get isRunning(): boolean {

@@ -75,7 +75,13 @@ export async function inspectEvalBackend(
   }
   const pid = payload.pid ?? payload.data?.pid ?? null;
   if (!pid) {
-    return { ok: true, pid: null, command: null, packaged: true, detail: 'Backend reported no pid.' };
+    return {
+      ok: true,
+      pid: null,
+      command: null,
+      packaged: true,
+      detail: 'Backend reported no pid.',
+    };
   }
   const command = commandForPid(pid);
   if (!command) {
@@ -95,9 +101,7 @@ export async function inspectEvalBackend(
 }
 
 /** Throw unless the backend serving evidence is the packaged bundle. */
-export async function assertPackagedEvalBackend(
-  baseUrl?: string,
-): Promise<EvalBackendIdentity> {
+export async function assertPackagedEvalBackend(baseUrl?: string): Promise<EvalBackendIdentity> {
   const identity = await inspectEvalBackend(baseUrl);
   if (!identity.ok) throw new Error(identity.detail);
   return identity;

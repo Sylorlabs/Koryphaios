@@ -546,8 +546,6 @@ function rowToTrashedNote(row: typeof notes.$inferSelect): TrashedNote {
   };
 }
 
-
-
 /** Build a revision snapshot from a stored notes row plus a body the caller
  * already holds. Column-unit conversions mirror the old `revisionSnapshotSql`
  * copy: `trashed_at` stays epoch ms, `note_*_at` stay epoch seconds. */
@@ -762,13 +760,19 @@ export async function updateNote(
 }
 
 /** Appearance changes never advance document revisions or rewrite source files. */
-export async function setNoteIcon(id: string, icon: NoteIcon | null, projectRoot: string): Promise<NoteIcon | null> {
+export async function setNoteIcon(
+  id: string,
+  icon: NoteIcon | null,
+  projectRoot: string,
+): Promise<NoteIcon | null> {
   if (icon !== null && !isNoteIcon(icon)) throw new ValidationError('Invalid note icon');
   return withNoteMutation(id, async () => {
     const existing = await getNote(id, projectRoot);
     if (!existing) throw new NotFoundError('Note', id);
-    db.update(notes).set({ icon: icon === null ? null : JSON.stringify(icon) })
-      .where(and(eq(notes.id, id), isNull(notes.trashedAt))).run();
+    db.update(notes)
+      .set({ icon: icon === null ? null : JSON.stringify(icon) })
+      .where(and(eq(notes.id, id), isNull(notes.trashedAt)))
+      .run();
     invalidateNotesCache();
     return icon;
   });
@@ -800,7 +804,11 @@ async function updateNoteUnlocked(
 
   const root = rowProjectRoot({ id, projectRoot: resolvedProjectRoot(projectRoot) });
   if (input.content !== undefined) assertContentBudget(input.content, root);
-  if ((input.tags ?? existing.tags).includes('canvas') && (input.content !== undefined || input.tags?.includes('canvas'))) validateNoteCanvas(JSON.parse(input.content ?? existing.content));
+  if (
+    (input.tags ?? existing.tags).includes('canvas') &&
+    (input.content !== undefined || input.tags?.includes('canvas'))
+  )
+    validateNoteCanvas(JSON.parse(input.content ?? existing.content));
   const sourceFile = resolveProjectDocument(id);
   if (sourceFile && input.content !== undefined) {
     const sourceExists = existsSync(sourceFile);
@@ -921,11 +929,7 @@ async function updateNoteUnlocked(
       mutateGraph?.(tx);
       if (graphTargets) replaceDocumentLinks(tx, id, graphTargets, root);
       const body = input.content ?? existing.content;
-      if (
-        input.title !== undefined ||
-        input.content !== undefined ||
-        input.tags !== undefined
-      ) {
+      if (input.title !== undefined || input.content !== undefined || input.tags !== undefined) {
         setNoteSearchText(
           id,
           (updateData.title as string) ?? existing.title,
@@ -1668,8 +1672,7 @@ export async function createVaultExport(projectRoot = PROJECT_ROOT): Promise<Vau
       });
     }
     revisionExports.sort(
-      (a, b) =>
-        stableStringCompare(a.row.noteId, b.row.noteId) || a.row.revision - b.row.revision,
+      (a, b) => stableStringCompare(a.row.noteId, b.row.noteId) || a.row.revision - b.row.revision,
     );
 
     const manifestRevisions = [] as Array<Record<string, unknown>>;
@@ -2176,7 +2179,11 @@ async function performProjectDocumentSync(
     // Instruction packages are managed by Skills, including their supporting
     // references. A visible bundled skill library must not become hundreds of
     // ordinary notes just because its documents use Markdown or HTML.
-    if (directory !== root && entries.some((entry) => entry.isFile() && /^SKILL\./i.test(entry.name))) return;
+    if (
+      directory !== root &&
+      entries.some((entry) => entry.isFile() && /^SKILL\./i.test(entry.name))
+    )
+      return;
     for (const entry of entries) {
       if (files.length >= MAX_FILES) {
         scanComplete = false;
@@ -2646,12 +2653,7 @@ async function performProjectDocumentSync(
           .onConflictDoNothing()
           .run();
         for (const entry of batch) {
-          setNoteSearchText(
-            entry.insert.id!,
-            entry.insert.title!,
-            entry.body,
-            entry.insert.tags!,
-          );
+          setNoteSearchText(entry.insert.id!, entry.insert.title!, entry.body, entry.insert.tags!);
         }
       });
     } catch (err) {
@@ -3019,7 +3021,8 @@ export async function refreshNoteRelationship(
   projectRoot: string,
   host: { provenance: 'user' | 'agent' | 'import'; actor?: NoteRelationshipActor },
 ): Promise<NoteRelationship> {
-  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) throw new ValidationError('expectedRevision must be a positive integer');
+  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1)
+    throw new ValidationError('expectedRevision must be a positive integer');
   return writeNoteRelationshipProposal(input, projectRoot, host, input.expectedRevision);
 }
 
@@ -3098,10 +3101,25 @@ async function writeNoteRelationshipProposal(
         )
         .get();
       if (expectedRelationshipRevision !== undefined) {
-        if (!current || current.projectRoot !== root || current.revision !== expectedRelationshipRevision) throw new ConflictError('Relationship changed; reload before refreshing evidence.');
-        tx.delete(noteRelationships).where(and(eq(noteRelationships.fromNoteId, input.fromId), eq(noteRelationships.toNoteId, input.toId), eq(noteRelationships.projectRoot, root))).run();
+        if (
+          !current ||
+          current.projectRoot !== root ||
+          current.revision !== expectedRelationshipRevision
+        )
+          throw new ConflictError('Relationship changed; reload before refreshing evidence.');
+        tx.delete(noteRelationships)
+          .where(
+            and(
+              eq(noteRelationships.fromNoteId, input.fromId),
+              eq(noteRelationships.toNoteId, input.toId),
+              eq(noteRelationships.projectRoot, root),
+            ),
+          )
+          .run();
       } else if (current) {
-        throw new ConflictError('A relationship already exists for this directed pair. Review it instead.');
+        throw new ConflictError(
+          'A relationship already exists for this directed pair. Review it instead.',
+        );
       }
       const now = new Date();
       tx.insert(noteRelationships)
@@ -4434,7 +4452,8 @@ export async function saveAttachment(
   return withNoteMutation(noteId, async () => {
     const note = await getNote(noteId, projectRoot);
     if (!note) throw new NotFoundError('Note', noteId);
-    if (expectedRevision !== undefined && note.revision !== expectedRevision) throw new ConflictError('Note changed before attachment creation');
+    if (expectedRevision !== undefined && note.revision !== expectedRevision)
+      throw new ConflictError('Note changed before attachment creation');
     return saveAttachmentUnlocked(noteId, filename, mimeType, data, projectRoot);
   });
 }
@@ -4546,7 +4565,11 @@ export async function getAttachment(
   };
 }
 
-export async function deleteAttachment(id: string, projectRoot?: string, expectedRevision?: number): Promise<void> {
+export async function deleteAttachment(
+  id: string,
+  projectRoot?: string,
+  expectedRevision?: number,
+): Promise<void> {
   const candidate = await getAttachment(id, projectRoot);
   if (!candidate) throw new NotFoundError('Attachment', id);
   await withNoteMutation(candidate.noteId, async () => {
@@ -4554,7 +4577,8 @@ export async function deleteAttachment(id: string, projectRoot?: string, expecte
     if (!att) throw new NotFoundError('Attachment', id);
     if (expectedRevision !== undefined) {
       const note = await getNote(att.noteId, projectRoot);
-      if (!note || note.revision !== expectedRevision) throw new ConflictError('Note changed before attachment removal');
+      if (!note || note.revision !== expectedRevision)
+        throw new ConflictError('Note changed before attachment removal');
     }
 
     try {

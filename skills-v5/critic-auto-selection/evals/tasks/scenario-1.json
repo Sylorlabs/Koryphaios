@@ -57,10 +57,7 @@
         "concerns are specific and actionable",
         "the record is auditable"
       ],
-      "blindTo": [
-        "skill-variant",
-        "expected-outcome"
-      ]
+      "blindTo": ["skill-variant", "expected-outcome"]
     }
   ],
   "requiredEvidence": [

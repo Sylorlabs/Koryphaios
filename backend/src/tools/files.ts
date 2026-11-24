@@ -86,7 +86,10 @@ export class ReadFileTool implements Tool {
       startLine: { type: 'number', description: 'Start line number (1-indexed). Optional.' },
       endLine: { type: 'number', description: 'End line number (1-indexed, inclusive). Optional.' },
       start_line: { type: 'number', description: 'Alias for startLine (1-indexed). Optional.' },
-      end_line: { type: 'number', description: 'Alias for endLine (1-indexed, inclusive). Optional.' },
+      end_line: {
+        type: 'number',
+        description: 'Alias for endLine (1-indexed, inclusive). Optional.',
+      },
     },
     required: ['path'],
   };
@@ -828,7 +831,11 @@ export class GlobTool implements Tool {
   };
 
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
-    const { pattern, path: basePath, __displayPath: displayPath } = call.input as {
+    const {
+      pattern,
+      path: basePath,
+      __displayPath: displayPath,
+    } = call.input as {
       pattern: string;
       path?: string;
       __displayPath?: string;

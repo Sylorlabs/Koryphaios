@@ -7,15 +7,16 @@
  */
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import {
-  createReadStream, lstatSync, mkdtempSync, readFileSync, statSync,
-} from 'node:fs';
+import { createReadStream, lstatSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inspectEnvironment, inspectReceipt } from './readiness.mjs';
 import {
-  examinePackagedApp, macWitnessSupport, processAlive, witnessMacWindow,
+  examinePackagedApp,
+  macWitnessSupport,
+  processAlive,
+  witnessMacWindow,
 } from './native-macos.mjs';
 
 const SCENARIO_ID = 'desktop-electron-tauri-full-task-2-individual';
@@ -51,7 +52,8 @@ export async function assessNativePrerequisites({
   if (environment.driver?.available && /^[0-9a-f]{64}$/.test(expectedHash ?? '')) {
     try {
       actualHash = await fingerprint(environment.driver.path);
-      if (actualHash !== expectedHash) blockers.push('Native driver differs from reviewed SHA-256 pin');
+      if (actualHash !== expectedHash)
+        blockers.push('Native driver differs from reviewed SHA-256 pin');
     } catch (error) {
       blockers.push(`Unable to fingerprint native driver: ${error.message}`);
     }
@@ -73,7 +75,8 @@ export async function assessNativePrerequisites({
  */
 export class NativeCheckpointVerifier {
   constructor({
-    challenge, runDir,
+    challenge,
+    runDir,
     examine = examinePackagedApp,
     observe = witnessMacWindow,
     alive = processAlive,
@@ -93,9 +96,15 @@ export class NativeCheckpointVerifier {
   }
 
   async accept(message) {
-    if (!message || typeof message !== 'object' || Array.isArray(message)
-      || message.checkpoint !== CHECKPOINTS[this.cursor]) {
-      throw new Error(`Unexpected driver checkpoint; expected ${CHECKPOINTS[this.cursor] ?? 'end'}`);
+    if (
+      !message ||
+      typeof message !== 'object' ||
+      Array.isArray(message) ||
+      message.checkpoint !== CHECKPOINTS[this.cursor]
+    ) {
+      throw new Error(
+        `Unexpected driver checkpoint; expected ${CHECKPOINTS[this.cursor] ?? 'end'}`,
+      );
     }
     const kind = message.checkpoint;
     if (kind === 'packaged-launch' || kind === 'packaged-relaunch') {
@@ -110,15 +119,24 @@ export class NativeCheckpointVerifier {
         throw new Error('Relaunch must use a different native process ID');
       }
       const observation = await this.observe({
-        pid: message.pid, packagedApp: app, runDir: this.runDir,
+        pid: message.pid,
+        packagedApp: app,
+        runDir: this.runDir,
         captureName: kind === 'packaged-launch' ? 'launch.png' : 'relaunch.png',
       });
-      if (observation.pid !== message.pid || !observation.capturePath
-        || observation.source !== 'macos-system-events-and-screencapture') {
+      if (
+        observation.pid !== message.pid ||
+        !observation.capturePath ||
+        observation.source !== 'macos-system-events-and-screencapture'
+      ) {
         throw new Error('Independent OS window observation incomplete');
       }
-      const expectedCapture = join(this.runDir, kind === 'packaged-launch' ? 'launch.png' : 'relaunch.png');
-      if (observation.capturePath !== expectedCapture) throw new Error('Unexpected OS capture destination');
+      const expectedCapture = join(
+        this.runDir,
+        kind === 'packaged-launch' ? 'launch.png' : 'relaunch.png',
+      );
+      if (observation.capturePath !== expectedCapture)
+        throw new Error('Unexpected OS capture destination');
       this.packagedApp = app;
       if (kind === 'packaged-launch') this.first = observation;
       else this.second = observation;
@@ -133,26 +151,35 @@ export class NativeCheckpointVerifier {
         throw new Error('Driver completion must identify the isolated receipt path');
       }
       const entry = lstatSync(receiptPath);
-      if (!entry.isFile() || entry.isSymbolicLink() || entry.size <= 0
-        || entry.size > MAX_RECEIPT_BYTES) {
+      if (
+        !entry.isFile() ||
+        entry.isSymbolicLink() ||
+        entry.size <= 0 ||
+        entry.size > MAX_RECEIPT_BYTES
+      ) {
         throw new Error('Native receipt missing, unsafe, or too large');
       }
       const receipt = JSON.parse(readFileSync(receiptPath, 'utf8'));
       const verdict = this.inspect(receipt, {
-        expectedChallenge: this.challenge, receiptPath,
+        expectedChallenge: this.challenge,
+        receiptPath,
       });
       if (verdict.classification !== 'structural-only') {
         throw new Error('Native driver receipt rejected: ' + verdict.issues.join('; '));
       }
-      if (receipt.package?.executablePath !== this.packagedApp.executablePath
-        || receipt.capture?.path !== this.second.capturePath
-        || receipt.capture?.sha256 !== this.second.sha256) {
+      if (
+        receipt.package?.executablePath !== this.packagedApp.executablePath ||
+        receipt.capture?.path !== this.second.capturePath ||
+        receipt.capture?.sha256 !== this.second.sha256
+      ) {
         throw new Error('Driver receipt artifacts differ from independently witnessed run');
       }
       const event = (name) => receipt.nativeEvents.find((entry) => entry.kind === name);
-      if (event('packaged-launch')?.pid !== this.first.pid
-        || event('app-quit')?.pid !== this.first.pid
-        || event('packaged-relaunch')?.pid !== this.second.pid) {
+      if (
+        event('packaged-launch')?.pid !== this.first.pid ||
+        event('app-quit')?.pid !== this.first.pid ||
+        event('packaged-relaunch')?.pid !== this.second.pid
+      ) {
         throw new Error('Driver receipt process IDs differ from witnessed processes');
       }
       this.finished = {
@@ -173,46 +200,90 @@ export class NativeCheckpointVerifier {
     return { checkpoint: kind, proceed: true, challenge: this.challenge };
   }
 
-  get complete() { return this.cursor === CHECKPOINTS.length && this.finished !== null; }
+  get complete() {
+    return this.cursor === CHECKPOINTS.length && this.finished !== null;
+  }
 }
 
 export function limitedDriverEnvironment(env) {
   // Never forward application/API credentials or arbitrary KORY_*/CI secrets.
   const allow = [
-    'PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'CARGO_HOME', 'RUSTUP_HOME',
-    'CARGO_TARGET_DIR', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+    'PATH',
+    'HOME',
+    'TMPDIR',
+    'LANG',
+    'LC_ALL',
+    'CARGO_HOME',
+    'RUSTUP_HOME',
+    'CARGO_TARGET_DIR',
+    'SSL_CERT_FILE',
+    'SSL_CERT_DIR',
   ];
-  return Object.fromEntries(allow.filter((name) => typeof env[name] === 'string')
-    .map((name) => [name, env[name]]));
+  return Object.fromEntries(
+    allow.filter((name) => typeof env[name] === 'string').map((name) => [name, env[name]]),
+  );
 }
 
 /** Execute and acknowledge an external reviewed driver's live checkpoints. */
-export function driveNativeDriver({ driverPath, cliPath, runDir, challenge, verifier,
-  env = process.env, timeoutMs = MAX_RUN_MS, spawnProcess = spawn }) {
+export function driveNativeDriver({
+  driverPath,
+  cliPath,
+  runDir,
+  challenge,
+  verifier,
+  env = process.env,
+  timeoutMs = MAX_RUN_MS,
+  spawnProcess = spawn,
+}) {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawnProcess(driverPath, [
-      '--scenario', SCENARIO_ID, '--tauri-cli', cliPath,
-      '--challenge', challenge, '--run-dir', runDir,
-    ], {
-      cwd: runDir, env: limitedDriverEnvironment(env), stdio: ['pipe', 'pipe', 'pipe'],
-      shell: false, detached: true,
-    });
+    const child = spawnProcess(
+      driverPath,
+      [
+        '--scenario',
+        SCENARIO_ID,
+        '--tauri-cli',
+        cliPath,
+        '--challenge',
+        challenge,
+        '--run-dir',
+        runDir,
+      ],
+      {
+        cwd: runDir,
+        env: limitedDriverEnvironment(env),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: false,
+        detached: true,
+      },
+    );
     let buffer = '';
     let stderr = '';
     let failure = null;
     let queue = Promise.resolve();
     const killDriver = () => {
-      try { if (Number.isInteger(child.pid)) process.kill(-child.pid, 'SIGTERM'); }
-      catch { try { child.kill('SIGTERM'); } catch { /* already exited */ } }
+      try {
+        if (Number.isInteger(child.pid)) process.kill(-child.pid, 'SIGTERM');
+      } catch {
+        try {
+          child.kill('SIGTERM');
+        } catch {
+          /* already exited */
+        }
+      }
     };
     const fail = (error) => {
       if (failure) return;
       failure = error;
       killDriver();
     };
-    const timeout = setTimeout(() => fail(new Error(`Native driver exceeded ${timeoutMs} ms`)), timeoutMs);
+    const timeout = setTimeout(
+      () => fail(new Error(`Native driver exceeded ${timeoutMs} ms`)),
+      timeoutMs,
+    );
     timeout.unref?.();
-    child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString('utf8')).slice(-2000); });
+    child.stderr.on('data', (chunk) => {
+      stderr = (stderr + chunk.toString('utf8')).slice(-2000);
+    });
     child.stdin.on('error', fail);
     child.stdout.on('data', (chunk) => {
       if (failure) return;
@@ -225,14 +296,16 @@ export function driveNativeDriver({ driverPath, cliPath, runDir, challenge, veri
       while ((index = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, index);
         buffer = buffer.slice(index + 1);
-        queue = queue.then(async () => {
-          if (failure) return;
-          if (!line || Buffer.byteLength(line) > MAX_STDOUT_LINE_BYTES) {
-            throw new Error('Driver must emit one bounded JSON object per line');
-          }
-          const acknowledgement = await verifier.accept(JSON.parse(line));
-          child.stdin.write(JSON.stringify(acknowledgement) + '\n');
-        }).catch(fail);
+        queue = queue
+          .then(async () => {
+            if (failure) return;
+            if (!line || Buffer.byteLength(line) > MAX_STDOUT_LINE_BYTES) {
+              throw new Error('Driver must emit one bounded JSON object per line');
+            }
+            const acknowledgement = await verifier.accept(JSON.parse(line));
+            child.stdin.write(JSON.stringify(acknowledgement) + '\n');
+          })
+          .catch(fail);
       }
     });
     child.on('error', fail);
@@ -241,10 +314,16 @@ export function driveNativeDriver({ driverPath, cliPath, runDir, challenge, veri
       await queue;
       if (failure) return rejectRun(failure);
       if (code !== 0 || signal) {
-        return rejectRun(new Error(`Native driver exited ${code ?? signal}: ${stderr.trim() || 'no stderr'}`));
+        return rejectRun(
+          new Error(`Native driver exited ${code ?? signal}: ${stderr.trim() || 'no stderr'}`),
+        );
       }
-      if (buffer.trim()) return rejectRun(new Error('Native driver emitted an incomplete JSON line'));
-      if (!verifier.complete) return rejectRun(new Error('Native driver exited without completing the live checkpoint protocol'));
+      if (buffer.trim())
+        return rejectRun(new Error('Native driver emitted an incomplete JSON line'));
+      if (!verifier.complete)
+        return rejectRun(
+          new Error('Native driver exited without completing the live checkpoint protocol'),
+        );
       resolveRun(verifier.finished);
     });
   });
@@ -260,22 +339,32 @@ export async function runNativeAttempt({ env = process.env } = {}) {
     const result = await driveNativeDriver({
       driverPath: prereq.environment.driver.path,
       cliPath: prereq.environment.cli.path,
-      runDir, challenge, verifier, env,
+      runDir,
+      challenge,
+      verifier,
+      env,
     });
     return { ...result, runDir, driverSha256: prereq.driverSha256, exitCode: 3 };
   } catch (error) {
     return {
-      status: 'native-attempt-failed', exitCode: 1, nativeDeviceVerified: false,
+      status: 'native-attempt-failed',
+      exitCode: 1,
+      nativeDeviceVerified: false,
       nativeWindowObserved: Boolean(verifier.first),
-      scenarioQualified: false, runDir, error: String(error.message),
+      scenarioQualified: false,
+      runDir,
+      error: String(error.message),
     };
   }
 }
 
-const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const invokedDirectly =
+  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (invokedDirectly) {
   if (process.argv.length !== 2) {
-    process.stderr.write('Usage: node native-run.mjs (configuration through KORY_SKILL_EVAL_TAURI_* variables)\n');
+    process.stderr.write(
+      'Usage: node native-run.mjs (configuration through KORY_SKILL_EVAL_TAURI_* variables)\n',
+    );
     process.exitCode = 64;
   } else {
     const result = await runNativeAttempt();

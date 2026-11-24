@@ -23,8 +23,7 @@ export function effectiveNotePermission(
     // up a non-default preset) or when the stored level differs from that
     // tool's default — older configs write the level without an override row.
     const explicit =
-      permissions.overrides?.[name] !== undefined ||
-      level !== DEFAULT_NOTE_TOOL_PERMISSIONS[name];
+      permissions.overrides?.[name] !== undefined || level !== DEFAULT_NOTE_TOOL_PERMISSIONS[name];
     return explicit ? level : 'auto';
   }
   return level;

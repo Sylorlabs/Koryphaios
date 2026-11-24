@@ -85,7 +85,10 @@ function unixMs(value: unknown): number | null {
 /** `TEAMS_TIER_DEVIN_MAX` → "Devin Max". */
 function tierLabel(value: unknown): string | undefined {
   if (!text(value, 128)) return undefined;
-  const stripped = value.replace(/^TEAMS_TIER_/, '').replace(/_/g, ' ').toLowerCase();
+  const stripped = value
+    .replace(/^TEAMS_TIER_/, '')
+    .replace(/_/g, ' ')
+    .toLowerCase();
   if (!stripped || stripped === value.toLowerCase()) return undefined;
   return stripped
     .split(' ')
@@ -235,7 +238,8 @@ export async function getDevinAccountSnapshot(
   let version = deps.version;
   if (!version) {
     try {
-      const { getDevinCapabilities } = require('./devin-capabilities') as typeof import('./devin-capabilities');
+      const { getDevinCapabilities } =
+        require('./devin-capabilities') as typeof import('./devin-capabilities');
       version = getDevinCapabilities().version ?? '0';
     } catch {
       version = '0';

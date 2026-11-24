@@ -123,7 +123,9 @@ export function upsertProviderSecrets(
   const headers = filtered.headers;
   if (Object.keys(filtered).length === 0) return;
   const secrets = loadProviderSecrets(projectRoot);
-  const existing = Object.prototype.hasOwnProperty.call(secrets, provider) ? secrets[provider]! : {};
+  const existing = Object.prototype.hasOwnProperty.call(secrets, provider)
+    ? secrets[provider]!
+    : {};
   secrets[provider] = {
     ...existing,
     ...filtered,
@@ -195,7 +197,7 @@ export function hydrateProviderSecrets<T extends Record<string, unknown>>(
   const out: Record<string, unknown> = { ...providers };
   for (const [name, vals] of Object.entries(secrets)) {
     const existing = Object.prototype.hasOwnProperty.call(out, name)
-      ? (out[name] as Record<string, unknown>) ?? {}
+      ? ((out[name] as Record<string, unknown>) ?? {})
       : {};
     const filtered = normalizedProviderSecretEntry(vals);
     const headers = filtered.headers;

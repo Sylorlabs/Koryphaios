@@ -50,12 +50,7 @@ export interface AcpProbeSummary {
 }
 
 export type AcpAgentListingStatus =
-  | 'ready'
-  | 'needs-probe'
-  | 'probe-failed'
-  | 'available'
-  | 'not-added'
-  | 'added';
+  'ready' | 'needs-probe' | 'probe-failed' | 'available' | 'not-added' | 'added';
 
 export interface AcpAgentListing {
   id: string;

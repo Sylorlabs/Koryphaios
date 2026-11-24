@@ -69,16 +69,23 @@ async function fixture(id: string, tests: string) {
   const scenario = { id } as SkillEvalScenarioV3;
   const root = mkdtempSync(join(tmpdir(), 'kory-testing-engineering-control-'));
   roots.push(root);
-  const materializer = TESTING_ENGINEERING_SKILL_EVAL_MATERIALIZERS.find(item => item.matches(scenario))!;
-  const scorer = TESTING_ENGINEERING_SKILL_EVAL_SCORERS.find(item => item.scenarioIds.includes(id))!;
+  const materializer = TESTING_ENGINEERING_SKILL_EVAL_MATERIALIZERS.find((item) =>
+    item.matches(scenario),
+  )!;
+  const scorer = TESTING_ENGINEERING_SKILL_EVAL_SCORERS.find((item) =>
+    item.scenarioIds.includes(id),
+  )!;
   await materializer.materialize(root, scenario);
   writeFileSync(join(root, 'tests/regression.test.ts'), tests);
   return {
     root,
-    score: () => scorer.score({
-      scenario, experiment: {} as never, workingDirectory: root,
-      observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
-    }),
+    score: () =>
+      scorer.score({
+        scenario,
+        experiment: {} as never,
+        workingDirectory: root,
+        observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
+      }),
   };
 }
 
@@ -98,11 +105,21 @@ describe('testing-engineering mutation fixtures', () => {
     test(`${id}: mutation subprocess timeout is not a kill`, async () => {
       const control = await fixture(id!, tests!);
       const actualSpawn = childProcess.spawnSync;
-      spyOn(childProcess, 'spawnSync').mockImplementation((...args: Parameters<typeof childProcess.spawnSync>) => {
-        const options = args[2] as { cwd?: string };
-        if (options?.cwd === control.root) return actualSpawn(...args);
-        return { pid: 0, output: [], stdout: '', stderr: '', status: null, signal: 'SIGTERM', error: Object.assign(new Error('timed out'), {code: 'ETIMEDOUT'}) };
-      });
+      spyOn(childProcess, 'spawnSync').mockImplementation(
+        (...args: Parameters<typeof childProcess.spawnSync>) => {
+          const options = args[2] as { cwd?: string };
+          if (options?.cwd === control.root) return actualSpawn(...args);
+          return {
+            pid: 0,
+            output: [],
+            stdout: '',
+            stderr: '',
+            status: null,
+            signal: 'SIGTERM',
+            error: Object.assign(new Error('timed out'), { code: 'ETIMEDOUT' }),
+          };
+        },
+      );
       const score = await control.score();
       expect(score.evidence.join('\n')).toContain('fixed suite: pass');
       expect(score.passed, score.evidence.join('\n')).toBe(false);

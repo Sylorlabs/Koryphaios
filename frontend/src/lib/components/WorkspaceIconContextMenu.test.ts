@@ -20,9 +20,7 @@ describe('WorkspaceIconContextMenu', () => {
       },
     });
 
-    expect(
-      screen.getByRole('menu', { name: 'Actions for Documents workspace' }),
-    ).toBeVisible();
+    expect(screen.getByRole('menu', { name: 'Actions for Documents workspace' })).toBeVisible();
     await fireEvent.click(screen.getByRole('menuitem', { name: /New project here/i }));
 
     expect(onaction).toHaveBeenCalledWith('new_project');

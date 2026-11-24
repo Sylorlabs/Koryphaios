@@ -25,8 +25,7 @@ export function resolveEnabledModelIds(
   const enabled = catalog
     .filter(
       (m) =>
-        selectedModels.includes(m.id) ||
-        m.aliases?.some((alias) => selectedModels.includes(alias)),
+        selectedModels.includes(m.id) || m.aliases?.some((alias) => selectedModels.includes(alias)),
     )
     .map((m) => m.id);
   return enabled.length > 0 ? enabled : catalog.map((m) => m.id);

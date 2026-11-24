@@ -14,8 +14,7 @@ export interface AcpStdioMcpServer {
 }
 
 export type AcpPromptBlock =
-  | { type: 'text'; text: string }
-  | { type: 'image'; mimeType: string; data: string };
+  { type: 'text'; text: string } | { type: 'image'; mimeType: string; data: string };
 
 export interface AcpConfigOption {
   id: string;
@@ -228,7 +227,9 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 function normalizeLocations(value: unknown): Array<{ path?: string }> | undefined {
   if (!Array.isArray(value)) return undefined;
   const locations = value
-    .map((entry) => (isRecord(entry) && typeof entry.path === 'string' ? { path: entry.path } : null))
+    .map((entry) =>
+      isRecord(entry) && typeof entry.path === 'string' ? { path: entry.path } : null,
+    )
     .filter((entry): entry is { path: string } => !!entry);
   return locations.length > 0 ? locations : undefined;
 }

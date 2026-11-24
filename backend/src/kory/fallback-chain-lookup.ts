@@ -19,7 +19,11 @@ export function runtimeFallbackLookup(): FallbackProviderLookup {
       !UNSUPPORTED_CHAT_PROVIDER_NAMES.has(name as ProviderName) &&
       registry.get(name as ProviderName) !== undefined,
     isConnected: (name) => registry.get(name as ProviderName)?.isAvailable() === true,
-    listModelIds: (name) => registry.get(name as ProviderName)?.listModels().map((model) => model.id),
+    listModelIds: (name) =>
+      registry
+        .get(name as ProviderName)
+        ?.listModels()
+        .map((model) => model.id),
   };
 }
 

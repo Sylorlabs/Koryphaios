@@ -65,14 +65,10 @@ describe('ThemeModeEditor', () => {
     const onChooseAccent = vi.fn();
     render(ThemeModeEditor, { props: { onChooseAccent } });
 
-    await fireEvent.click(
-      screen.getByRole('button', { name: 'Edit light mode primary accent' }),
-    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit light mode primary accent' }));
     expect(onChooseAccent).toHaveBeenCalledWith('light', 'primary');
 
-    await fireEvent.click(
-      screen.getByRole('button', { name: 'Edit dark mode secondary accent' }),
-    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit dark mode secondary accent' }));
     expect(onChooseAccent).toHaveBeenCalledWith('dark', 'secondary');
   });
 });

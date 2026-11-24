@@ -251,7 +251,9 @@ export function canAutoEnable(provider: ProviderName): boolean {
       return discoverFreebuffAccounts().some(
         (account) =>
           !!whichBinary('freebuff') ||
-          executableSuffixes().some((suffix) => existsSync(join(account.profileDir, `freebuff${suffix}`))),
+          executableSuffixes().some((suffix) =>
+            existsSync(join(account.profileDir, `freebuff${suffix}`)),
+          ),
       );
     case 'omnirush':
       return !!whichBinary('omnirush') && detectOmnirushCLILogin();
@@ -313,9 +315,7 @@ export function cliAutoEnableCreds(
     case 'workbuddy-desktop':
       // No credential exists to detect: the marker only says "the desktop app
       // is installed, route turns through its runtime".
-      return locateWorkBuddyDesktopApp()
-        ? { authToken: createWorkBuddyDesktopAuthMarker() }
-        : null;
+      return locateWorkBuddyDesktopApp() ? { authToken: createWorkBuddyDesktopAuthMarker() } : null;
     default:
       return null;
   }
@@ -480,13 +480,25 @@ export function detectAgentClis(): AgentCliStatus[] {
     authSource: opencodeLogin ? '~/.local/share/opencode/auth.json' : null,
     autoEnabled: canAutoEnable('opencode'),
     workingNote:
-      'OpenCode login material detected. Chat is routed through the installed CLI (ACP); the model catalog and context windows come from the CLI\'s own authenticated catalog. Account access is verified only when the CLI runs.',
+      "OpenCode login material detected. Chat is routed through the installed CLI (ACP); the model catalog and context windows come from the CLI's own authenticated catalog. Account access is verified only when the CLI runs.",
     loggedOutNote:
       'No OpenCode login material detected — run "opencode auth login" in your terminal, then click Auth again.',
     docsUrl: 'https://opencode.ai/docs/cli/',
   });
 
-  return [claude, codex, antigravity, codebuddy, grok, cursor, devin, kimi, freebuff, omnirush, opencode];
+  return [
+    claude,
+    codex,
+    antigravity,
+    codebuddy,
+    grok,
+    cursor,
+    devin,
+    kimi,
+    freebuff,
+    omnirush,
+    opencode,
+  ];
 }
 
 function mk(

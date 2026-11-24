@@ -27,10 +27,7 @@ function createStore(): { sqlite: Database; store: RunResumptionStore } {
 }
 
 /** Test harness: a controllable clock, a fake admission, and a recorded event stream. */
-function harness(
-  store: RunResumptionStore,
-  options: { active?: boolean } = {},
-) {
+function harness(store: RunResumptionStore, options: { active?: boolean } = {}) {
   let clock = 1_000_000_000_000;
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const events: Array<{ sessionId: string; payload: PendingResumePayload }> = [];
@@ -72,7 +69,10 @@ function harness(
   };
 }
 
-function accepted(sessionId: string, completion: Promise<SessionTurnResult>): SessionTurnSubmission {
+function accepted(
+  sessionId: string,
+  completion: Promise<SessionTurnResult>,
+): SessionTurnSubmission {
   return {
     accepted: true,
     sessionId,
@@ -83,7 +83,13 @@ function accepted(sessionId: string, completion: Promise<SessionTurnResult>): Se
 }
 
 function completed(sessionId: string): SessionTurnResult {
-  return { sessionId, runId: 'run-continuation', status: 'completed', phase: 'done', reason: 'completed' };
+  return {
+    sessionId,
+    runId: 'run-continuation',
+    status: 'completed',
+    phase: 'done',
+    reason: 'completed',
+  };
 }
 
 function limited(sessionId: string): SessionTurnResult {
@@ -161,7 +167,12 @@ describe('UsageLimitResumeService', () => {
 
   test('resume-now admits a continuation, and a clean outcome clears the pending record', async () => {
     const h = harness(store);
-    h.service.schedule(SESSION, { message: LIMIT_TEXT, provider: 'claude', model: null, sourceRunId: 'run-a' });
+    h.service.schedule(SESSION, {
+      message: LIMIT_TEXT,
+      provider: 'claude',
+      model: null,
+      sourceRunId: 'run-a',
+    });
     expect(await h.service.resumeNow(SESSION)).toBe('started');
     await flush();
     expect(h.admitted).toEqual([
@@ -176,7 +187,12 @@ describe('UsageLimitResumeService', () => {
 
   test('a continuation that hits the limit again reschedules on the next backoff step', async () => {
     const h = harness(store);
-    h.service.schedule(SESSION, { message: LIMIT_TEXT, provider: 'claude', model: null, sourceRunId: null });
+    h.service.schedule(SESSION, {
+      message: LIMIT_TEXT,
+      provider: 'claude',
+      model: null,
+      sourceRunId: null,
+    });
     h.setAdmit(async (input) => {
       h.admitted.push(input);
       return accepted(SESSION, Promise.resolve(limited(SESSION)));
@@ -192,7 +208,12 @@ describe('UsageLimitResumeService', () => {
 
   test('the attempts are bounded: after the last backoff the chat is exhausted and the row is cleared', async () => {
     const h = harness(store);
-    h.service.schedule(SESSION, { message: LIMIT_TEXT, provider: 'claude', model: null, sourceRunId: null });
+    h.service.schedule(SESSION, {
+      message: LIMIT_TEXT,
+      provider: 'claude',
+      model: null,
+      sourceRunId: null,
+    });
     h.setAdmit(async (input) => {
       h.admitted.push(input);
       return accepted(SESSION, Promise.resolve(limited(SESSION)));
@@ -211,7 +232,12 @@ describe('UsageLimitResumeService', () => {
 
   test('a non-limit failure stops automatic retries instead of looping', async () => {
     const h = harness(store);
-    h.service.schedule(SESSION, { message: LIMIT_TEXT, provider: 'claude', model: null, sourceRunId: null });
+    h.service.schedule(SESSION, {
+      message: LIMIT_TEXT,
+      provider: 'claude',
+      model: null,
+      sourceRunId: null,
+    });
     h.setAdmit(async (input) => {
       h.admitted.push(input);
       return accepted(
@@ -227,12 +253,23 @@ describe('UsageLimitResumeService', () => {
 
   test('a busy session defers without consuming an attempt', async () => {
     const h = harness(store);
-    h.service.schedule(SESSION, { message: LIMIT_TEXT, provider: 'claude', model: null, sourceRunId: null });
+    h.service.schedule(SESSION, {
+      message: LIMIT_TEXT,
+      provider: 'claude',
+      model: null,
+      sourceRunId: null,
+    });
     h.setAdmit(async (input) => {
       h.admitted.push(input);
       return {
         accepted: false,
-        result: { sessionId: SESSION, runId: '', status: 'rejected', phase: 'idle', reason: 'session_busy' },
+        result: {
+          sessionId: SESSION,
+          runId: '',
+          status: 'rejected',
+          phase: 'idle',
+          reason: 'session_busy',
+        },
       } as SessionTurnSubmission;
     });
     await h.service.resumeNow(SESSION);
@@ -245,7 +282,12 @@ describe('UsageLimitResumeService', () => {
 
   test('a cancelled chat is cleared when its timer fires, without admitting a turn', async () => {
     const h = harness(store, { active: false });
-    h.service.schedule(SESSION, { message: LIMIT_TEXT, provider: 'claude', model: null, sourceRunId: null });
+    h.service.schedule(SESSION, {
+      message: LIMIT_TEXT,
+      provider: 'claude',
+      model: null,
+      sourceRunId: null,
+    });
     await h.service.resumeNow(SESSION);
     expect(h.admitted).toEqual([]);
     expect(store.getPendingResume(SESSION)).toBeNull();
@@ -253,7 +295,12 @@ describe('UsageLimitResumeService', () => {
 
   test('the user cancel clears the record and its timer; a second cancel reports nothing pending', () => {
     const h = harness(store);
-    h.service.schedule(SESSION, { message: LIMIT_TEXT, provider: 'claude', model: null, sourceRunId: null });
+    h.service.schedule(SESSION, {
+      message: LIMIT_TEXT,
+      provider: 'claude',
+      model: null,
+      sourceRunId: null,
+    });
     expect(h.service.cancel(SESSION)).toBe(true);
     expect(store.getPendingResume(SESSION)).toBeNull();
     expect(h.timers.has(SESSION)).toBe(false);
@@ -268,7 +315,12 @@ describe('UsageLimitResumeService', () => {
 
   test('a restart re-arms the pending resume; one that was running fires once on wake', () => {
     const first = harness(store);
-    first.service.schedule(SESSION, { message: LIMIT_TEXT, provider: 'claude', model: null, sourceRunId: null });
+    first.service.schedule(SESSION, {
+      message: LIMIT_TEXT,
+      provider: 'claude',
+      model: null,
+      sourceRunId: null,
+    });
     // Simulate a crash mid-resume: the row is left in the resuming state.
     const record = store.getPendingResume(SESSION)!;
     store.upsertPendingResume({ ...record, state: 'resuming' });
@@ -281,10 +333,22 @@ describe('UsageLimitResumeService', () => {
 
   test('a limit that arrives while a continuation is already running does not add a second record', async () => {
     const h = harness(store);
-    h.service.schedule(SESSION, { message: LIMIT_TEXT, provider: 'claude', model: null, sourceRunId: null });
+    h.service.schedule(SESSION, {
+      message: LIMIT_TEXT,
+      provider: 'claude',
+      model: null,
+      sourceRunId: null,
+    });
     const record = store.getPendingResume(SESSION)!;
     store.upsertPendingResume({ ...record, state: 'resuming' });
-    expect(h.service.schedule(SESSION, { message: LIMIT_TEXT, provider: 'claude', model: null, sourceRunId: null })).toBeNull();
+    expect(
+      h.service.schedule(SESSION, {
+        message: LIMIT_TEXT,
+        provider: 'claude',
+        model: null,
+        sourceRunId: null,
+      }),
+    ).toBeNull();
     expect(store.getPendingResume(SESSION)?.state).toBe('resuming');
   });
 });

@@ -41,9 +41,7 @@ export function mergeModelLists(fallback: ModelDef[], discovered: ModelDef[]): M
         ...(remote.maxOutputTokens > 0 ? { maxOutputTokens: remote.maxOutputTokens } : {}),
         ...(remote.vision !== undefined ? { vision: remote.vision } : {}),
         ...(remote.reasoningLevels?.length ? { reasoningLevels: remote.reasoningLevels } : {}),
-        ...(remote.outputModalities?.length
-          ? { outputModalities: remote.outputModalities }
-          : {}),
+        ...(remote.outputModalities?.length ? { outputModalities: remote.outputModalities } : {}),
       });
     } else {
       merged.push(catalog);

@@ -154,7 +154,9 @@ describe('isolateSessionWorkspace', () => {
     const { events } = await isolatedChat();
     const updated = events.filter((e) => e.type === 'session.updated');
     expect(updated.length).toBe(1);
-    expect((updated[0].payload as { session: Row }).session.gitWorkspace?.autoIsolated).toBeDefined();
+    expect(
+      (updated[0].payload as { session: Row }).session.gitWorkspace?.autoIsolated,
+    ).toBeDefined();
   });
 
   test('refuses when the chat is already isolated', async () => {
@@ -182,7 +184,9 @@ describe('isolateSessionWorkspace', () => {
     mkdirSync(folder);
     const rows = new Map<string, Row>([['c1', row('c1', folder)]]);
     const { kory } = manager(rows);
-    await expect(kory.isolateSessionWorkspace('c1', 'why')).rejects.toThrow('not inside a Git repository');
+    await expect(kory.isolateSessionWorkspace('c1', 'why')).rejects.toThrow(
+      'not inside a Git repository',
+    );
   });
 
   test('refuses a detached HEAD', async () => {

@@ -356,13 +356,17 @@ explain. \`tools/capture.py\` reproduces it.
 \`f0 f1 f2 f3\` are r0 to r3, \`f4\` is r12, \`f5\` is the return address in the
 faulting context, \`f6\` is the faulting PC. \`lr\` is EXC_RETURN. The stacked frame
 is the hardware exception frame, not something the handler composed.
-${scenario === 1 ? `
+${
+  scenario === 1
+    ? `
 The board has an MPU. Region 0 is the only region the application configures;
 \`firmware/board.c\` shows the base, size and access fields it writes.
-` : `
+`
+    : `
 The board dispatches packets through a table of handler pointers in
 \`firmware/board.c\`.
-`}
+`
+}
 
 ## What you deliver
 
@@ -376,22 +380,26 @@ The board dispatches packets through a table of handler pointers in
   "faultStatus": ${scenario === 1 ? '"MemManage"' : '"UsageFault"'},
   "cfsr": "0x…",
   "hfsr": "0x…",
-  ${scenario === 1
-    ? `"mmfar": "0x…",
+  ${
+    scenario === 1
+      ? `"mmfar": "0x…",
   "mmfarValid": true,
   "bfarValid": false,`
-    : `"stackedPc": "0x…",
+      : `"stackedPc": "0x…",
   "returnAddress": "0x…",
-  "invstate": true,`}
-  ${scenario === 1
-    ? `"pcSymbol": "<function containing the faulting PC>",
+  "invstate": true,`
+  }
+  ${
+    scenario === 1
+      ? `"pcSymbol": "<function containing the faulting PC>",
   "cause": "mpu-region-misconfigured",
   "mpuRegion": 0,
   "regionBase": "0x…",
   "regionSizeBytes": 32,
   "regionAccess": "no-access",`
-    : `"pcSymbol": "<function containing the return address>",
-  "cause": "thumb-bit-cleared",`}
+      : `"pcSymbol": "<function containing the return address>",
+  "cause": "thumb-bit-cleared",`
+  }
   "repair": "<one sentence: what you changed and why it removes the fault>"
 }
 \`\`\`
@@ -562,9 +570,10 @@ export interface HardwareRecord {
 }
 
 export function parseHardwareRecord(text: string): HardwareRecord | null {
-  const match = /^(\w+) cfsr=([0-9a-f]{8}) hfsr=([0-9a-f]{8}) mmfar=([0-9a-f]{8}) bfar=([0-9a-f]{8}) lr=([0-9a-f]{8}) ((?:f[0-6]=[0-9a-f]{8} ?){7})/u.exec(
-    text.trim(),
-  );
+  const match =
+    /^(\w+) cfsr=([0-9a-f]{8}) hfsr=([0-9a-f]{8}) mmfar=([0-9a-f]{8}) bfar=([0-9a-f]{8}) lr=([0-9a-f]{8}) ((?:f[0-6]=[0-9a-f]{8} ?){7})/u.exec(
+      text.trim(),
+    );
   if (!match) return null;
   const frame = [...match[7].matchAll(/f(\d)=([0-9a-f]{8})/gu)]
     .sort((a, b) => Number(a[1]) - Number(b[1]))
@@ -613,7 +622,10 @@ export function symbolContaining(
 }
 
 export function expectedChecksum(seed: number, scenario: 1 | 2): number {
-  const samples = Array.from({ length: 8 }, (_, index) => ((seed ^ Math.imul(0x9e37, index + 1)) >>> 3) & 0xff);
+  const samples = Array.from(
+    { length: 8 },
+    (_, index) => ((seed ^ Math.imul(0x9e37, index + 1)) >>> 3) & 0xff,
+  );
   if (scenario === 1) {
     let checksum = 0;
     for (let packet = 0; packet < 3; packet++) {
@@ -697,9 +709,7 @@ export function runHardwareScenario(root: string, scenario: 1 | 2): HardwareScen
   checks.push({
     id: 'contract',
     passed: Boolean(diagnosis) && Boolean(record),
-    detail: diagnosis
-      ? 'diagnosis.json parsed'
-      : 'diagnosis.json is missing or is not valid JSON',
+    detail: diagnosis ? 'diagnosis.json parsed' : 'diagnosis.json is missing or is not valid JSON',
   });
   if (!record) evidence.push(`shipped fault record unreadable: ${faultText.slice(0, 200)}`);
 
@@ -780,11 +790,14 @@ export function runHardwareScenario(root: string, scenario: 1 | 2): HardwareScen
   checks.push({
     id: 'repair-builds',
     passed: run.built,
-    detail: run.built ? 'candidate source compiled and linked' : run.buildLog.slice(-600) || 'build failed',
+    detail: run.built
+      ? 'candidate source compiled and linked'
+      : run.buildLog.slice(-600) || 'build failed',
   });
   const expected = expectedChecksum(seed, scenario);
   const published = /^OK packets=3 checksum=([0-9a-f]{8})/u.exec(run.record);
-  const runsClean = run.built && Boolean(published) && Number.parseInt(published![1], 16) === expected;
+  const runsClean =
+    run.built && Boolean(published) && Number.parseInt(published![1], 16) === expected;
   checks.push({
     id: 'repair-runs',
     passed: runsClean,

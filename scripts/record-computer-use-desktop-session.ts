@@ -9,7 +9,15 @@
 // Output: outputs/skill-library-finish-plan/computer-use-live-session.json and the
 // step screenshots under computer-use-runtime/captures/.
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 const HERE = dirname(new URL(import.meta.url).pathname);
@@ -20,13 +28,38 @@ const IMAGE = 'kory-at-linux';
 
 const STEPS = [
   { name: 'surface-ready', action: 'none', note: 'window painted before any input' },
-  { name: 'focus-authorized', action: 'key Tab', note: 'first keyboard stop is the authorized export control' },
+  {
+    name: 'focus-authorized',
+    action: 'key Tab',
+    note: 'first keyboard stop is the authorized export control',
+  },
   { name: 'export-authorized', action: 'click 144 138', note: 'authorized export performed' },
-  { name: 'focus-denied', action: 'key Tab', note: 'second keyboard stop is the denied export control' },
-  { name: 'export-denied', action: 'click 416 138', note: 'denied export refused by the application' },
-  { name: 'permission-race-setup', action: 'shell rm -f /var/kory-targets/authorized/report.txt; chmod 0500 /var/kory-targets/authorized', note: 'the exported file is removed and the authorized root made read-only while the window is open' },
-  { name: 'retry-authorized', action: 'click 144 210', note: 'retry against a now unwritable root' },
-  { name: 'race-cleared', action: 'shell chmod 0755 /var/kory-targets/authorized', note: 'authorized root restored' },
+  {
+    name: 'focus-denied',
+    action: 'key Tab',
+    note: 'second keyboard stop is the denied export control',
+  },
+  {
+    name: 'export-denied',
+    action: 'click 416 138',
+    note: 'denied export refused by the application',
+  },
+  {
+    name: 'permission-race-setup',
+    action:
+      'shell rm -f /var/kory-targets/authorized/report.txt; chmod 0500 /var/kory-targets/authorized',
+    note: 'the exported file is removed and the authorized root made read-only while the window is open',
+  },
+  {
+    name: 'retry-authorized',
+    action: 'click 144 210',
+    note: 'retry against a now unwritable root',
+  },
+  {
+    name: 'race-cleared',
+    action: 'shell chmod 0755 /var/kory-targets/authorized',
+    note: 'authorized root restored',
+  },
 ] as const;
 
 rmSync(CAPTURES, { recursive: true, force: true });
@@ -129,7 +162,8 @@ const session = {
   application: {
     name: 'Kory Export Console',
     runtime: 'Python 3 + Tk',
-    policy: 'an export is permitted only inside targets/authorized and only while that root is writable',
+    policy:
+      'an export is permitted only inside targets/authorized and only while that root is writable',
   },
   steps: STEPS.map((step) => {
     const file = join(CAPTURES, `${step.name}.png`);
@@ -150,5 +184,7 @@ writeFileSync(out, `${JSON.stringify(session, null, 2)}\n`);
 console.log(`wrote ${out}`);
 console.log(`steps=${STEPS.length} captures=${captures.length} actions=${actionLog.length}`);
 for (const action of actionLog) {
-  console.log(`  ${action.target.padEnd(12)} permitted=${String(action.permitted).padEnd(5)} ${action.status}`);
+  console.log(
+    `  ${action.target.padEnd(12)} permitted=${String(action.permitted).padEnd(5)} ${action.status}`,
+  );
 }

@@ -5,24 +5,13 @@
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "ai",
-    "ml",
-    "training"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["ai", "ml", "training"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 8000,
-  "broader": [
-    "implementation"
-  ],
+  "broader": ["implementation"],
   "facets": [],
-  "requires": [
-    "verification",
-    "ml-evaluation"
-  ],
+  "requires": ["verification", "ml-evaluation"],
   "conflicts": [],
   "activation": [
     "fine tuning",
@@ -99,13 +88,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "llm-evaluation"
-        ],
-        "tags": [
-          "ambiguous",
-          "neighbor-boundary"
-        ]
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["ambiguous", "neighbor-boundary"]
       },
       {
         "id": "fine-tuning-training-ambiguous-2",
@@ -113,13 +97,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "rag-retrieval-systems"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["rag-retrieval-systems"],
+        "tags": ["ambiguous", "scope-control"]
       },
       {
         "id": "fine-tuning-training-ambiguous-3",
@@ -127,13 +106,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "mlops"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["mlops"],
+        "tags": ["ambiguous", "scope-control"]
       }
     ],
     "adversarial": [
@@ -143,13 +117,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "documentation"
-        ],
-        "tags": [
-          "adversarial",
-          "quoted-decoy"
-        ]
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "quoted-decoy"]
       },
       {
         "id": "fine-tuning-training-adversarial-2",
@@ -157,13 +126,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "incident-response"
-        ],
-        "tags": [
-          "adversarial",
-          "scope-control"
-        ]
+        "adjacentSkills": ["incident-response"],
+        "tags": ["adversarial", "scope-control"]
       },
       {
         "id": "fine-tuning-training-adversarial-3",
@@ -171,13 +135,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "documentation"
-        ],
-        "tags": [
-          "adversarial",
-          "scope-control"
-        ]
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "scope-control"]
       }
     ]
   },

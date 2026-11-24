@@ -121,10 +121,7 @@ describe('messaging permission policy', () => {
 
   test('same-chat mail stays queued in every mode, even when overrides block cross-chat', async () => {
     for (const mode of Object.keys(MATRIX)) {
-      const sender = await seedProjectSession(
-        `Own ${mode}`,
-        `/tmp/kory-own-${mode}`,
-      );
+      const sender = await seedProjectSession(`Own ${mode}`, `/tmp/kory-own-${mode}`);
       configureAgentMail({
         kory: mailKory({
           mode,

@@ -11,7 +11,10 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { SkillEvalDeterministicScorer, SkillEvalFixtureMaterializer } from './skill-eval-execution';
+import type {
+  SkillEvalDeterministicScorer,
+  SkillEvalFixtureMaterializer,
+} from './skill-eval-execution';
 import { readJsonArtifact, writeFixtureFile } from './skill-eval-fixture-helpers';
 import { finishChecks, runBounded } from './skill-eval-real-web-runtime';
 
@@ -29,13 +32,76 @@ export interface NativeCaptureContext {
 }
 
 export const NATIVE_CAPTURE_CONTEXTS: readonly NativeCaptureContext[] = [
-  { id: 'min-light-en', width: 620, height: 520, appearance: 'light', locale: 'en', textScale: 1, emptySelection: false, denseMetadata: false },
-  { id: 'default-light-en', width: 900, height: 700, appearance: 'light', locale: 'en', textScale: 1, emptySelection: false, denseMetadata: false },
-  { id: 'wide-light-en', width: 1400, height: 900, appearance: 'light', locale: 'en', textScale: 1, emptySelection: false, denseMetadata: false },
-  { id: 'default-dark-en', width: 900, height: 700, appearance: 'dark', locale: 'en', textScale: 1, emptySelection: false, denseMetadata: false },
-  { id: 'min-dark-de-large-text', width: 620, height: 520, appearance: 'dark', locale: 'de', textScale: 1.35, emptySelection: false, denseMetadata: false },
-  { id: 'empty-selection', width: 900, height: 700, appearance: 'light', locale: 'en', textScale: 1, emptySelection: true, denseMetadata: false },
-  { id: 'dense-metadata', width: 900, height: 700, appearance: 'light', locale: 'en', textScale: 1, emptySelection: false, denseMetadata: true },
+  {
+    id: 'min-light-en',
+    width: 620,
+    height: 520,
+    appearance: 'light',
+    locale: 'en',
+    textScale: 1,
+    emptySelection: false,
+    denseMetadata: false,
+  },
+  {
+    id: 'default-light-en',
+    width: 900,
+    height: 700,
+    appearance: 'light',
+    locale: 'en',
+    textScale: 1,
+    emptySelection: false,
+    denseMetadata: false,
+  },
+  {
+    id: 'wide-light-en',
+    width: 1400,
+    height: 900,
+    appearance: 'light',
+    locale: 'en',
+    textScale: 1,
+    emptySelection: false,
+    denseMetadata: false,
+  },
+  {
+    id: 'default-dark-en',
+    width: 900,
+    height: 700,
+    appearance: 'dark',
+    locale: 'en',
+    textScale: 1,
+    emptySelection: false,
+    denseMetadata: false,
+  },
+  {
+    id: 'min-dark-de-large-text',
+    width: 620,
+    height: 520,
+    appearance: 'dark',
+    locale: 'de',
+    textScale: 1.35,
+    emptySelection: false,
+    denseMetadata: false,
+  },
+  {
+    id: 'empty-selection',
+    width: 900,
+    height: 700,
+    appearance: 'light',
+    locale: 'en',
+    textScale: 1,
+    emptySelection: true,
+    denseMetadata: false,
+  },
+  {
+    id: 'dense-metadata',
+    width: 900,
+    height: 700,
+    appearance: 'light',
+    locale: 'en',
+    textScale: 1,
+    emptySelection: false,
+    denseMetadata: true,
+  },
 ] as const;
 
 export const INSPECTOR_SWIFT = String.raw`import AppKit
@@ -424,7 +490,10 @@ export const VISUAL_NATIVE_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicSc
         immutable ? 'unchanged' : 'candidate modified an evaluator owned fixture file',
       );
 
-      const result = readJsonArtifact<NativeResultArtifact>(workingDirectory, 'verification/result.json');
+      const result = readJsonArtifact<NativeResultArtifact>(
+        workingDirectory,
+        'verification/result.json',
+      );
       const captures = result?.captures ?? [];
       const contexts = result?.contexts ?? [];
       const missingContexts = NATIVE_CAPTURE_CONTEXTS.filter(
@@ -475,14 +544,22 @@ export const VISUAL_NATIVE_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicSc
             ['swiftc', '-O', 'Inspector.swift', '-o', 'inspector'],
             workingDirectory,
             120_000,
-            { ...process.env, DEVELOPER_DIR: process.env.DEVELOPER_DIR?.trim() || '/Applications/Xcode-beta.app/Contents/Developer' },
+            {
+              ...process.env,
+              DEVELOPER_DIR:
+                process.env.DEVELOPER_DIR?.trim() ||
+                '/Applications/Xcode-beta.app/Contents/Developer',
+            },
           );
         } catch (error) {
           buildError = (error as Error).message.slice(0, 400);
         }
       }
-      add('capture tool builds with the platform toolchain', toolchain && !buildError,
-        buildError || 'built');
+      add(
+        'capture tool builds with the platform toolchain',
+        toolchain && !buildError,
+        buildError || 'built',
+      );
 
       const verdictErrors: string[] = [];
       if (!buildError) {
@@ -520,14 +597,18 @@ export const VISUAL_NATIVE_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicSc
             const expectedVerdict = truth.length === 0 ? 'clean' : 'defects';
             if (!declared) verdictErrors.push(`${context.id}: no verdict`);
             else if (verdict !== expectedVerdict) {
-              verdictErrors.push(`${context.id}: verdict ${verdict ?? 'missing'}, measured ${expectedVerdict}`);
+              verdictErrors.push(
+                `${context.id}: verdict ${verdict ?? 'missing'}, measured ${expectedVerdict}`,
+              );
             } else if (JSON.stringify(claimed) !== JSON.stringify(truth)) {
               verdictErrors.push(
                 `${context.id}: defects ${claimed.join(',') || 'none'} measured ${truth.join(',') || 'none'}`,
               );
             }
           } catch (error) {
-            verdictErrors.push(`${context.id}: evaluator capture failed ${(error as Error).message.slice(0, 120)}`);
+            verdictErrors.push(
+              `${context.id}: evaluator capture failed ${(error as Error).message.slice(0, 120)}`,
+            );
           }
         }
       }
@@ -551,7 +632,9 @@ export const VISUAL_NATIVE_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicSc
       add(
         'declared verification status and platform',
         verified,
-        verified ? 'verified on macos-appkit' : `status=${result?.status ?? 'missing'} platform=${result?.platform ?? 'missing'}`,
+        verified
+          ? 'verified on macos-appkit'
+          : `status=${result?.status ?? 'missing'} platform=${result?.platform ?? 'missing'}`,
       );
 
       // These checks are the fixture's own verification evidence: the capture tool
@@ -639,11 +722,20 @@ const OPERATIONS_BUILD = BUILD_SCRIPT.replace('Inspector.swift', 'Operations.swi
 );
 
 const REQUIRED_STATES = [
-  'running', 'loading', 'partial', 'stale-or-error', 'success', 'cancelled',
-  'cancellation-failed', 'disabled', 'recovered',
+  'running',
+  'loading',
+  'partial',
+  'stale-or-error',
+  'success',
+  'cancelled',
+  'cancellation-failed',
+  'disabled',
+  'recovered',
 ] as const;
 const REQUIRED_CONSEQUENCES = [
-  'destructive-confirmation', 'cancellation-boundary', 'interruption-return',
+  'destructive-confirmation',
+  'cancellation-boundary',
+  'interruption-return',
 ] as const;
 const REQUIRED_VERIFICATION = [
   'native-frontend-platform-boundary',
@@ -693,8 +785,11 @@ export const NATIVE_OPERATIONS_SKILL_EVAL_SCORERS: readonly SkillEvalDeterminist
         fixed(workingDirectory, 'Operations.swift', INSPECTOR_SWIFT) &&
         fixed(workingDirectory, 'build.sh', OPERATIONS_BUILD) &&
         fixed(workingDirectory, 'README.md', OPERATIONS_README);
-      add('evaluator owned fixture inputs', immutable,
-        immutable ? 'unchanged' : 'candidate modified an evaluator owned fixture file');
+      add(
+        'evaluator owned fixture inputs',
+        immutable,
+        immutable ? 'unchanged' : 'candidate modified an evaluator owned fixture file',
+      );
 
       const plan = readJsonArtifact<NativePlan>(workingDirectory, 'plan.json');
       const reason = (plan?.delegation?.reason ?? '').trim();
@@ -726,61 +821,113 @@ export const NATIVE_OPERATIONS_SKILL_EVAL_SCORERS: readonly SkillEvalDeterminist
       const states = plan?.states ?? [];
       const statesComplete = REQUIRED_STATES.every((id) => {
         const entry = states.find((candidate) => candidate.id === id);
-        return Boolean(entry && (entry.feedback ?? '').trim().length >= 25 && (entry.recovery ?? '').trim().length >= 25);
+        return Boolean(
+          entry &&
+          (entry.feedback ?? '').trim().length >= 25 &&
+          (entry.recovery ?? '').trim().length >= 25,
+        );
       });
-      add('every state has feedback and a recovery path', statesComplete,
-        `${states.length} state rows`);
+      add(
+        'every state has feedback and a recovery path',
+        statesComplete,
+        `${states.length} state rows`,
+      );
 
       const consequences = plan?.consequences ?? [];
       const consequencesComplete = REQUIRED_CONSEQUENCES.every((id) => {
         const entry = consequences.find((candidate) => candidate.id === id);
-        return Boolean(entry && (entry.precondition ?? '').trim().length >= 25 && (entry.outcome ?? '').trim().length >= 25);
+        return Boolean(
+          entry &&
+          (entry.precondition ?? '').trim().length >= 25 &&
+          (entry.outcome ?? '').trim().length >= 25,
+        );
       });
-      add('destructive, cancellation and interruption consequences are explicit',
-        consequencesComplete, `${consequences.length} consequence rows`);
+      add(
+        'destructive, cancellation and interruption consequences are explicit',
+        consequencesComplete,
+        `${consequences.length} consequence rows`,
+      );
 
       const verification = plan?.verification ?? [];
       const verificationComplete = REQUIRED_VERIFICATION.every((id) => {
         const entry = verification.find((candidate) => candidate.id === id);
-        return Boolean(entry && (entry.method ?? '').trim().length >= 25 && (entry.observable ?? '').trim().length >= 25);
+        return Boolean(
+          entry &&
+          (entry.method ?? '').trim().length >= 25 &&
+          (entry.observable ?? '').trim().length >= 25,
+        );
       });
-      add('verification contract covers every check id', verificationComplete,
-        `${verification.length} verification rows`);
+      add(
+        'verification contract covers every check id',
+        verificationComplete,
+        `${verification.length} verification rows`,
+      );
 
       const excluded = new Set(
         (plan?.excludedBrowserPatterns ?? []).map((item) => item.trim().toLowerCase()),
       );
       const excludedComplete = ['dom', 'aria', 'css-pixels', 'browser-tab-order'].every((item) =>
-        [...excluded].some((entry) => entry === item || entry.startsWith(`${item} `) || entry.startsWith(`${item},`)),
+        [...excluded].some(
+          (entry) => entry === item || entry.startsWith(`${item} `) || entry.startsWith(`${item},`),
+        ),
       );
-      add('browser only mechanisms named as excluded', excludedComplete,
-        [...excluded].join(',') || 'none');
+      add(
+        'browser only mechanisms named as excluded',
+        excludedComplete,
+        [...excluded].join(',') || 'none',
+      );
 
       let built = false;
       let buildError = '';
       try {
-        await runBounded('xcrun', ['swiftc', '-O', 'Operations.swift', '-o', 'operations'],
-          workingDirectory, 120_000,
-          { ...process.env, DEVELOPER_DIR: process.env.DEVELOPER_DIR?.trim() || '/Applications/Xcode-beta.app/Contents/Developer' });
+        await runBounded(
+          'xcrun',
+          ['swiftc', '-O', 'Operations.swift', '-o', 'operations'],
+          workingDirectory,
+          120_000,
+          {
+            ...process.env,
+            DEVELOPER_DIR:
+              process.env.DEVELOPER_DIR?.trim() ||
+              '/Applications/Xcode-beta.app/Contents/Developer',
+          },
+        );
         built = true;
       } catch (error) {
         buildError = (error as Error).message.slice(0, 300);
       }
       let runtimeStates = 0;
       if (built) {
-        for (const [width, height, appearance] of [[620, 520, 'light'], [900, 700, 'dark'], [1400, 900, 'light']] as const) {
+        for (const [width, height, appearance] of [
+          [620, 520, 'light'],
+          [900, 700, 'dark'],
+          [1400, 900, 'light'],
+        ] as const) {
           const out = join(workingDirectory, `.evaluator-${width}x${height}-${appearance}.png`);
           try {
-            await runBounded(join(workingDirectory, 'operations'),
-              [`--width=${width}`, `--height=${height}`, `--appearance=${appearance}`,
-               '--locale=en', '--out=' + out], workingDirectory, 60_000);
+            await runBounded(
+              join(workingDirectory, 'operations'),
+              [
+                `--width=${width}`,
+                `--height=${height}`,
+                `--appearance=${appearance}`,
+                '--locale=en',
+                '--out=' + out,
+              ],
+              workingDirectory,
+              60_000,
+            );
             if (existsSync(out)) runtimeStates += 1;
-          } catch { /* counted below */ }
+          } catch {
+            /* counted below */
+          }
         }
       }
-      add('native surface builds and renders at three window sizes',
+      add(
+        'native surface builds and renders at three window sizes',
         built && runtimeStates === 3,
-        buildError || `${runtimeStates} of 3 captures`);
+        buildError || `${runtimeStates} of 3 captures`,
+      );
 
       // The deliverable is a plan, so a plan status is correct. What matters is that
       // the status is declared explicitly and the platform is the reviewed surface.
@@ -788,10 +935,16 @@ export const NATIVE_OPERATIONS_SKILL_EVAL_SCORERS: readonly SkillEvalDeterminist
       const verified =
         ['verified', 'planned', 'ready-for-implementation'].includes(planStatus) &&
         plan?.platform === 'macos-appkit';
-      add('declared plan status and platform', verified,
-        `status=${plan?.status ?? 'missing'} platform=${plan?.platform ?? 'missing'}`);
+      add(
+        'declared plan status and platform',
+        verified,
+        `status=${plan?.status ?? 'missing'} platform=${plan?.platform ?? 'missing'}`,
+      );
 
-      return finishChecks(checks.map((check) => ({ ...check, browser: true })), !immutable);
+      return finishChecks(
+        checks.map((check) => ({ ...check, browser: true })),
+        !immutable,
+      );
     },
   },
 ];

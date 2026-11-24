@@ -22,7 +22,7 @@ TypeScript types do not validate runtime input. Treat network payloads, persiste
 
 At an untrusted boundary, validate the container, discriminant, and every required field specific to the variant (including nested values) before constructing or dispatching a trusted discriminated union. Define the policy for unknown tags, malformed known tags, and compatibility with versions and extra fields; reject or quarantine invalid input without applying partial side effects. A cast after `JSON.parse` is not validation.
 
-Model mutually exclusive states as discriminated unions when that matches the runtime domain. Exhaustively handle the *validated* union using a `never` check so added variants surface at compile time; this does not protect against unknown runtime input. Do not make properties optional just to make an invalid state typecheck.
+Model mutually exclusive states as discriminated unions when that matches the runtime domain. Exhaustively handle the _validated_ union using a `never` check so added variants surface at compile time; this does not protect against unknown runtime input. Do not make properties optional just to make an invalid state typecheck.
 
 ### Public type contracts
 
@@ -40,7 +40,7 @@ Make promise rejection, cancellation, timeout, and cleanup ownership explicit. P
 
 `Promise.race` can settle a timeout wrapper while leaving the losing operation running. Decide who owns cancellation, timer teardown, and listener removal; propagate abort to cooperating work, and state what happens to work that cannot be cancelled. Preserve underlying rejection identity and any public contract for timeout errors.
 
-Check a caller signal that is already aborted before starting work. Install cancellation observation and a guard that settles and cleans up only once *before* invoking user work; invoke work synchronously so it can subscribe to abort before the caller can cancel in the same turn. Handle synchronous throws and timer callbacks that fire during setup. On every terminal path, remove listeners and clear any installed timer, even when its handle is falsy or `undefined`; preserve explicit abort reasons such as `null` rather than replacing them with a default.
+Check a caller signal that is already aborted before starting work. Install cancellation observation and a guard that settles and cleans up only once _before_ invoking user work; invoke work synchronously so it can subscribe to abort before the caller can cancel in the same turn. Handle synchronous throws and timer callbacks that fire during setup. On every terminal path, remove listeners and clear any installed timer, even when its handle is falsy or `undefined`; preserve explicit abort reasons such as `null` rather than replacing them with a default.
 
 Use [runtime boundary and async failure checks](references/runtime-boundary-and-async-checks.md) when either contract changes.
 

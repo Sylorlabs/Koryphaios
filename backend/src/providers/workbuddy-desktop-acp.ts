@@ -352,7 +352,9 @@ export class WorkBuddyDesktopAcpClient {
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(`ACP ${method} failed (HTTP ${response.status})${text ? `: ${text.slice(0, 300)}` : ''}`);
+      throw new Error(
+        `ACP ${method} failed (HTTP ${response.status})${text ? `: ${text.slice(0, 300)}` : ''}`,
+      );
     }
     const matched = await readJsonRpcStream(response, id, (msg) => this.dispatch(msg));
     if (!matched) throw new Error(`ACP ${method} stream ended without a response`);

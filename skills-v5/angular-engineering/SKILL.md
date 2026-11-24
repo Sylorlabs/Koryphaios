@@ -39,7 +39,7 @@ Run the Angular build and relevant component/router tests. Exercise route reuse,
 
 Finish every requested verification artifact as carefully as the implementation. For a supplied machine readable `verification/result.json` contract, inspect the fixture instructions and match the exact case sensitive fields and **values**, not just the file name or a prose claim that it was updated: the evidence-backed status, the actual pinned Angular version, the requested broader skill and near neighbor identity, and a specific recovery explanation when required. A `nearNeighbor` identifier is distinct from the broader skill and may differ by scenario. Read the saved JSON again, validate its required fields against the fixture, and fix mismatches before declaring completion. Use a verified status only after the required runtime checks have actually passed; if they are unavailable, record the blocker and the contract's supported incomplete status, or report that the contract cannot yet be satisfied.
 
- Treat that artifact as a five key checklist and verify it one key at a time after the runtime work, because a single missing key fails the whole task while every other check passes:
+Treat that artifact as a five key checklist and verify it one key at a time after the runtime work, because a single missing key fails the whole task while every other check passes:
 
 1. `status`, set to the contract's verified value only when the browser or compiler checks you ran actually passed.
 2. `angularVersion`, the exact version string the pin states, copied as a bare version such as `20.3.16` with no caret, tilde, range or `latest` marker, never from memory or the newest release you know of.

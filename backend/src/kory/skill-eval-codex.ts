@@ -25,7 +25,7 @@ import {
   REACT_BROWSER_BROKER_INSTRUCTIONS,
   startReactBrowserBroker,
   type ReactBrowserBroker,
- } from './skill-eval-react-browser-broker';
+} from './skill-eval-react-browser-broker';
 import {
   isVisualBrowserScenario,
   startVisualBrowserBroker,

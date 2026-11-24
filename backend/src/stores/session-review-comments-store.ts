@@ -1,8 +1,4 @@
-import type {
-  ReviewComment,
-  ReviewCommentSide,
-  ReviewCommentStatus,
-} from '@koryphaios/shared';
+import type { ReviewComment, ReviewCommentSide, ReviewCommentStatus } from '@koryphaios/shared';
 import { REVIEW_COMMENT_MAX_PER_SESSION } from '@koryphaios/shared';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
@@ -30,7 +26,9 @@ function mapRow(row: Row): ReviewComment {
 
 export class SessionLimitError extends Error {
   constructor() {
-    super(`A chat can hold at most ${REVIEW_COMMENT_MAX_PER_SESSION} review comments. Resolve or delete some first.`);
+    super(
+      `A chat can hold at most ${REVIEW_COMMENT_MAX_PER_SESSION} review comments. Resolve or delete some first.`,
+    );
     this.name = 'SessionLimitError';
   }
 }
@@ -63,10 +61,7 @@ export async function listReviewComments(
   return rows.map(mapRow);
 }
 
-export function createReviewComment(
-  input: NewReviewCommentRow,
-  now = Date.now(),
-): ReviewComment {
+export function createReviewComment(input: NewReviewCommentRow, now = Date.now()): ReviewComment {
   return db.transaction(
     (tx) => {
       const count = tx
@@ -147,7 +142,10 @@ export function claimOpenReviewCommentsForBatch(
         .where(
           and(
             eq(sessionReviewComments.sessionId, sessionId),
-            inArray(sessionReviewComments.id, rows.map((row) => row.id)),
+            inArray(
+              sessionReviewComments.id,
+              rows.map((row) => row.id),
+            ),
           ),
         )
         .run();

@@ -16,8 +16,12 @@ function amount(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 function text(value: unknown, max = 256): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= max &&
-    !/[\x00-\x1f\x7f]/.test(value);
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= max &&
+    !/[\x00-\x1f\x7f]/.test(value)
+  );
 }
 
 export function parseFreebuffAccountSnapshot(value: unknown, now: number): FreebuffAccountSnapshot {
@@ -136,11 +140,7 @@ export async function getFreebuffAccountSnapshot(
   const previous = cache.get(profileDir);
   const existing = previous?.revision === revision ? previous : undefined;
   if (existing?.inFlight) return existing.inFlight;
-  if (
-    !force &&
-    existing &&
-    dependencies.now() - existing.attemptedAt < FREEBUFF_ACCOUNT_TTL_MS
-  )
+  if (!force && existing && dependencies.now() - existing.attemptedAt < FREEBUFF_ACCOUNT_TTL_MS)
     return existing.value;
   const state = existing ?? {
     revision,

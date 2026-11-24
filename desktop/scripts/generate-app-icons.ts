@@ -95,7 +95,9 @@ export function encodeIco(images: ReadonlyArray<{ size: number; png: Uint8Array 
 function run(command: string, args: string[]): string {
   const result = spawnSync(command, args, { encoding: 'utf8' });
   if (result.error) {
-    throw new Error(`${command} is unavailable (${result.error.message}); icon generation needs macOS sips and iconutil`);
+    throw new Error(
+      `${command} is unavailable (${result.error.message}); icon generation needs macOS sips and iconutil`,
+    );
   }
   if (result.status !== 0) {
     throw new Error(`${command} ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
@@ -162,10 +164,14 @@ function main(): void {
     renderIcons(MASTER_PATH, scratch);
     const stale = GENERATED_FILES.filter((name) => {
       const committed = join(ICONS_DIR, name);
-      return !existsSync(committed) || !readFileSync(committed).equals(readFileSync(join(scratch, name)));
+      return (
+        !existsSync(committed) || !readFileSync(committed).equals(readFileSync(join(scratch, name)))
+      );
     });
     if (stale.length > 0) {
-      console.error(`App icons are stale: ${stale.join(', ')}. Run bun run desktop/scripts/generate-app-icons.ts`);
+      console.error(
+        `App icons are stale: ${stale.join(', ')}. Run bun run desktop/scripts/generate-app-icons.ts`,
+      );
       process.exit(1);
     }
     console.log('App icons match the master.');

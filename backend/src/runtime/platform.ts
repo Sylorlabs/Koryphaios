@@ -29,7 +29,9 @@ export function terminateProviderProcessGroup(pid: number | undefined): void {
     } else {
       process.kill(-pid, 'SIGKILL');
     }
-  } catch { /* Process group already exited. */ }
+  } catch {
+    /* Process group already exited. */
+  }
 }
 
 /** The three OSes Koryphaios supports, narrowed from `NodeJS.Platform`. */
@@ -164,8 +166,9 @@ export function findExecutableOnPath(
  * readiness: discovering two executable files is never qualification proof.
  */
 export function javaToolchainExecutables(): { javac: string; java: string } | null {
-  const configuredHomes = [process.env.KORY_SKILL_EVAL_JAVA_HOME, process.env.JAVA_HOME]
-    .filter((home): home is string => Boolean(home));
+  const configuredHomes = [process.env.KORY_SKILL_EVAL_JAVA_HOME, process.env.JAVA_HOME].filter(
+    (home): home is string => Boolean(home),
+  );
   const platformDirs = isMac()
     ? ['/opt/homebrew/opt/openjdk/bin', '/usr/local/opt/openjdk/bin']
     : [];
@@ -183,7 +186,9 @@ export function javaToolchainExecutables(): { javac: string; java: string } | nu
         accessSync(javac, constants.X_OK);
         accessSync(java, constants.X_OK);
         return { javac, java };
-      } catch { /* candidate missing one executable */ }
+      } catch {
+        /* candidate missing one executable */
+      }
     }
   }
   return null;
@@ -195,10 +200,9 @@ export function openssl3ExecutableCandidates(): readonly string[] {
   // through to a different installation when that selection is unusable.
   if (process.env.KORY_EVAL_OPENSSL3) return [process.env.KORY_EVAL_OPENSSL3];
   return [
-    ...(isMac() ? [
-      '/opt/homebrew/opt/openssl@3/bin/openssl',
-      '/usr/local/opt/openssl@3/bin/openssl',
-    ] : []),
+    ...(isMac()
+      ? ['/opt/homebrew/opt/openssl@3/bin/openssl', '/usr/local/opt/openssl@3/bin/openssl']
+      : []),
     'openssl',
   ];
 }

@@ -67,8 +67,19 @@ export const NATIVE_INSPECTOR_SIZES = [
 ] as const;
 
 export const METADATA_IDS = [
-  'name', 'owner', 'created', 'modified', 'type', 'access', 'location',
-  'revision', 'review', 'retention', 'identifier', 'distribution', 'notes',
+  'name',
+  'owner',
+  'created',
+  'modified',
+  'type',
+  'access',
+  'location',
+  'revision',
+  'review',
+  'retention',
+  'identifier',
+  'distribution',
+  'notes',
 ] as const;
 
 export function stateId(state: InspectorState): string {
@@ -83,7 +94,14 @@ export function nativeInspectorMatrix(): InspectorState[] {
       for (const language of ['en', 'de'] as const) {
         for (const content of ['normal', 'empty', 'max'] as const) {
           for (const textSize of ['standard', 'large'] as const) {
-            states.push({ revision: states.length + 1, ...size, appearance, language, content, textSize });
+            states.push({
+              revision: states.length + 1,
+              ...size,
+              appearance,
+              language,
+              content,
+              textSize,
+            });
           }
         }
       }
@@ -99,14 +117,20 @@ export function nativeInspectorResizeMatrix(initialRevision = 72): InspectorStat
     { width: 900, height: 700 },
   ] as const;
   return sizes.map((size, index): InspectorState => ({
-    revision: initialRevision + index + 1, ...size,
-    appearance: 'dark', language: 'de', content: 'max', textSize: 'large',
+    revision: initialRevision + index + 1,
+    ...size,
+    appearance: 'dark',
+    language: 'de',
+    content: 'max',
+    textSize: 'large',
   }));
 }
 
 const geometryValid = (rect: Rectangle | null | undefined): rect is Rectangle =>
-  !!rect && [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) &&
-  rect.width > 0 && rect.height > 0;
+  !!rect &&
+  [rect.x, rect.y, rect.width, rect.height].every(Number.isFinite) &&
+  rect.width > 0 &&
+  rect.height > 0;
 
 /** An evaluator's measurements. Do not classify unobserved regions as clean. */
 export function inspectNativeEvidence(
@@ -115,17 +139,28 @@ export function inspectNativeEvidence(
   image: NativeImageObservation | null,
 ): string[] {
   const issues: string[] = [];
-  const fault = (key: string): void => { issues.push(`${stateId(state)}:${key}`); };
+  const fault = (key: string): void => {
+    issues.push(`${stateId(state)}:${key}`);
+  };
   const win = observation.window;
   if (!geometryValid(win) || observation.windowNumber < 1 || observation.pid < 1) {
     fault('windowserver-window-missing');
   } else if (Math.abs(win.width - state.width) > 3 || Math.abs(win.height - state.height) > 3) {
     fault(`native-window-size-${Math.round(win.width)}x${Math.round(win.height)}`);
   }
-  if (!observation.accessibilityTrusted || !observation.accessibilityWindowFound || observation.errors.length) {
+  if (
+    !observation.accessibilityTrusted ||
+    !observation.accessibilityWindowFound ||
+    observation.errors.length
+  ) {
     fault('independent-accessibility-unavailable');
   }
-  if (!image || image.sampledPoints < 100 || image.distinctColors < 10 || image.luminanceRange < 0.12) {
+  if (
+    !image ||
+    image.sampledPoints < 100 ||
+    image.distinctColors < 10 ||
+    image.luminanceRange < 0.12
+  ) {
     fault('blank-or-unverified-native-screenshot');
   }
   if (geometryValid(win) && image) {
@@ -137,7 +172,8 @@ export function inspectNativeEvidence(
   }
 
   const elements = new Map(observation.elements.map((row) => [row.identifier, row]));
-  if (elements.size !== observation.elements.length) fault('duplicate-native-accessibility-identifiers');
+  if (elements.size !== observation.elements.length)
+    fault('duplicate-native-accessibility-identifiers');
   const accessibleText = (element: AccessibleElement | null): string =>
     element?.value || element?.title || '';
   function required(id: string): AccessibleElement | null {
@@ -155,34 +191,51 @@ export function inspectNativeEvidence(
   const documentButtons = [0, 1, 2].map((index) => required(`sidebar.document.${index}`));
   const heading = required('inspector.heading');
   const context = required('inspector.context');
-  if (accessibleText(context) !== `${state.language}-${state.appearance} · ${state.content} · ${state.textSize}`) {
+  if (
+    accessibleText(context) !==
+    `${state.language}-${state.appearance} · ${state.content} · ${state.textSize}`
+  ) {
     fault('accessibility-does-not-match-requested-state');
   }
   if (accessibleText(sidebarHeading) !== (state.language === 'de' ? 'DOKUMENTE' : 'DOCUMENTS')) {
     fault('german-localization-not-rendered');
   }
   const translated = state.language === 'de';
-  const expectedTitle = translated ? (state.width === 620 ? 'Dokumente' : 'Dokumenteneigenschaften') : 'Document Inspector';
-  if (accessibleText(toolbarTitle) !== expectedTitle ||
-      accessibleText(importButton) !== (translated ? 'Importieren' : 'Import') ||
-      accessibleText(shareButton) !== (translated ? 'Teilen' : 'Share')) {
+  const expectedTitle = translated
+    ? state.width === 620
+      ? 'Dokumente'
+      : 'Dokumenteneigenschaften'
+    : 'Document Inspector';
+  if (
+    accessibleText(toolbarTitle) !== expectedTitle ||
+    accessibleText(importButton) !== (translated ? 'Importieren' : 'Import') ||
+    accessibleText(shareButton) !== (translated ? 'Teilen' : 'Share')
+  ) {
     fault('toolbar-localization-not-rendered');
   }
-  if (accessibleText(heading) !== (translated ? 'Dokumentdetails und Eigenschaften' : 'Document details')) {
+  if (
+    accessibleText(heading) !==
+    (translated ? 'Dokumentdetails und Eigenschaften' : 'Document details')
+  ) {
     fault('inspector-localization-not-rendered');
   }
-  const expectedDocuments = translated ? [
-    'Jahresabschluss und Geschäftsbericht',
-    'Strategische Produktentwicklungsplanung',
-    'Dokument mit ausführlicher Gestaltungsspezifikation',
-  ] : ['Annual report', 'Roadmap', 'Design brief'];
+  const expectedDocuments = translated
+    ? [
+        'Jahresabschluss und Geschäftsbericht',
+        'Strategische Produktentwicklungsplanung',
+        'Dokument mit ausführlicher Gestaltungsspezifikation',
+      ]
+    : ['Annual report', 'Roadmap', 'Design brief'];
   for (const [index, document] of documentButtons.entries()) {
     // Native visual ellipsis is allowed only when the full accessible name is preserved.
-    if (accessibleText(document) !== expectedDocuments[index]) fault(`sidebar-document-${index}-name-truncated`);
+    if (accessibleText(document) !== expectedDocuments[index])
+      fault(`sidebar-document-${index}-name-truncated`);
   }
   if (state.content === 'empty') {
     const empty = required('inspector.empty');
-    if (accessibleText(empty) !== (translated ? 'Kein Dokument ausgewählt' : 'No document selected')) {
+    if (
+      accessibleText(empty) !== (translated ? 'Kein Dokument ausgewählt' : 'No document selected')
+    ) {
       fault('empty-selection-localization-not-rendered');
     }
     if (observation.elements.some((item) => item.identifier.startsWith('metadata.'))) {
@@ -198,7 +251,8 @@ export function inspectNativeEvidence(
       if (!label?.geometry || !value?.geometry) continue;
       const rowTop = Math.min(label.geometry.y, value.geometry.y);
       const rowBottom = Math.max(
-        label.geometry.y + label.geometry.height, value.geometry.y + value.geometry.height,
+        label.geometry.y + label.geometry.height,
+        value.geometry.y + value.geometry.height,
       );
       if (rowTop < previousRowBottom - 2) fault(`metadata-${key}-vertical-overlap`);
       previousRowBottom = rowBottom;
@@ -236,21 +290,33 @@ export function inspectNativeEvidence(
       } else if (id.startsWith('toolbar.')) {
         if (!inside(element.geometry, left + 4, right - 4)) fault(`${id}-toolbar-clipping`);
       }
-      if ((id === 'inspector.heading' || id === 'inspector.context') &&
-          (element.geometry.y < win.y + 50 || element.geometry.y + element.geometry.height > bottom - 4)) {
+      if (
+        (id === 'inspector.heading' || id === 'inspector.context') &&
+        (element.geometry.y < win.y + 50 ||
+          element.geometry.y + element.geometry.height > bottom - 4)
+      ) {
         fault(`${id}-stranded-outside-native-window`);
       }
-      if ((id.startsWith('toolbar.') || id.startsWith('sidebar.')) &&
-          (element.geometry.y < win.y - 4 || element.geometry.y + element.geometry.height > bottom + 4)) {
+      if (
+        (id.startsWith('toolbar.') || id.startsWith('sidebar.')) &&
+        (element.geometry.y < win.y - 4 ||
+          element.geometry.y + element.geometry.height > bottom + 4)
+      ) {
         fault(`${id}-outside-native-window`);
       }
     }
-    if (toolbarTitle?.geometry && importButton?.geometry &&
-        toolbarTitle.geometry.x + toolbarTitle.geometry.width + 8 > importButton.geometry.x) {
+    if (
+      toolbarTitle?.geometry &&
+      importButton?.geometry &&
+      toolbarTitle.geometry.x + toolbarTitle.geometry.width + 8 > importButton.geometry.x
+    ) {
       fault('toolbar-title-overlaps-import');
     }
-    if (importButton?.geometry && shareButton?.geometry &&
-        importButton.geometry.x + importButton.geometry.width + 4 > shareButton.geometry.x) {
+    if (
+      importButton?.geometry &&
+      shareButton?.geometry &&
+      importButton.geometry.x + importButton.geometry.width + 4 > shareButton.geometry.x
+    ) {
       fault('toolbar-actions-overlap');
     }
     if (heading?.geometry && heading.geometry.x <= sidebarRight) fault('sidebar-inspector-overlap');
@@ -282,12 +348,16 @@ export function assessNativeRedGreen(
     const actual = captures[i];
     const state = expected[i]!;
     const expectedId = i >= 72 ? `resize-${state.revision}-${stateId(state)}` : stateId(state);
-    if (!actual || actual.captureId !== expectedId ||
-        JSON.stringify(actual.state) !== JSON.stringify(state)) {
+    if (
+      !actual ||
+      actual.captureId !== expectedId ||
+      JSON.stringify(actual.state) !== JSON.stringify(state)
+    ) {
       failures.push(`native-matrix-state-${i + 1}-missing-or-mismatched`);
       continue;
     }
-    if (identities.has(actual.captureId)) failures.push(`native-matrix-duplicate-${actual.captureId}`);
+    if (identities.has(actual.captureId))
+      failures.push(`native-matrix-duplicate-${actual.captureId}`);
     identities.add(actual.captureId);
     if (!/^[a-f0-9]{64}$/u.test(actual.sha256) || !actual.screenshot.endsWith('.png')) {
       failures.push(`${actual.captureId}:missing-capture-integrity`);
@@ -298,19 +368,29 @@ export function assessNativeRedGreen(
     failures.push(...actual.failures);
   }
   failures.push(...checkCrossStateEvidence(captures));
-  const fatalFault = faultCapture?.failures.some((failure) =>
-    /(?:independent-accessibility-unavailable|blank-or-unverified-native-screenshot|windowserver-window-missing|screenshot-window-dimension-mismatch)/u.test(failure)) ?? true;
-  const red = !!faultCapture &&
+  const fatalFault =
+    faultCapture?.failures.some((failure) =>
+      /(?:independent-accessibility-unavailable|blank-or-unverified-native-screenshot|windowserver-window-missing|screenshot-window-dimension-mismatch)/u.test(
+        failure,
+      ),
+    ) ?? true;
+  const red =
+    !!faultCapture &&
     stateId(faultCapture.state) === '620x520-dark-de-max-large' &&
     faultCapture.captureId === 'fault-620x520-dark-de-max-large' &&
     /^[a-f0-9]{64}$/u.test(faultCapture.sha256) &&
     (faultCapture.stabilizationSamples ?? 0) >= 2 &&
     !fatalFault &&
     faultCapture.failures.some((failure) =>
-      /(?:metadata-.*horizontal-overlap|metadata\..*-inspector-horizontal-clipping)/u.test(failure));
+      /(?:metadata-.*horizontal-overlap|metadata\..*-inspector-horizontal-clipping)/u.test(failure),
+    );
   if (!red) failures.push('Native fault screenshot did not prove the expected metadata overflow');
-  const green = captures.length === expected.length &&
-    failures.every((failure) => failure === 'Native fault screenshot did not prove the expected metadata overflow');
+  const green =
+    captures.length === expected.length &&
+    failures.every(
+      (failure) =>
+        failure === 'Native fault screenshot did not prove the expected metadata overflow',
+    );
   return { red, green, failures };
 }
 
@@ -326,14 +406,23 @@ export function checkCrossStateEvidence(captures: readonly NativeCapture[]): str
       failures.push(`${base}:required-comparison-captures-missing`);
       continue;
     }
-    if (light.sha256 === dark.sha256 ||
-        Math.abs(light.image.meanLuminance - dark.image.meanLuminance) < 0.06) {
+    if (
+      light.sha256 === dark.sha256 ||
+      Math.abs(light.image.meanLuminance - dark.image.meanLuminance) < 0.06
+    ) {
       failures.push(`${base}:light-dark-native-render-not-distinct`);
     }
-    const normalHeading = light.observation.elements.find((e) => e.identifier === 'inspector.heading');
-    const largeHeading = large.observation.elements.find((e) => e.identifier === 'inspector.heading');
-    if (!normalHeading?.geometry || !largeHeading?.geometry ||
-        largeHeading.geometry.height <= normalHeading.geometry.height) {
+    const normalHeading = light.observation.elements.find(
+      (e) => e.identifier === 'inspector.heading',
+    );
+    const largeHeading = large.observation.elements.find(
+      (e) => e.identifier === 'inspector.heading',
+    );
+    if (
+      !normalHeading?.geometry ||
+      !largeHeading?.geometry ||
+      largeHeading.geometry.height <= normalHeading.geometry.height
+    ) {
       failures.push(`${base}:enlarged-text-not-observed`);
     }
   }

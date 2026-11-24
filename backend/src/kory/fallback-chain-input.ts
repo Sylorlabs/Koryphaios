@@ -18,7 +18,10 @@ export function normalizeFallbackStepInput(raw: unknown): FallbackStep | undefin
   const split = explicitProvider
     ? { provider: explicitProvider, model }
     : model.includes(':')
-      ? { provider: splitProviderKey(model).provider as string, model: splitProviderKey(model).model }
+      ? {
+          provider: splitProviderKey(model).provider as string,
+          model: splitProviderKey(model).model,
+        }
       : { provider: '', model };
   return normalizeFallbackStep({
     provider: split.provider,

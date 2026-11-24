@@ -555,7 +555,9 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
       return 'test';
     }
 
-    if (['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs', '.java', '.c', '.cpp'].includes(extension)) {
+    if (
+      ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs', '.java', '.c', '.cpp'].includes(extension)
+    ) {
       return 'source';
     }
 

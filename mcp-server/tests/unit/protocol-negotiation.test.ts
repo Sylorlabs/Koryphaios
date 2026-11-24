@@ -20,7 +20,7 @@ function bunBinary(): string {
 
 function connect(
   negotiation: unknown,
-  env: Record<string, string> = {},
+  env: Record<string, string> = {}
 ): { client: Client; transport: StdioClientTransport } {
   const transport = new StdioClientTransport({
     command: bunBinary(),
@@ -30,7 +30,7 @@ function connect(
   });
   const client = new Client(
     { name: 'protocol-negotiation', version: '1.0.0' },
-    { versionNegotiation: negotiation as never },
+    { versionNegotiation: negotiation as never }
   );
   return { client, transport };
 }
@@ -38,7 +38,7 @@ function connect(
 async function withClient<T>(
   negotiation: unknown,
   body: (client: Client) => Promise<T>,
-  env: Record<string, string> = {},
+  env: Record<string, string> = {}
 ): Promise<T> {
   const { client, transport } = connect(negotiation, env);
   await client.connect(transport);
@@ -51,7 +51,7 @@ async function withClient<T>(
 
 describe('MCP protocol negotiation', () => {
   it('serves the 2026-07-28 revision to a modern client and the empty tool surface of the passive responder', async () => {
-    const result = await withClient({ mode: 'auto' }, async (client) => ({
+    const result = await withClient({ mode: 'auto' }, async client => ({
       negotiated: client.getNegotiatedProtocolVersion(),
       tools: (await client.listTools()).tools.length,
       prompts: (await client.listPrompts()).prompts.length,
@@ -61,7 +61,7 @@ describe('MCP protocol negotiation', () => {
   }, 60_000);
 
   it('still answers a legacy client that performs the pre-2026 initialize handshake', async () => {
-    const negotiated = await withClient({ mode: 'legacy' }, async (client) => {
+    const negotiated = await withClient({ mode: 'legacy' }, async client => {
       expect((await client.listTools()).tools).toEqual([]);
       return client.getNegotiatedProtocolVersion();
     });
@@ -69,9 +69,8 @@ describe('MCP protocol negotiation', () => {
   }, 60_000);
 
   it('pins the modern revision without falling back', async () => {
-    const negotiated = await withClient(
-      { mode: { pin: '2026-07-28' } },
-      async (client) => client.getNegotiatedProtocolVersion(),
+    const negotiated = await withClient({ mode: { pin: '2026-07-28' } }, async client =>
+      client.getNegotiatedProtocolVersion()
     );
     expect(negotiated).toBe('2026-07-28');
   }, 60_000);
@@ -79,8 +78,8 @@ describe('MCP protocol negotiation', () => {
   it('registers the full tool surface when Koryphaios is active and rejects an unknown tool as invalid params', async () => {
     const result = await withClient(
       { mode: 'auto' },
-      async (client) => {
-        const tools = (await client.listTools()).tools.map((tool) => tool.name).sort();
+      async client => {
+        const tools = (await client.listTools()).tools.map(tool => tool.name).sort();
         const detection = await client.callTool({
           name: 'detect-errors',
           arguments: { source: 'console' },
@@ -98,7 +97,7 @@ describe('MCP protocol negotiation', () => {
           rejection,
         };
       },
-      { KORYPHAIOS_ACTIVE: '1' },
+      { KORYPHAIOS_ACTIVE: '1' }
     );
     expect(result.negotiated).toBe('2026-07-28');
     expect(result.tools).toEqual([

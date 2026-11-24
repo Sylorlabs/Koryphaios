@@ -49,7 +49,8 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'agent',
     label: 'Agent behavior',
-    description: 'Approvals, sandbox, sub-agents, worktrees, Critic, messaging, context, and research.',
+    description:
+      'Approvals, sandbox, sub-agents, worktrees, Critic, messaging, context, and research.',
     scope: 'Current project',
     group: 'Intelligence',
     keywords: [

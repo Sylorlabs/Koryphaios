@@ -29,9 +29,7 @@ describe('mergeTranscript', () => {
   });
 
   it('joins pieces that share no words', () => {
-    expect(mergeTranscript('spoken first', 'and then second')).toBe(
-      'spoken first and then second',
-    );
+    expect(mergeTranscript('spoken first', 'and then second')).toBe('spoken first and then second');
   });
 
   it('keeps a repeated single word only once', () => {

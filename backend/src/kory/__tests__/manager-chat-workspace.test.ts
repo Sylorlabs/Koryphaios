@@ -78,11 +78,15 @@ test('retries a workspace after a transient directory outage instead of serving 
 
   expect(await kory.resolveSessionWorkingDirectoryPublic('temporary')).toBe(project);
   rmSync(project, { recursive: true, force: true });
-  await expect(kory.resolveSessionWorkingDirectoryPublic('temporary')).rejects.toThrow('unavailable');
+  await expect(kory.resolveSessionWorkingDirectoryPublic('temporary')).rejects.toThrow(
+    'unavailable',
+  );
   await expect(kory.resolveSessionWorkingDirectoryPublic('temporary')).rejects.toThrow(project);
 
   writeFileSync(project, 'not a directory');
-  await expect(kory.resolveSessionWorkingDirectoryPublic('temporary')).rejects.toThrow('unavailable');
+  await expect(kory.resolveSessionWorkingDirectoryPublic('temporary')).rejects.toThrow(
+    'unavailable',
+  );
   rmSync(project);
 
   mkdirSync(project);

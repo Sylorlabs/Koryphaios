@@ -225,7 +225,13 @@ export function verificationMatrixCovers(
   let current: string[][] = [];
   for (const line of markdown.split(/\r?\n/u)) {
     if (/^\s*\|.*\|\s*$/u.test(line)) {
-      current.push(line.trim().slice(1, -1).split('|').map((cell) => cell.trim()));
+      current.push(
+        line
+          .trim()
+          .slice(1, -1)
+          .split('|')
+          .map((cell) => cell.trim()),
+      );
     } else if (current.length > 0) {
       tables.push(current);
       current = [];
@@ -245,11 +251,13 @@ export function verificationMatrixCovers(
     const methodIndex = index(['method', 'check']);
     const statusIndex = index(['status', 'result']);
     const evidenceIndex = index(['evidence', 'capture']);
-    if ([conditionIndex, expectedIndex, methodIndex, statusIndex, evidenceIndex].some((i) => i < 0)) continue;
+    if ([conditionIndex, expectedIndex, methodIndex, statusIndex, evidenceIndex].some((i) => i < 0))
+      continue;
     if (
       lines[1]!.length !== headers.length ||
       !lines[1]!.every((cell) => /^:?-{3,}:?$/u.test(cell))
-    ) continue;
+    )
+      continue;
     for (const row of lines.slice(2)) {
       if (
         row.length !== headers.length ||
@@ -258,7 +266,8 @@ export function verificationMatrixCovers(
         !row[methodIndex] ||
         row.some((cell) => /\bTODO\b/iu.test(cell)) ||
         !/^observed\s*:\s*pass$/iu.test(row[statusIndex] ?? '')
-      ) continue;
+      )
+        continue;
       const captureId = row[evidenceIndex]!;
       const capture = independent.captures.get(captureId);
       if (
@@ -271,7 +280,8 @@ export function verificationMatrixCovers(
         !normalizeCondition(capture.verifiedRequirements.join(' ')).includes(
           normalizeCondition(capture.condition),
         )
-      ) continue;
+      )
+        continue;
       capturedIds.add(captureId);
       checkableConditions.push(...capture.verifiedRequirements);
     }
@@ -363,7 +373,8 @@ function scoreEditor(root: string): SkillEvalDeterministicScore {
   const verification = text(root, 'verification.md');
   const independent = independentVisualEvidence();
   const sourceReady = !!independent.sourceIdentity;
-  const capturesReady = sourceReady &&
+  const capturesReady =
+    sourceReady &&
     [...independent.captures.values()].filter(
       (capture) => capture.passed && capture.sourceIdentity === independent.sourceIdentity,
     ).length >= 7;
@@ -420,9 +431,10 @@ function scoreEditor(root: string): SkillEvalDeterministicScore {
     passed,
     // Without source and independent observations, constraint matches are only
     // diagnostic. They must not yield quality credit toward promotion.
-    quality: sourceReady && capturesReady && verificationReady
-      ? checks.filter(([, ok]) => ok).length / checks.length
-      : 0,
+    quality:
+      sourceReady && capturesReady && verificationReady
+        ? checks.filter(([, ok]) => ok).length / checks.length
+        : 0,
     verification: passed ? 1 : 0,
     integrityFailure: !intact,
     evidence: [
@@ -439,7 +451,8 @@ function scoreOps(root: string): SkillEvalDeterministicScore {
   const verification = text(root, 'verification.md');
   const independent = independentVisualEvidence();
   const sourceReady = !!independent.sourceIdentity;
-  const capturesReady = sourceReady &&
+  const capturesReady =
+    sourceReady &&
     [...independent.captures.values()].filter(
       (capture) => capture.passed && capture.sourceIdentity === independent.sourceIdentity,
     ).length >= 7;
@@ -505,9 +518,10 @@ function scoreOps(root: string): SkillEvalDeterministicScore {
   const passed = checks.every(([, ok]) => ok);
   return {
     passed,
-    quality: sourceReady && capturesReady && verificationReady
-      ? checks.filter(([, ok]) => ok).length / checks.length
-      : 0,
+    quality:
+      sourceReady && capturesReady && verificationReady
+        ? checks.filter(([, ok]) => ok).length / checks.length
+        : 0,
     verification: passed ? 1 : 0,
     integrityFailure: !intact,
     evidence: [
@@ -539,7 +553,8 @@ export const VISUAL_DESIGN_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicSc
   {
     id: 'visual-interface-design/cross-platform-system-scorer@6',
     scenarioIds: [EDITOR],
-    score: ({ workingDirectory }) => scoreRealDirectionFixture(workingDirectory, EDITOR_DIRECTION_SCENARIO),
+    score: ({ workingDirectory }) =>
+      scoreRealDirectionFixture(workingDirectory, EDITOR_DIRECTION_SCENARIO),
   },
   {
     id: 'visual-interface-design/dense-operations-system-scorer@5',

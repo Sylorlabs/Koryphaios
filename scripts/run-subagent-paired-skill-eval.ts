@@ -75,7 +75,10 @@ if (!requestedSkill || !requestedScenario) {
   throw new Error('--skill and --scenario are required');
 }
 
-function contractHashFor(skillPackage: ReturnType<typeof loadPackage>['skillPackage'], task: ReturnType<typeof loadPackage>['task']) {
+function contractHashFor(
+  skillPackage: ReturnType<typeof loadPackage>['skillPackage'],
+  task: ReturnType<typeof loadPackage>['task'],
+) {
   const materializerIds = BUILTIN_SKILL_EVAL_MATERIALIZERS.filter((item) =>
     item.matches(task as never),
   )
@@ -235,7 +238,8 @@ async function recordMode(): Promise<void> {
       artifacts: Array<{ kind: 'other'; location: string; sha256: string }>;
       durationMs: number;
     }> => {
-      const variant = input.experiment?.variant === 'without-skill' ? 'without-skill' : 'with-skill';
+      const variant =
+        input.experiment?.variant === 'without-skill' ? 'without-skill' : 'with-skill';
       const source = armSource[variant];
       if (!existsSync(source)) {
         throw new Error(`No produced work for ${variant} at ${source}`);
@@ -261,7 +265,11 @@ async function recordMode(): Promise<void> {
           `subagent produced files: ${changed.map((item) => item.path).join(', ') || 'none'}`,
           `skill context injected: ${variant === 'with-skill' ? 'yes' : 'no'}`,
         ],
-        artifacts: changed.map((item) => ({ kind: 'other' as const, location: item.path, sha256: item.sha256 })),
+        artifacts: changed.map((item) => ({
+          kind: 'other' as const,
+          location: item.path,
+          sha256: item.sha256,
+        })),
         durationMs: Date.now() - start,
       };
     },

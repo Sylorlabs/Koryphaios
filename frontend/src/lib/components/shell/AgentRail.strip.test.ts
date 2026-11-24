@@ -12,11 +12,23 @@ vi.mock('$lib/stores/agents.svelte', () => ({
 function agent(id: string, status: AgentStatus, name: string) {
   return {
     identity: {
-      id, name, role: 'worker' as AgentRole, domain: 'general' as const,
-      provider: 'openai', model: 'gpt-test', glowColor: 'var(--color-accent)',
+      id,
+      name,
+      role: 'worker' as AgentRole,
+      domain: 'general' as const,
+      provider: 'openai',
+      model: 'gpt-test',
+      glowColor: 'var(--color-accent)',
     },
-    status, content: '', thinking: '', toolCalls: [], task: '',
-    tokensUsed: 0, contextMax: 0, contextKnown: false, sessionId: 'session-1',
+    status,
+    content: '',
+    thinking: '',
+    toolCalls: [],
+    task: '',
+    tokensUsed: 0,
+    contextMax: 0,
+    contextKnown: false,
+    sessionId: 'session-1',
   };
 }
 
@@ -111,7 +123,10 @@ describe('AgentRail segmented strip', () => {
 
   it('keeps each divider inside its segment so it leaves with it', () => {
     render(AgentRail, {
-      props: { rail: rail([agent('w1', 'thinking', 'UI Worker'), agent('w2', 'thinking', 'API')]), visible: false },
+      props: {
+        rail: rail([agent('w1', 'thinking', 'UI Worker'), agent('w2', 'thinking', 'API')]),
+        visible: false,
+      },
     });
     for (const divider of document.querySelectorAll('.seg-divider')) {
       expect(divider.nextElementSibling?.classList.contains('agent-seg')).toBe(true);

@@ -13,8 +13,13 @@ vi.mock('$lib/stores/updater.svelte', () => ({ updater: { updateAvailable: false
 
 function menuBar() {
   return render(MenuBar, {
-    showSidebar: true, showAgents: false, zenMode: false, projectName: null,
-    activeAgents: [], recentProjects: [], onAction: vi.fn(),
+    showSidebar: true,
+    showAgents: false,
+    zenMode: false,
+    projectName: null,
+    activeAgents: [],
+    recentProjects: [],
+    onAction: vi.fn(),
   });
 }
 
@@ -63,12 +68,19 @@ describe('MenuBar window controls', () => {
 
   it('does not overwrite a completed toggle with an older startup query', async () => {
     let resolveInitial!: (value: boolean) => void;
-    native.invoke.mockImplementationOnce(() => new Promise<boolean>((resolve) => { resolveInitial = resolve; }));
+    native.invoke.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveInitial = resolve;
+        }),
+    );
     menuBar();
     await waitFor(() => expect(native.invoke).toHaveBeenCalledWith('is_window_expanded'));
     native.invoke.mockResolvedValue(true);
     await fireEvent.click(screen.getByRole('button', { name: 'Maximize window' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Restore window' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Restore window' })).toBeInTheDocument(),
+    );
     resolveInitial(false);
     await tick();
     expect(screen.getByRole('button', { name: 'Restore window' })).toBeInTheDocument();
@@ -76,7 +88,9 @@ describe('MenuBar window controls', () => {
 
   it('does not start window dragging from controls or secondary clicks', async () => {
     const { container } = menuBar();
-    await fireEvent.mouseDown(screen.getByRole('button', { name: 'Maximize window' }), { button: 0 });
+    await fireEvent.mouseDown(screen.getByRole('button', { name: 'Maximize window' }), {
+      button: 0,
+    });
     await fireEvent.mouseDown(container.querySelector('header')!, { button: 2 });
     expect(native.startDragging).not.toHaveBeenCalled();
   });

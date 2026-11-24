@@ -10,7 +10,11 @@ const native = vi.hoisted(() => ({
 }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: native.invoke }));
 vi.mock('$lib/stores/run-state.svelte', () => ({
-  runStateStore: { get states() { return native.runStates; } },
+  runStateStore: {
+    get states() {
+      return native.runStates;
+    },
+  },
 }));
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async (name: string, callback: (event: { payload: unknown }) => void) => {

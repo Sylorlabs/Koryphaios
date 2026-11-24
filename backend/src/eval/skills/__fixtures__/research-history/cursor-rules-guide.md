@@ -3,6 +3,7 @@
 > Transform your AI coding assistant into an enterprise-grade development partner with optimized MDC rules.
 
 ## 📋 Table of Contents
+
 - [Quick Start](#-quick-start)
 - [Installation](#-installation)
 - [Rule Overview](#-rule-overview)
@@ -14,6 +15,7 @@
 ## 🎯 Quick Start
 
 ### 30-Second Setup
+
 ```bash
 # 1. Create rules directory
 mkdir -p .cursor/rules
@@ -31,6 +33,7 @@ mkdir -p .cursor/rules
 ```
 
 ### First Commands to Try
+
 ```bash
 # Test terminal efficiency
 "Create a new feature branch, add 3 files, and commit"
@@ -47,6 +50,7 @@ mkdir -p .cursor/rules
 ## 📁 Installation
 
 ### Method 1: Essential Setup (Recommended)
+
 ```bash
 # Core protection + efficiency (5 rules)
 .cursor/rules/
@@ -58,6 +62,7 @@ mkdir -p .cursor/rules
 ```
 
 ### Method 2: Full Suite (9 rules)
+
 ```bash
 # All capabilities (9 rules)
 .cursor/rules/
@@ -73,7 +78,9 @@ mkdir -p .cursor/rules
 ```
 
 ### Method 3: Custom Selection
+
 Choose based on your needs:
+
 - **Solo Developer**: Essential 5
 - **Team Project**: Essential 5 + ADR.mdc
 - **Large Codebase**: Essential 5 + memory-management.mdc
@@ -82,9 +89,11 @@ Choose based on your needs:
 ## 📖 Rule Overview
 
 ### 🔍 **audit.mdc**
+
 **Purpose**: Comprehensive code quality assurance with surgical precision
 
 **Key Features**:
+
 - Recursive 4-phase audit loop
 - Thinking protocols for transparency
 - Surgical intervention approach
@@ -92,7 +101,8 @@ Choose based on your needs:
 
 **When Active**: Always (all code files)
 
-**Impact**: 
+**Impact**:
+
 - ✅ Systematic code quality improvement
 - ✅ Root cause identification
 - ✅ Surgical fixes over band-aids
@@ -100,9 +110,11 @@ Choose based on your needs:
 ---
 
 ### ⚡ **terminal.mdc**
+
 **Purpose**: Optimizes terminal operations for maximum efficiency
 
 **Key Features**:
+
 - Command chaining patterns
 - Output optimization
 - State verification
@@ -111,6 +123,7 @@ Choose based on your needs:
 **When Active**: Shell scripts, configs, terminal operations
 
 **Impact**:
+
 - ✅ 60-80% fewer terminal calls
 - ✅ Faster execution
 - ✅ Better error handling
@@ -118,9 +131,11 @@ Choose based on your needs:
 ---
 
 ### 🎯 **commonsense.mdc**
+
 **Purpose**: Enforces coding best practices and quality patterns
 
 **Key Features**:
+
 - Simple > Complex principle
 - Error handling patterns
 - Naming conventions
@@ -129,6 +144,7 @@ Choose based on your needs:
 **When Active**: All files
 
 **Impact**:
+
 - ✅ Consistent code quality
 - ✅ Fewer bugs
 - ✅ Better maintainability
@@ -136,9 +152,11 @@ Choose based on your needs:
 ---
 
 ### 📊 **efficiency.mdc**
+
 **Purpose**: Minimizes all tool usage across the board
 
 **Key Features**:
+
 - Tool call hierarchy
 - Batching strategies
 - Caching patterns
@@ -147,6 +165,7 @@ Choose based on your needs:
 **When Active**: All files
 
 **Impact**:
+
 - ✅ 50-70% fewer tool calls overall
 - ✅ Faster responses
 - ✅ Lower API costs
@@ -154,9 +173,11 @@ Choose based on your needs:
 ---
 
 ### 🐛 **debugging.mdc**
+
 **Purpose**: Systematic debugging with minimal exploration
 
 **Key Features**:
+
 - 5-step debug protocol
 - Common bug patterns
 - Universal debug logger
@@ -165,16 +186,19 @@ Choose based on your needs:
 **When Active**: Code files when debugging
 
 **Impact**:
+
 - ✅ Faster bug resolution
 - ✅ Systematic approach
 - ✅ Better root cause analysis
 
 ---
 
-### 🧠 **memory-management.mdc** *(Optional)*
+### 🧠 **memory-management.mdc** _(Optional)_
+
 **Purpose**: Intelligent context management for large projects
 
 **Key Features**:
+
 - 4-level priority system
 - Pattern recognition
 - Context compression
@@ -183,16 +207,19 @@ Choose based on your needs:
 **When Active**: Large codebases, complex projects
 
 **Impact**:
+
 - ✅ Better context retention
 - ✅ Faster pattern recognition
 - ✅ Smarter suggestions
 
 ---
 
-### 🔄 **session-coordinator.mdc** *(Optional)*
+### 🔄 **session-coordinator.mdc** _(Optional)_
+
 **Purpose**: Maintains continuity across work sessions
 
 **Key Features**:
+
 - Checkpoint system
 - Progress tracking
 - Team handoffs
@@ -201,16 +228,19 @@ Choose based on your needs:
 **When Active**: Long-term projects, team work
 
 **Impact**:
+
 - ✅ Never lose context
 - ✅ Smooth handoffs
 - ✅ Better progress tracking
 
 ---
 
-### 📚 **development-journal.mdc** *(Optional)*
+### 📚 **development-journal.mdc** _(Optional)_
+
 **Purpose**: Captures patterns and learnings automatically
 
 **Key Features**:
+
 - Problem-solution pairs
 - Performance discoveries
 - Bug pattern tracking
@@ -219,16 +249,19 @@ Choose based on your needs:
 **When Active**: During development
 
 **Impact**:
+
 - ✅ Knowledge preservation
 - ✅ Pattern learning
 - ✅ Better decisions
 
 ---
 
-### 📋 **ADR.mdc** *(Optional)*
+### 📋 **ADR.mdc** _(Optional)_
+
 **Purpose**: Tracks architectural decisions systematically
 
 **Key Features**:
+
 - ADR template
 - Decision triggers
 - Review schedules
@@ -237,6 +270,7 @@ Choose based on your needs:
 **When Active**: Architecture discussions
 
 **Impact**:
+
 - ✅ Clear decision trail
 - ✅ Better architecture
 - ✅ Team alignment
@@ -244,6 +278,7 @@ Choose based on your needs:
 ## 🔄 Practical Workflows
 
 ### 🌟 Daily Development Flow
+
 ```bash
 # 1. Start your day
 "Check git status and show recent changes"
@@ -266,6 +301,7 @@ Choose based on your needs:
 ```
 
 ### 🐛 Bug Investigation Flow
+
 ```bash
 # 1. Initial assessment
 "Analyze this error and recent changes"
@@ -283,6 +319,7 @@ Choose based on your needs:
 ```
 
 ### 🏗️ Architecture Decision Flow
+
 ```bash
 # 1. Evaluate options
 "Should we use PostgreSQL or MongoDB for this project?"
@@ -301,6 +338,7 @@ Choose based on your needs:
 ```
 
 ### 🚀 Feature Development Flow
+
 ```bash
 # 1. Check existing code
 "Implement user profile feature"
@@ -328,6 +366,7 @@ Choose based on your needs:
 ### 🎯 Command Patterns
 
 #### Efficiency Maximizers
+
 ```bash
 # Bundle operations
 "Create component with test, story, and styles in one go"
@@ -340,6 +379,7 @@ Choose based on your needs:
 ```
 
 #### Debug Accelerators
+
 ```bash
 # Quick triage
 "Debug context for current error state"
@@ -352,6 +392,7 @@ Choose based on your needs:
 ```
 
 #### Terminal Optimizers
+
 ```bash
 # Complex workflows
 "Set up new microservice with Docker, tests, and CI"
@@ -366,37 +407,42 @@ Choose based on your needs:
 ### 📊 Metrics to Track
 
 #### Efficiency Metrics
+
 ```yaml
 Before MDC Rules:
-- Average tool calls per task: 8-12
-- Terminal commands per operation: 6-10
-- Debug time per bug: 30-45 min
-- Duplicate code incidents: 2-3 per week
+  - Average tool calls per task: 8-12
+  - Terminal commands per operation: 6-10
+  - Debug time per bug: 30-45 min
+  - Duplicate code incidents: 2-3 per week
 
 After MDC Rules:
-- Average tool calls per task: 2-4 (-70%)
-- Terminal commands per operation: 1-3 (-80%)
-- Debug time per bug: 10-20 min (-60%)
-- Duplicate code incidents: 0 (-100%)
+  - Average tool calls per task: 2-4 (-70%)
+  - Terminal commands per operation: 1-3 (-80%)
+  - Debug time per bug: 10-20 min (-60%)
+  - Duplicate code incidents: 0 (-100%)
 ```
 
 ### 🚨 Common Pitfalls & Solutions
 
 #### Pitfall 1: Too Many Rules
+
 **Symptom**: AI becomes overly cautious, slow responses
 **Solution**: Start with essential 5, add others gradually
 
 #### Pitfall 2: Conflicting Rules
+
 **Symptom**: Contradictory suggestions
 **Solution**: Check rule overlap, disable redundant ones
 
 #### Pitfall 3: Over-reliance on Rules
+
 **Symptom**: AI won't make simple decisions
 **Solution**: Rules guide, not dictate - use common sense
 
 ## 🔧 Troubleshooting
 
 ### Rule Not Applying?
+
 ```bash
 # Check 1: File pattern match
 - Verify glob patterns in rule header
@@ -413,6 +459,7 @@ After MDC Rules:
 ```
 
 ### Performance Issues?
+
 ```bash
 # Reduce active rules
 - Disable session-coordinator if not needed
@@ -428,28 +475,30 @@ After MDC Rules:
 ## 📈 Performance Metrics
 
 ### Measuring Success
+
 ```javascript
 // Track your improvements
 const metrics = {
   toolCallsPerSession: [], // Should decrease
-  bugsResolvedTime: [],    // Should decrease
-  codeQualityScore: [],    // Should increase
-  duplicateIncidents: []   // Should be zero
+  bugsResolvedTime: [], // Should decrease
+  codeQualityScore: [], // Should increase
+  duplicateIncidents: [], // Should be zero
 };
 
 // Weekly review
-"Generate efficiency report for this week"
-"Show tool call optimization trends"
-"Analyze debugging time improvements"
+('Generate efficiency report for this week');
+('Show tool call optimization trends');
+('Analyze debugging time improvements');
 ```
 
 ### ROI Calculation
+
 ```yaml
 Time Saved Per Week:
-- Terminal optimization: 2-3 hours
-- Anti-duplication: 1-2 hours  
-- Efficient debugging: 3-4 hours
-- Smart context: 1-2 hours
+  - Terminal optimization: 2-3 hours
+  - Anti-duplication: 1-2 hours
+  - Efficient debugging: 3-4 hours
+  - Smart context: 1-2 hours
 
 Total: 7-11 hours/week saved
 Cost: 0 (one-time setup)
@@ -459,22 +508,25 @@ ROI: 20-30% productivity gain
 ## 🎓 Advanced Techniques
 
 ### Custom Rule Creation
+
 ```markdown
 ---
 description: Project-specific patterns
-globs: ["src/**/*.tsx"]
+globs: ['src/**/*.tsx']
 alwaysApply: true
 ---
 
 # Project Patterns
 
 ## Component Creation
+
 Always use our custom generator:
 \`\`\`bash
 npm run generate:component ComponentName
 \`\`\`
 
-## State Management  
+## State Management
+
 Use Zustand, not Redux:
 \`\`\`javascript
 import { create } from 'zustand'
@@ -482,6 +534,7 @@ import { create } from 'zustand'
 ```
 
 ### Rule Composition
+
 ```bash
 # Combine rules for specific tasks
 "Use debugging + efficiency for performance issues"

@@ -43,7 +43,10 @@ export class OutputLoopDetector {
     const maximum = Math.floor(tokens.length / OUTPUT_LOOP_REPETITION_THRESHOLD);
     for (let size = 1; size <= maximum; size++) {
       const start = tokens.length - size * OUTPUT_LOOP_REPETITION_THRESHOLD;
-      const expected = tokens.slice(start, start + size).map(([value]) => value).join('\u0000');
+      const expected = tokens
+        .slice(start, start + size)
+        .map(([value]) => value)
+        .join('\u0000');
       let repeated = true;
       for (let block = 1; block < OUTPUT_LOOP_REPETITION_THRESHOLD; block++) {
         const actual = tokens

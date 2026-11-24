@@ -49,9 +49,7 @@ function asPositiveInt(value: unknown): number | undefined {
 
 function asNonNegativeNumber(value: unknown): number | undefined {
   const parsed = typeof value === 'string' ? Number.parseFloat(value) : value;
-  return typeof parsed === 'number' && Number.isFinite(parsed) && parsed >= 0
-    ? parsed
-    : undefined;
+  return typeof parsed === 'number' && Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 export class HundredMillionSeekProvider extends OpenAIProvider {

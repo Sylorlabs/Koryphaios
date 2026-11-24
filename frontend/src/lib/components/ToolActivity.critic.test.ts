@@ -103,5 +103,7 @@ it('distinguishes a Critic run that produced partial output before failing', () 
     } as FeedEntryLocal,
   });
 
-  expect(screen.getByRole('button', { name: /Critic failed after partial output.*View evaluation/ })).toBeTruthy();
+  expect(
+    screen.getByRole('button', { name: /Critic failed after partial output.*View evaluation/ }),
+  ).toBeTruthy();
 });

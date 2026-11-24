@@ -13,7 +13,10 @@ export class ManageAgentsTool implements Tool {
   readonly inputSchema = {
     type: 'object',
     properties: {
-      action: { type: 'string', enum: ['list', 'message', 'cancel', 'set_controls', 'prune_context'] },
+      action: {
+        type: 'string',
+        enum: ['list', 'message', 'cancel', 'set_controls', 'prune_context'],
+      },
       agentId: { type: 'string' },
       message: { type: 'string' },
       model: { type: 'string', description: 'Worker model, optionally provider:model.' },

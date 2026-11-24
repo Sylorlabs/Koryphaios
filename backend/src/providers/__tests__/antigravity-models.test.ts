@@ -55,12 +55,18 @@ describe('Antigravity model capabilities', () => {
       model: 'model-a',
       systemPrompt: 'system',
       workingDirectory: '/workspace/project',
-      tools: [{ name: 'kory__read_file', description: 'Read files', inputSchema: { type: 'object' } }],
+      tools: [
+        { name: 'kory__read_file', description: 'Read files', inputSchema: { type: 'object' } },
+      ],
     };
     const fingerprint = fingerprintAntigravityContext(base);
     expect(fingerprintAntigravityContext({ ...base, model: 'model-b' })).not.toBe(fingerprint);
-    expect(fingerprintAntigravityContext({ ...base, systemPrompt: 'changed' })).not.toBe(fingerprint);
-    expect(fingerprintAntigravityContext({ ...base, workingDirectory: '/workspace/other' })).not.toBe(fingerprint);
+    expect(fingerprintAntigravityContext({ ...base, systemPrompt: 'changed' })).not.toBe(
+      fingerprint,
+    );
+    expect(
+      fingerprintAntigravityContext({ ...base, workingDirectory: '/workspace/other' }),
+    ).not.toBe(fingerprint);
     expect(fingerprintAntigravityContext({ ...base, tools: [] })).not.toBe(fingerprint);
   });
 

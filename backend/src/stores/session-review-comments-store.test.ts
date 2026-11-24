@@ -15,7 +15,10 @@ const store = await import('./session-review-comments-store');
 const A = 'session-a';
 const B = 'session-b';
 
-function row(sessionId: string, overrides: Partial<Parameters<typeof store.createReviewComment>[0]> = {}) {
+function row(
+  sessionId: string,
+  overrides: Partial<Parameters<typeof store.createReviewComment>[0]> = {},
+) {
   return store.createReviewComment({
     sessionId,
     filePath: 'src/app.ts',
@@ -84,10 +87,14 @@ describe('session review comments store', () => {
     expect(claimedIds).not.toContain(otherChat.id);
     expect(claimed.every((comment) => comment.sentBatchId === 'batch-1')).toBe(true);
 
-    const persisted = (await store.listReviewComments(A)).find((comment) => comment.id === second.id);
+    const persisted = (await store.listReviewComments(A)).find(
+      (comment) => comment.id === second.id,
+    );
     expect(persisted).toMatchObject({ side: 'old', staged: true, sentBatchId: 'batch-1' });
     // The other chat's comment was never claimed.
-    expect((await store.listReviewComments(B)).find((c) => c.id === otherChat.id)?.sentBatchId).toBeUndefined();
+    expect(
+      (await store.listReviewComments(B)).find((c) => c.id === otherChat.id)?.sentBatchId,
+    ).toBeUndefined();
   });
 
   test('releasing a batch clears only that batch’s stamps', async () => {

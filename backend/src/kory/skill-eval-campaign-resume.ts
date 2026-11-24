@@ -42,20 +42,24 @@ export function hasCompleteCurrentSkillPair(
       !run.suiteId ||
       !run.materializerId ||
       !run.deterministicScorerId
-    ) continue;
+    )
+      continue;
     byPair.set(run.comparisonId, [...(byPair.get(run.comparisonId) ?? []), run]);
   }
   return [...byPair.values()].some((pairRuns) =>
-    pairRuns.some((withSkill) =>
-      withSkill.variant === 'with-skill' && pairRuns.some((withoutSkill) =>
-        withoutSkill.variant === 'without-skill' &&
-        withoutSkill.skill === withSkill.skill &&
-        withoutSkill.caseId === withSkill.caseId &&
-        withoutSkill.suiteId === withSkill.suiteId &&
-        withoutSkill.evaluationContractVersion === withSkill.evaluationContractVersion &&
-        withoutSkill.materializerId === withSkill.materializerId &&
-        withoutSkill.deterministicScorerId === withSkill.deterministicScorerId,
-      ),
+    pairRuns.some(
+      (withSkill) =>
+        withSkill.variant === 'with-skill' &&
+        pairRuns.some(
+          (withoutSkill) =>
+            withoutSkill.variant === 'without-skill' &&
+            withoutSkill.skill === withSkill.skill &&
+            withoutSkill.caseId === withSkill.caseId &&
+            withoutSkill.suiteId === withSkill.suiteId &&
+            withoutSkill.evaluationContractVersion === withSkill.evaluationContractVersion &&
+            withoutSkill.materializerId === withSkill.materializerId &&
+            withoutSkill.deterministicScorerId === withSkill.deterministicScorerId,
+        ),
     ),
   );
 }

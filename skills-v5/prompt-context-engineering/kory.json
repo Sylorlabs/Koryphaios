@@ -5,23 +5,13 @@
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "ai",
-    "prompting",
-    "context"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["ai", "prompting", "context"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 6500,
-  "broader": [
-    "llm-application-engineering"
-  ],
+  "broader": ["llm-application-engineering"],
   "facets": [],
-  "requires": [
-    "llm-evaluation"
-  ],
+  "requires": ["llm-evaluation"],
   "conflicts": [],
   "activation": [
     "prompt engineering",
@@ -93,13 +83,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "rag-retrieval-systems"
-        ],
-        "tags": [
-          "ambiguous",
-          "neighbor-boundary"
-        ]
+        "adjacentSkills": ["rag-retrieval-systems"],
+        "tags": ["ambiguous", "neighbor-boundary"]
       },
       {
         "id": "prompt-context-engineering-ambiguous-2",
@@ -107,13 +92,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "llm-application-engineering"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["llm-application-engineering"],
+        "tags": ["ambiguous", "scope-control"]
       },
       {
         "id": "prompt-context-engineering-ambiguous-3",
@@ -121,13 +101,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "llm-evaluation"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["ambiguous", "scope-control"]
       }
     ],
     "adversarial": [
@@ -137,13 +112,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "implementation"
-        ],
-        "tags": [
-          "adversarial",
-          "quoted-decoy"
-        ]
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "quoted-decoy"]
       },
       {
         "id": "prompt-context-engineering-adversarial-2",
@@ -151,13 +121,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "incident-response"
-        ],
-        "tags": [
-          "adversarial",
-          "scope-control"
-        ]
+        "adjacentSkills": ["incident-response"],
+        "tags": ["adversarial", "scope-control"]
       },
       {
         "id": "prompt-context-engineering-adversarial-3",
@@ -165,13 +130,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "documentation"
-        ],
-        "tags": [
-          "adversarial",
-          "scope-control"
-        ]
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "scope-control"]
       }
     ]
   },

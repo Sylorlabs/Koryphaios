@@ -13,7 +13,10 @@ import { QUEUE_NAMES, type LLMJobData, type LLMJobResult } from '../types';
 import { ProviderRegistry } from '../../providers';
 import { serverLog, providerLog } from '../../logger';
 import type { StreamRequest, ProviderMessage, ProviderEvent } from '../../providers/types';
-import { currentProviderExecutionScope, withSessionProviderExecutionScope } from '../../providers/execution-scope';
+import {
+  currentProviderExecutionScope,
+  withSessionProviderExecutionScope,
+} from '../../providers/execution-scope';
 import { getContext } from '../../context';
 
 // ============================================================================
@@ -161,9 +164,12 @@ async function processScopedLLMJob(job: Job<LLMJobData>): Promise<LLMJobResult> 
 
     const request: StreamRequest = {
       sessionId,
-      ...(currentProviderExecutionScope() ? {
-        workingDirectory: await getContext().kory.resolveSessionWorkingDirectoryPublic(sessionId),
-      } : {}),
+      ...(currentProviderExecutionScope()
+        ? {
+            workingDirectory:
+              await getContext().kory.resolveSessionWorkingDirectoryPublic(sessionId),
+          }
+        : {}),
       model,
       messages,
       systemPrompt: systemPrompt ?? 'You are a helpful assistant.',

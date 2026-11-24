@@ -77,10 +77,7 @@ export function embeddedToolchain(): {
   return {
     clang,
     ld: firstExisting(['/opt/homebrew/bin/ld.lld', '/usr/local/bin/ld.lld']),
-    qemu: firstExisting([
-      '/opt/homebrew/bin/qemu-system-arm',
-      '/usr/local/bin/qemu-system-arm',
-    ]),
+    qemu: firstExisting(['/opt/homebrew/bin/qemu-system-arm', '/usr/local/bin/qemu-system-arm']),
     includeDir,
   };
 }
@@ -102,9 +99,7 @@ export function embeddedRuntimeReadiness(): string[] {
     toolchain.qemu ? null : 'qemu-system-arm',
     toolchain.includeDir ? null : 'clang builtin includes',
   ].filter((entry): entry is string => entry !== null);
-  return missing.length
-    ? [`${EMBEDDED_RUNTIME_BLOCKER}. Missing: ${missing.join(', ')}`]
-    : [];
+  return missing.length ? [`${EMBEDDED_RUNTIME_BLOCKER}. Missing: ${missing.join(', ')}`] : [];
 }
 
 const STARTUP = `#include <stdint.h>
@@ -828,7 +823,8 @@ function parseJournal(text: string): FlashOp[] {
   const ops: FlashOp[] = [];
   for (const line of text.split('\n')) {
     const parts = line.trim().split(' ');
-    if (parts[0] === 'E') ops.push({ kind: 'E', page: Number(parts[1]), offset: 0, bytes: Buffer.alloc(0) });
+    if (parts[0] === 'E')
+      ops.push({ kind: 'E', page: Number(parts[1]), offset: 0, bytes: Buffer.alloc(0) });
     else if (parts[0] === 'P')
       ops.push({
         kind: 'P',
@@ -857,12 +853,16 @@ function applyFlashOp(image: Buffer, op: FlashOp, fraction: number): void {
 /** Replay the journal up to `complete` full operations plus a torn operation. */
 function replayFlash(previous: Buffer, ops: readonly FlashOp[], complete: number): Buffer {
   const image = Buffer.from(previous);
-  for (let index = 0; index < complete && index < ops.length; index++) applyFlashOp(image, ops[index]!, 1);
+  for (let index = 0; index < complete && index < ops.length; index++)
+    applyFlashOp(image, ops[index]!, 1);
   if (complete < ops.length) applyFlashOp(image, ops[complete]!, 0.5);
   return image;
 }
 
-function buildFirmware(root: string, sources: readonly string[]): { ok: boolean; log: string; elf: string } {
+function buildFirmware(
+  root: string,
+  sources: readonly string[],
+): { ok: boolean; log: string; elf: string } {
   const toolchain = embeddedToolchain();
   const elf = join(root, 'firmware.elf');
   if (!toolchain.clang || !toolchain.ld || !toolchain.includeDir) {
@@ -887,12 +887,20 @@ function buildFirmware(root: string, sources: readonly string[]): { ok: boolean;
   const objects: string[] = [];
   for (const source of sources) {
     const object = `${source}.o`;
-    const compiled = spawnSync(toolchain.clang, [...common, '-c', join(root, 'src', source), '-o', join(root, object)], {
-      encoding: 'utf8',
-      timeout: 120_000,
-    });
+    const compiled = spawnSync(
+      toolchain.clang,
+      [...common, '-c', join(root, 'src', source), '-o', join(root, object)],
+      {
+        encoding: 'utf8',
+        timeout: 120_000,
+      },
+    );
     if (compiled.status !== 0) {
-      return { ok: false, log: `${source}: ${compiled.stderr ?? compiled.stdout ?? 'compile failed'}`, elf };
+      return {
+        ok: false,
+        log: `${source}: ${compiled.stderr ?? compiled.stdout ?? 'compile failed'}`,
+        elf,
+      };
     }
     objects.push(join(root, object));
   }
@@ -901,7 +909,8 @@ function buildFirmware(root: string, sources: readonly string[]): { ok: boolean;
     ['-T', join(root, 'src', 'link.ld'), '--gc-sections', ...objects, '-o', elf],
     { encoding: 'utf8', timeout: 120_000 },
   );
-  if (linked.status !== 0) return { ok: false, log: `link: ${linked.stderr ?? linked.stdout ?? 'link failed'}`, elf };
+  if (linked.status !== 0)
+    return { ok: false, log: `link: ${linked.stderr ?? linked.stdout ?? 'link failed'}`, elf };
   return { ok: true, log: '', elf };
 }
 
@@ -921,7 +930,8 @@ function bootFirmware(
   options: { command?: string; rate?: number; slow?: number; power?: number; image?: Buffer },
 ): FirmwareRun {
   const toolchain = embeddedToolchain();
-  if (!toolchain.qemu) return { stdout: EMBEDDED_RUNTIME_BLOCKER, result: '', ops: [], exitCode: null };
+  if (!toolchain.qemu)
+    return { stdout: EMBEDDED_RUNTIME_BLOCKER, result: '', ops: [], exitCode: null };
   if (options.command !== undefined) writeFileSync(join(root, 'command.txt'), options.command);
   if (options.rate !== undefined) writeFileSync(join(root, 'rate.txt'), String(options.rate));
   if (options.slow !== undefined) writeFileSync(join(root, 'slow.txt'), String(options.slow));
@@ -945,7 +955,9 @@ function bootFirmware(
     ],
     { encoding: 'utf8', timeout: 120_000, cwd: root },
   );
-  const spawnError = run.error ? `SPAWN-ERROR ${(run.error as NodeJS.ErrnoException).code ?? run.error.message}\n` : '';
+  const spawnError = run.error
+    ? `SPAWN-ERROR ${(run.error as NodeJS.ErrnoException).code ?? run.error.message}\n`
+    : '';
   const stdout = `${spawnError}${run.stdout ?? ''}${run.stderr ?? ''}`;
   const reportPath = join(root, 'result.txt');
   const reported = existsSync(reportPath) ? readFileSync(reportPath, 'utf8') : '';
@@ -1037,7 +1049,11 @@ interrupt handler stays inside its cycle budget.
 per interrupt and a fast consumer.
 `;
 
-function writeBuildScript(destination: string, sources: readonly string[], candidate: string): void {
+function writeBuildScript(
+  destination: string,
+  sources: readonly string[],
+  candidate: string,
+): void {
   const toolchain = embeddedToolchain();
   const clang = toolchain.clang ?? 'clang';
   const ld = toolchain.ld ?? 'ld.lld';
@@ -1109,7 +1125,9 @@ uint8_t corpus_byte(uint32_t offset) { return offset < CORPUS_BYTES ? corpus[off
     writeFileSync(join(destination, 'README.md'), EMBEDDED_README_2);
     writeBuildScript(destination, ['startup.c', 'corpus.c', 'producer.c', 'main.c'], 'ring.c');
   }
-  writeFileSync(join(destination, 'run.sh'), `set -e\n${join(destination, 'build.sh')}\n`, { mode: 0o755 });
+  writeFileSync(join(destination, 'run.sh'), `set -e\n${join(destination, 'build.sh')}\n`, {
+    mode: 0o755,
+  });
   writeFileSync(join(destination, 'rate.txt'), '4');
   writeFileSync(join(destination, 'slow.txt'), '0');
   writeFileSync(join(destination, 'command.txt'), 'load');
@@ -1158,7 +1176,8 @@ function legacyRecord(seq: number, baud: number, mode: number, flags: number): B
 export function runEmbeddedScenario1(root: string): EmbeddedResult {
   const checks: EmbeddedCheck[] = [];
   const evidence: string[] = [];
-  if (embeddedRuntimeReadiness().length) return { passed: false, checks: [], evidence: embeddedRuntimeReadiness().join('\n') };
+  if (embeddedRuntimeReadiness().length)
+    return { passed: false, checks: [], evidence: embeddedRuntimeReadiness().join('\n') };
 
   restoreHarnessSources(root, 1);
   const { copyFileSync } = require('node:fs') as typeof import('node:fs');
@@ -1167,7 +1186,13 @@ export function runEmbeddedScenario1(root: string): EmbeddedResult {
   if (!build.ok) {
     return {
       passed: false,
-      checks: [{ id: 'contract', passed: false, detail: `firmware build failed: ${build.log.slice(0, 400)}` }],
+      checks: [
+        {
+          id: 'contract',
+          passed: false,
+          detail: `firmware build failed: ${build.log.slice(0, 400)}`,
+        },
+      ],
       evidence: build.log,
     };
   }
@@ -1190,7 +1215,11 @@ export function runEmbeddedScenario1(root: string): EmbeddedResult {
   for (let seq = 1; seq <= COMMITS; seq++) {
     const before = Buffer.from(image);
     const baud = baudOf(seq);
-    const save = runFirmware(root, { command: `save ${baud} ${seq % 4} ${seq}`, power: 1_000_000, image });
+    const save = runFirmware(root, {
+      command: `save ${baud} ${seq % 4} ${seq}`,
+      power: 1_000_000,
+      image,
+    });
     const values = numbersIn(save.result);
     if (firstSaveStatus === null) firstSaveStatus = values.status ?? null;
     if (values.status !== 0) {
@@ -1198,7 +1227,8 @@ export function runEmbeddedScenario1(root: string): EmbeddedResult {
       evidence.push(`save ${seq} failed: ${save.result || '(no result)'}`);
       break;
     }
-    if (!crossing && save.ops.some((op) => op.kind === 'E')) crossing = { ops: save.ops, before, seq, baud };
+    if (!crossing && save.ops.some((op) => op.kind === 'E'))
+      crossing = { ops: save.ops, before, seq, baud };
     for (const op of save.ops) {
       applyFlashOp(image, op, 1);
       if (op.kind === 'E') erases[op.page]! += 1;
@@ -1230,8 +1260,13 @@ export function runEmbeddedScenario1(root: string): EmbeddedResult {
       const torn = replayFlash(crossing.before, crossing.ops, complete);
       const loaded = runFirmware(root, { command: 'load', power: 1_000_000, image: torn });
       const values = numbersIn(loaded.result);
-      if (values.status === 1 && values.seq === crossing.seq && values.baud === crossing.baud) newCommitted++;
-      else if (values.status === 1 && values.seq === crossing.seq - 1 && values.baud === baudOf(crossing.seq - 1))
+      if (values.status === 1 && values.seq === crossing.seq && values.baud === crossing.baud)
+        newCommitted++;
+      else if (
+        values.status === 1 &&
+        values.seq === crossing.seq - 1 &&
+        values.baud === baudOf(crossing.seq - 1)
+      )
         previousCommitted++;
       else broken.push(`complete=${complete}: ${loaded.result || '(no result)'}`);
     }
@@ -1245,12 +1280,23 @@ export function runEmbeddedScenario1(root: string): EmbeddedResult {
     const tornValues = numbersIn(tornLoad.result);
     checks.push({
       id: 'torn-write',
-      passed: tornValues.status === 1 && tornValues.seq === crossing.seq - 1 && tornValues.baud === baudOf(crossing.seq - 1),
+      passed:
+        tornValues.status === 1 &&
+        tornValues.seq === crossing.seq - 1 &&
+        tornValues.baud === baudOf(crossing.seq - 1),
       detail: `half-programmed record: ${tornLoad.result || '(no result)'} (expected the previous committed record)`,
     });
   } else {
-    checks.push({ id: 'brownout-sweep', passed: false, detail: `no page erase happened during ${COMMITS} commits` });
-    checks.push({ id: 'torn-write', passed: false, detail: `no page erase happened during ${COMMITS} commits` });
+    checks.push({
+      id: 'brownout-sweep',
+      passed: false,
+      detail: `no page erase happened during ${COMMITS} commits`,
+    });
+    checks.push({
+      id: 'torn-write',
+      passed: false,
+      detail: `no page erase happened during ${COMMITS} commits`,
+    });
   }
 
   const wearBalanced = Math.abs(erases[0]! - erases[1]!) <= 1 && erases[0]! + erases[1]! >= 2;
@@ -1281,7 +1327,8 @@ export function runEmbeddedScenario1(root: string): EmbeddedResult {
 export function runEmbeddedScenario2(root: string): EmbeddedResult {
   const checks: EmbeddedCheck[] = [];
   const evidence: string[] = [];
-  if (embeddedRuntimeReadiness().length) return { passed: false, checks: [], evidence: embeddedRuntimeReadiness().join('\n') };
+  if (embeddedRuntimeReadiness().length)
+    return { passed: false, checks: [], evidence: embeddedRuntimeReadiness().join('\n') };
 
   restoreHarnessSources(root, 2);
   const { copyFileSync } = require('node:fs') as typeof import('node:fs');
@@ -1290,7 +1337,13 @@ export function runEmbeddedScenario2(root: string): EmbeddedResult {
   if (!build.ok) {
     return {
       passed: false,
-      checks: [{ id: 'contract', passed: false, detail: `firmware build failed: ${build.log.slice(0, 400)}` }],
+      checks: [
+        {
+          id: 'contract',
+          passed: false,
+          detail: `firmware build failed: ${build.log.slice(0, 400)}`,
+        },
+      ],
       evidence: build.log,
     };
   }
@@ -1316,7 +1369,10 @@ export function runEmbeddedScenario2(root: string): EmbeddedResult {
   checks.push({
     id: 'framing-intact',
     passed:
-      steadyDone.frames === CORPUS_FRAMES && steadyDone.gaps === 0 && steadyDone.badcrc === 0 && steadyDone.overruns === 0,
+      steadyDone.frames === CORPUS_FRAMES &&
+      steadyDone.gaps === 0 &&
+      steadyDone.badcrc === 0 &&
+      steadyDone.overruns === 0,
     detail: `four bytes per interrupt: frames=${steadyDone.frames ?? 'n/a'}/${CORPUS_FRAMES} gaps=${steadyDone.gaps ?? 'n/a'} badcrc=${steadyDone.badcrc ?? 'n/a'} overruns=${steadyDone.overruns ?? 'n/a'}`,
   });
   checks.push({

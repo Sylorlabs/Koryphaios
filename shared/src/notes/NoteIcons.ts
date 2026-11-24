@@ -62,14 +62,17 @@ export function isNoteEmoji(value: unknown): value is string {
 export function isNoteIconLabel(label: unknown): label is string {
   if (typeof label !== 'string') return false;
   const trimmed = label.trim();
-  return trimmed.length > 0 && trimmed.length <= MAX_NOTE_ICON_LABEL_LENGTH && !CONTROL.test(trimmed);
+  return (
+    trimmed.length > 0 && trimmed.length <= MAX_NOTE_ICON_LABEL_LENGTH && !CONTROL.test(trimmed)
+  );
 }
 
 export function isNoteIcon(value: unknown): value is NoteIcon {
   if (!value || typeof value !== 'object') return false;
   const icon = value as NoteIcon;
   if (icon.label !== undefined && !isNoteIconLabel(icon.label)) return false;
-  if (icon.kind === 'builtin') return NOTE_ICON_CHOICES.some((choice) => choice.value === icon.value);
+  if (icon.kind === 'builtin')
+    return NOTE_ICON_CHOICES.some((choice) => choice.value === icon.value);
   if (icon.kind === 'emoji') return isNoteEmoji(icon.value);
   return (
     icon.kind === 'image' &&

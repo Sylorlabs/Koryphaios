@@ -164,7 +164,8 @@ describe('required session naming', () => {
       await f.titleFinished.promise;
       await turn;
       expect(
-        (await f.messages.getAll(f.session.id)).find((message) => message.role === 'assistant')?.content,
+        (await f.messages.getAll(f.session.id)).find((message) => message.role === 'assistant')
+          ?.content,
       ).toBe('Here is how to fix the login issue.');
       expect(f.titleRequests[0]?.model).toBe('selected-model');
       expect(f.titleRequests[0]?.messages[0]?.content).toContain('checkout login bug');
@@ -328,7 +329,8 @@ describe('required session naming', () => {
     await turn;
     expect(f.executeWithRetry).toHaveBeenCalledTimes(1);
     expect(
-      (await f.messages.getAll(f.session.id)).find((message) => message.role === 'assistant')?.content,
+      (await f.messages.getAll(f.session.id)).find((message) => message.role === 'assistant')
+        ?.content,
     ).toBe('Here is how to fix the login issue.');
     expect((await f.sessions.get(f.session.id))?.title).toBe(SESSION.DEFAULT_TITLE);
     f.sessions.update = update;

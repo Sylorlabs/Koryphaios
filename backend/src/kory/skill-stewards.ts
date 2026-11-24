@@ -141,12 +141,14 @@ export function isChatGptWebSkillStewardIdentity(provider: string, model: string
  */
 export function isEligibleBlindReviewerProvenance(
   skill: string,
-  provenance: {
-    agentId?: string;
-    displayLabel?: string;
-    blindTo?: readonly string[];
-    evidence?: readonly string[];
-  } | undefined,
+  provenance:
+    | {
+        agentId?: string;
+        displayLabel?: string;
+        blindTo?: readonly string[];
+        evidence?: readonly string[];
+      }
+    | undefined,
   steward?: { agentId?: string },
 ): boolean {
   if (!provenance?.agentId) return false;

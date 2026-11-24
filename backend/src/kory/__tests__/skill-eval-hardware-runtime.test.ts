@@ -50,7 +50,10 @@ function hex(value: number): string {
 }
 
 const REPAIR_S1 = [
-  ['#define GUARDED_REGION_BASE 0x20000000u', '#define GUARDED_REGION_BASE ((uint32_t)calibration_scratch)'],
+  [
+    '#define GUARDED_REGION_BASE 0x20000000u',
+    '#define GUARDED_REGION_BASE ((uint32_t)calibration_scratch)',
+  ],
 ] as const;
 
 const REPAIR_S2 = [
@@ -158,10 +161,12 @@ describe('Cortex-M hardware runtime fixture', () => {
       );
       const result = runHardwareScenario(root, 1);
       expect(result.passed).toBe(false);
-      expect(result.checks.filter((check) => !check.passed).map((check) => check.id).sort()).toEqual([
-        'fault-address',
-        'pc-symbol',
-      ]);
+      expect(
+        result.checks
+          .filter((check) => !check.passed)
+          .map((check) => check.id)
+          .sort(),
+      ).toEqual(['fault-address', 'pc-symbol']);
     },
     300_000,
   );

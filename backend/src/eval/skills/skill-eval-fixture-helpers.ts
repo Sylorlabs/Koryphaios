@@ -200,7 +200,10 @@ export function hasRegressionText(root: string, required: RegExp[]): boolean {
   }
 }
 
-export function runCandidateBunTests(root: string, selectedTests?: readonly string[]): {
+export function runCandidateBunTests(
+  root: string,
+  selectedTests?: readonly string[],
+): {
   completed: boolean;
   passed: boolean;
   exitStatus: number | null;
@@ -212,13 +215,22 @@ export function runCandidateBunTests(root: string, selectedTests?: readonly stri
   try {
     const discovered = testFiles(root);
     const publicTests = selectedTests ? [...selectedTests] : discovered;
-    if (publicTests.length > TEST_SCAN_MAX_FILES || new Set(publicTests).size !== publicTests.length ||
-        publicTests.some((path) => !discovered.includes(path))) {
+    if (
+      publicTests.length > TEST_SCAN_MAX_FILES ||
+      new Set(publicTests).size !== publicTests.length ||
+      publicTests.some((path) => !discovered.includes(path))
+    ) {
       throw new Error('Selected tests must be distinct, bounded discovered Bun test files');
     }
     for (const path of publicTests) readFixtureText(root, path);
     if (!publicTests.length) {
-      return { completed: false, passed: false, exitStatus: null, output: '', evidence: 'Candidate tests are missing.' };
+      return {
+        completed: false,
+        passed: false,
+        exitStatus: null,
+        output: '',
+        evidence: 'Candidate tests are missing.',
+      };
     }
     privateHome = mkdtempSync(join(tmpdir(), 'kory-eval-public-test-home-'));
     const runnerConfig = '[test]\npreload = ["./setup.ts"]\n';

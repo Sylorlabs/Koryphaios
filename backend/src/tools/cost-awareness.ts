@@ -64,7 +64,8 @@ export class GetModelPricingTool implements Tool {
       },
       provider: {
         type: 'string',
-        description: 'Provider name. Scopes a bare model id, or lists that provider catalog when models is omitted.',
+        description:
+          'Provider name. Scopes a bare model id, or lists that provider catalog when models is omitted.',
       },
     },
   };
@@ -78,11 +79,18 @@ export class GetModelPricingTool implements Tool {
     try {
       const input = call.input as { models?: unknown; provider?: unknown };
       const rawModels =
-        typeof input.models === 'string' ? [input.models] : Array.isArray(input.models) ? input.models : undefined;
+        typeof input.models === 'string'
+          ? [input.models]
+          : Array.isArray(input.models)
+            ? input.models
+            : undefined;
       if (rawModels !== undefined && rawModels.some((value) => typeof value !== 'string')) {
         return fail(call, this.name, 'models must be an array of provider:model strings.');
       }
-      const models = rawModels?.map((value) => (value as string).trim()).filter(Boolean).slice(0, MAX_MODELS_PER_CALL);
+      const models = rawModels
+        ?.map((value) => (value as string).trim())
+        .filter(Boolean)
+        .slice(0, MAX_MODELS_PER_CALL);
       const provider = typeof input.provider === 'string' ? input.provider : undefined;
       const providers = this.providers.getStatus().map((status) => ({
         name: status.name,
@@ -111,7 +119,8 @@ export async function readSpendCapStatus(sessionId: string | undefined): Promise
   const windows = await getSpendWindowSnapshot(sessionId);
   const usd = (cents: number): number => cents / 100;
   const limit = (cents: number): number | null => (cents > 0 ? usd(cents) : null);
-  const pause = sessionId && isSessionPaused(sessionId) ? getSessionPauseRecord(sessionId) : undefined;
+  const pause =
+    sessionId && isSessionPaused(sessionId) ? getSessionPauseRecord(sessionId) : undefined;
   return {
     enabled: caps.enabled,
     action: caps.action,
@@ -177,7 +186,11 @@ export class GetUsageSummaryTool implements Tool {
       if (requested && requested !== ctx.sessionId) {
         const target = await this.sessions.get(requested);
         if (!target) {
-          return fail(call, this.name, `No chat with id '${requested}'. Use list_sessions to find chat ids.`);
+          return fail(
+            call,
+            this.name,
+            `No chat with id '${requested}'. Use list_sessions to find chat ids.`,
+          );
         }
         targetId = target.id;
       }
@@ -199,9 +212,7 @@ export class GetUsageSummaryTool implements Tool {
         { scope, sessionId: targetId, projectSessionIds },
         {
           rows: this.deps.rows ?? ((sinceMs) => getUsageCostBreakdown(undefined, sinceMs)),
-          budget:
-            this.deps.budget ??
-            (() => collectResourceBudgetSnapshot(providerConfigs(), {})),
+          budget: this.deps.budget ?? (() => collectResourceBudgetSnapshot(providerConfigs(), {})),
           spendCap: this.deps.spendCap ?? readSpendCapStatus,
           ...(this.deps.now ? { now: this.deps.now } : {}),
         },

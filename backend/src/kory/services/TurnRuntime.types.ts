@@ -110,9 +110,7 @@ export function durableRunOwnsTurn(
   durable: { runId: string | null; status: string } | null | undefined,
   runId: string,
 ): boolean {
-  return (
-    durable?.runId === runId && (durable.status === 'active' || durable.status === 'waiting')
-  );
+  return durable?.runId === runId && (durable.status === 'active' || durable.status === 'waiting');
 }
 
 /** Partial transcript data is deliberately non-enumerable: logging an error

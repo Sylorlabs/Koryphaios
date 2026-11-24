@@ -42,9 +42,7 @@ afterEach(async () => {
   }
 });
 
-async function fixture(
-  script: (request: StreamRequest) => AsyncGenerator<ProviderEvent>,
-) {
+async function fixture(script: (request: StreamRequest) => AsyncGenerator<ProviderEvent>) {
   const root = mkdtempSync(join(tmpdir(), 'process-task-timeout-'));
   const sessions = new SessionStore();
   const messages = new MessageStore();
@@ -92,7 +90,9 @@ async function fixture(
   return { manager, session, runs, messages };
 }
 
-async function captureBroker<T>(run: () => Promise<T>): Promise<{ result: T; published: WSMessage[] }> {
+async function captureBroker<T>(
+  run: () => Promise<T>,
+): Promise<{ result: T; published: WSMessage[] }> {
   const published: WSMessage[] = [];
   const broker = wsBroker as unknown as { publish: (channel: string, message: unknown) => void };
   const original = broker.publish;
@@ -107,15 +107,13 @@ async function captureBroker<T>(run: () => Promise<T>): Promise<{ result: T; pub
 }
 
 function runTurn(f: Awaited<ReturnType<typeof fixture>>) {
-  return f.manager
-    .reserveSessionTurn(f.session.id, 'user_turn')
-    .then((admission) =>
-      f.manager.dispatchAdmittedTask(admission!, {
-        userMessage: 'Answer me',
-        preferredModel: 'openai:gpt-4o',
-        interactionMode: 'act',
-      }),
-    );
+  return f.manager.reserveSessionTurn(f.session.id, 'user_turn').then((admission) =>
+    f.manager.dispatchAdmittedTask(admission!, {
+      userMessage: 'Answer me',
+      preferredModel: 'openai:gpt-4o',
+      interactionMode: 'act',
+    }),
+  );
 }
 
 function sessionEvents(published: WSMessage[], sessionId: string) {
@@ -150,7 +148,7 @@ describe('PROCESS_TASK_TIMEOUT_MS wall-clock kill', () => {
       }
       providerSawAbortAt = Date.now();
       if (request.signal?.aborted) {
-        throw (request.signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        throw request.signal.reason ?? new DOMException('Aborted', 'AbortError');
       }
       yield { type: 'complete' } as ProviderEvent;
     });
@@ -181,9 +179,9 @@ describe('PROCESS_TASK_TIMEOUT_MS wall-clock kill', () => {
 
     // The persisted transcript also records the stop as a user action.
     const persisted = await f.messages.getContextMessages(f.session.id);
-    expect(
-      persisted.some((m) => m.role === 'system' && m.content === 'Stopped by user.'),
-    ).toBe(true);
+    expect(persisted.some((m) => m.role === 'system' && m.content === 'Stopped by user.')).toBe(
+      true,
+    );
   });
 
   test('control: a turn that finishes under the limit completes normally', async () => {

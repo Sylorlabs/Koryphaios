@@ -91,14 +91,25 @@ export interface KoryToolDef {
 
 export const KORY_TOOLS: KoryToolDef[] = [
   {
-    name: 'kory__manage_review_agents', role: 'critic',
+    name: 'kory__manage_review_agents',
+    role: 'critic',
     description: 'Manage specialists owned by this Critic review.',
-    inputSchema: { type: 'object', properties: {
-      action: { type: 'string', enum: ['list', 'message', 'cancel'] },
-      agentId: { type: 'string' }, message: { type: 'string' },
-    }, required: ['action'] },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['list', 'message', 'cancel'] },
+        agentId: { type: 'string' },
+        message: { type: 'string' },
+      },
+      required: ['action'],
+    },
   },
-  ...NOTE_WORKSPACE_TOOL_DEFINITIONS.map((tool): KoryToolDef => ({ name: `kory__${tool.name}`, description: tool.description, inputSchema: { type: 'object' }, role: tool.category === 'read' ? 'any' : 'worker' })),
+  ...NOTE_WORKSPACE_TOOL_DEFINITIONS.map((tool): KoryToolDef => ({
+    name: `kory__${tool.name}`,
+    description: tool.description,
+    inputSchema: { type: 'object' },
+    role: tool.category === 'read' ? 'any' : 'worker',
+  })),
   // Runtime schemas/descriptions are fetched from the authoritative registry.
   ...[
     'status',
@@ -596,7 +607,8 @@ export const KORY_TOOLS: KoryToolDef[] = [
   },
   {
     name: 'kory__prune_context',
-    description: 'Prune old tool output context. Managers use archive ids; workers and Critics can prune their own context with keepRecent.',
+    description:
+      'Prune old tool output context. Managers use archive ids; workers and Critics can prune their own context with keepRecent.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -609,7 +621,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
   {
     name: 'kory__manage_context',
     description:
-      'Report, hide, summarize, restore, re-policy or compact this agent\'s own tool-output context. Hiding and summarizing change only what the agent reads; the transcript keeps the full output.',
+      "Report, hide, summarize, restore, re-policy or compact this agent's own tool-output context. Hiding and summarizing change only what the agent reads; the transcript keeps the full output.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -660,7 +672,8 @@ export const KORY_TOOLS: KoryToolDef[] = [
   // ── Interaction ──
   {
     name: 'kory__request_critic_review',
-    description: 'In Critic Auto mode, request an independent Critic review of your proposed answer. Pass compareGroupId to have the Critic rank a compare group.',
+    description:
+      'In Critic Auto mode, request an independent Critic review of your proposed answer. Pass compareGroupId to have the Critic rank a compare group.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -766,7 +779,10 @@ export const KORY_TOOLS: KoryToolDef[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['list', 'message', 'cancel', 'set_controls', 'prune_context'] },
+        action: {
+          type: 'string',
+          enum: ['list', 'message', 'cancel', 'set_controls', 'prune_context'],
+        },
         agentId: { type: 'string' },
         message: { type: 'string' },
         model: { type: 'string' },
@@ -877,7 +893,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
   {
     name: 'kory__merge_chat_back',
     description:
-      "Merge the work this chat did in its own copy back into the project folder and run there again. Only for chats isolated via kory__isolate_chat. Requires user approval outside YOLO mode; conflicts abort and keep the chat isolated.",
+      'Merge the work this chat did in its own copy back into the project folder and run there again. Only for chats isolated via kory__isolate_chat. Requires user approval outside YOLO mode; conflicts abort and keep the chat isolated.',
     inputSchema: {
       type: 'object',
       properties: { message: { type: 'string' } },
@@ -888,7 +904,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
   {
     name: 'kory__create_chat',
     description:
-      "Create a new chat in this project, optionally starting it with a first message (start: true). The new chat is marked as created by you. Requires user approval outside YOLO mode.",
+      'Create a new chat in this project, optionally starting it with a first message (start: true). The new chat is marked as created by you. Requires user approval outside YOLO mode.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -904,7 +920,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
   {
     name: 'kory__send_to_chat',
     description:
-      "Send a message to another chat in this project. An idle chat starts a turn; a busy one queues the message on its steering queue. Delivered as coming from your agent, not the user. Requires user approval outside YOLO mode. Use kory__wait_for_chat for the reply.",
+      'Send a message to another chat in this project. An idle chat starts a turn; a busy one queues the message on its steering queue. Delivered as coming from your agent, not the user. Requires user approval outside YOLO mode. Use kory__wait_for_chat for the reply.',
     inputSchema: {
       type: 'object',
       properties: { sessionId: { type: 'string' }, message: { type: 'string' } },
@@ -918,7 +934,10 @@ export const KORY_TOOLS: KoryToolDef[] = [
       'Wait for a run in another chat in this project to settle, up to timeoutSec (default 300, max 1800). Returns the final state and the last assistant reply.',
     inputSchema: {
       type: 'object',
-      properties: { sessionId: { type: 'string' }, timeoutSec: { type: 'number', minimum: 1, maximum: 1800 } },
+      properties: {
+        sessionId: { type: 'string' },
+        timeoutSec: { type: 'number', minimum: 1, maximum: 1800 },
+      },
       required: ['sessionId'],
     },
     role: 'any',
@@ -959,14 +978,45 @@ export const KORY_TOOLS: KoryToolDef[] = [
 
   {
     name: 'kory__list_linked_devices',
-    description: 'List user-authorized linked desktops available to the session manager, with names, OS, and connectivity.',
+    description:
+      'List user-authorized linked desktops available to the session manager, with names, OS, and connectivity.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     role: 'manager',
   },
   {
     name: 'kory__control_linked_device',
-    description: 'Route work to a user-authorized desktop through its Kory manager. Use workspace/session IDs discovered on that device, never local paths. Cannot approve remote prompts or change device grants.',
-    inputSchema: { type: 'object', properties: { deviceId: { type: 'string' }, operation: { type: 'string', enum: ['workspaces','folders','sessions','snapshot','create_chat','prompt','cancel'] }, input: { type: 'object', properties: { workspaceId: {type:'string'}, sessionId: {type:'string'}, title: {type:'string'}, content: {type:'string'} }, additionalProperties: false } }, required: ['deviceId','operation'], additionalProperties: false },
+    description:
+      'Route work to a user-authorized desktop through its Kory manager. Use workspace/session IDs discovered on that device, never local paths. Cannot approve remote prompts or change device grants.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        deviceId: { type: 'string' },
+        operation: {
+          type: 'string',
+          enum: [
+            'workspaces',
+            'folders',
+            'sessions',
+            'snapshot',
+            'create_chat',
+            'prompt',
+            'cancel',
+          ],
+        },
+        input: {
+          type: 'object',
+          properties: {
+            workspaceId: { type: 'string' },
+            sessionId: { type: 'string' },
+            title: { type: 'string' },
+            content: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+      },
+      required: ['deviceId', 'operation'],
+      additionalProperties: false,
+    },
     role: 'manager',
   },
   // ── Goals ──
@@ -1215,10 +1265,7 @@ export const KORY_TOOLS: KoryToolDef[] = [
       properties: {
         action: { type: 'string', enum: ['report', 'block', 'unblock'] },
         skills: {
-          anyOf: [
-            { type: 'array', items: { type: 'string' } },
-            { type: 'string' },
-          ],
+          anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'string' }],
         },
         reason: { type: 'string' },
       },
@@ -1383,14 +1430,24 @@ export const KORY_TOOLS: KoryToolDef[] = [
   },
 
   // ── MCP server management ──
-  { name: 'kory__list_mcp_tools', description: 'Discover this project’s custom MCP tools and exact input schemas.', inputSchema: MCP_DISCOVERY_SCHEMA, role: 'worker' },
-  { name: 'kory__invoke_mcp_tool', description: 'Invoke a discovered custom MCP tool, including tools added mid-turn.', inputSchema: MCP_INVOCATION_SCHEMA, role: 'worker' },
+  {
+    name: 'kory__list_mcp_tools',
+    description: 'Discover this project’s custom MCP tools and exact input schemas.',
+    inputSchema: MCP_DISCOVERY_SCHEMA,
+    role: 'worker',
+  },
+  {
+    name: 'kory__invoke_mcp_tool',
+    description: 'Invoke a discovered custom MCP tool, including tools added mid-turn.',
+    inputSchema: MCP_INVOCATION_SCHEMA,
+    role: 'worker',
+  },
   {
     name: 'kory__manage_mcp_server',
     description:
       'Manage user-pluggable MCP servers: list, add, update, remove, test-connect, or reload. ' +
       'Env vars (including tokens) are stored in the 0600 secret store, never in koryphaios.json. ' +
-       'Mutations are blocked in planning interaction mode.',
+      'Mutations are blocked in planning interaction mode.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1417,7 +1474,9 @@ export const KORY_TOOLS: KoryToolDef[] = [
 export function toolsForRole(role: string): KoryToolDef[] {
   const r = role === 'coder' ? 'worker' : role;
   if (r !== 'manager' && r !== 'worker' && r !== 'critic') return [];
-  return KORY_TOOLS.filter((tool) => roleIncludesTool(tool.name.replace(/^kory__/, ''), r, tool.role));
+  return KORY_TOOLS.filter((tool) =>
+    roleIncludesTool(tool.name.replace(/^kory__/, ''), r, tool.role),
+  );
 }
 
 // ─── Backend proxy ─────────────────────────────────────────────────────────
@@ -1450,7 +1509,10 @@ export async function fetchAuthoritativeToolCatalog(
       },
       body: JSON.stringify(body),
       redirect: 'error',
-      signal: AbortSignal.any([bridgeProcessAbort.signal, AbortSignal.timeout(BRIDGE_CATALOG_TIMEOUT_MS)]),
+      signal: AbortSignal.any([
+        bridgeProcessAbort.signal,
+        AbortSignal.timeout(BRIDGE_CATALOG_TIMEOUT_MS),
+      ]),
     });
     if (!response.ok) throw new Error('Catalog request rejected');
     const payload = (await response.json()) as { tools?: unknown };
@@ -1511,7 +1573,10 @@ async function proxyToolCall(
       },
       body: JSON.stringify(body),
       redirect: 'error',
-      signal: AbortSignal.any([bridgeProcessAbort.signal, AbortSignal.timeout(BRIDGE_EXECUTE_TIMEOUT_MS)]),
+      signal: AbortSignal.any([
+        bridgeProcessAbort.signal,
+        AbortSignal.timeout(BRIDGE_EXECUTE_TIMEOUT_MS),
+      ]),
     });
     if (!resp.ok) {
       return {
@@ -1544,19 +1609,28 @@ async function proxyToolCall(
 
 // ─── Server factory ────────────────────────────────────────────────────────
 
-const bridgeRegistrations = new WeakMap<McpServer, Map<string, { signature: string; remove(): void }>>();
+const bridgeRegistrations = new WeakMap<
+  McpServer,
+  Map<string, { signature: string; remove(): void }>
+>();
 
 /** Reconcile the authenticated catalog using SDK registration handles. The SDK
  * emits tools/list_changed for additions, removals and schema replacements. */
 export function updateBridgeToolCatalog(
   server: McpServer,
   tools: RuntimeKoryToolDef[],
-  proxy: (toolName: string, input: Record<string, unknown>) => Promise<{ content: string; isError: boolean; images?: ToolImage[] }>,
+  proxy: (
+    toolName: string,
+    input: Record<string, unknown>,
+  ) => Promise<{ content: string; isError: boolean; images?: ToolImage[] }>,
 ): void {
   const registrations = bridgeRegistrations.get(server)!;
   const names = new Set(tools.map((tool) => tool.name));
   for (const [name, registered] of registrations) {
-    if (!names.has(name)) { registered.remove(); registrations.delete(name); }
+    if (!names.has(name)) {
+      registered.remove();
+      registrations.delete(name);
+    }
   }
   for (const tool of tools) {
     const signature = JSON.stringify(tool);
@@ -1565,20 +1639,31 @@ export function updateBridgeToolCatalog(
     previous?.remove();
     registrations.delete(tool.name);
     try {
-      const registered = server.registerTool(tool.name, {
-        description: tool.description, inputSchema: fromJsonSchema(tool.inputSchema),
-      }, async (args: unknown) => {
-        const result = await proxy(tool.name, (args ?? {}) as Record<string, unknown>);
-        return {
-          content: [
-            { type: 'text' as const, text: result.content },
-            ...(!result.isError ? validatedToolImages(result.images) : []).map((image) => ({ type: 'image' as const, ...image })),
-          ], isError: result.isError,
-        };
-      });
+      const registered = server.registerTool(
+        tool.name,
+        {
+          description: tool.description,
+          inputSchema: fromJsonSchema(tool.inputSchema),
+        },
+        async (args: unknown) => {
+          const result = await proxy(tool.name, (args ?? {}) as Record<string, unknown>);
+          return {
+            content: [
+              { type: 'text' as const, text: result.content },
+              ...(!result.isError ? validatedToolImages(result.images) : []).map((image) => ({
+                type: 'image' as const,
+                ...image,
+              })),
+            ],
+            isError: result.isError,
+          };
+        },
+      );
       registrations.set(tool.name, { signature, remove: () => registered.remove() });
     } catch (error) {
-      process.stderr.write(`[kory-mcp-bridge] skipped invalid tool schema ${tool.name}: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.stderr.write(
+        `[kory-mcp-bridge] skipped invalid tool schema ${tool.name}: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
     }
   }
 }
@@ -1611,12 +1696,18 @@ export function buildServer(
   let pending: Promise<void> | undefined;
   const refresh = (): Promise<void> => {
     if (!options.loadCatalog || closed) return Promise.resolve();
-    return pending ??= options.loadCatalog().then((tools) => {
-      if (!closed) updateBridgeToolCatalog(server, tools, dispatch);
-    }).catch(() => {
-      // Retain only the last authenticated catalog on a transient failure.
-      // Every execution still authenticates against the current backend state.
-    }).finally(() => { pending = undefined; });
+    return (pending ??= options
+      .loadCatalog()
+      .then((tools) => {
+        if (!closed) updateBridgeToolCatalog(server, tools, dispatch);
+      })
+      .catch(() => {
+        // Retain only the last authenticated catalog on a transient failure.
+        // Every execution still authenticates against the current backend state.
+      })
+      .finally(() => {
+        pending = undefined;
+      }));
   };
   const dispatch: typeof proxy = async (name, input) => {
     const result = await proxy(name, input);
@@ -1625,10 +1716,16 @@ export function buildServer(
   };
   updateBridgeToolCatalog(server, allowedTools, dispatch);
   if (options.loadCatalog) {
-    const timer = setInterval(() => { void refresh(); }, options.refreshIntervalMs ?? 2_000);
+    const timer = setInterval(() => {
+      void refresh();
+    }, options.refreshIntervalMs ?? 2_000);
     timer.unref?.();
     const previousClose = server.server.onclose;
-    server.server.onclose = () => { closed = true; clearInterval(timer); previousClose?.(); };
+    server.server.onclose = () => {
+      closed = true;
+      clearInterval(timer);
+      previousClose?.();
+    };
   }
 
   return server;

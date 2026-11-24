@@ -268,7 +268,11 @@ export class UsageLimitResumeService {
     );
   }
 
-  private onOutcome(sessionId: string, claimed: PendingResumeRecord, result: SessionTurnResult): void {
+  private onOutcome(
+    sessionId: string,
+    claimed: PendingResumeRecord,
+    result: SessionTurnResult,
+  ): void {
     if (result.status === 'completed' || result.status === 'waiting') {
       this.clear(sessionId, 'resumed');
       return;

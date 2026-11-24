@@ -245,7 +245,9 @@ if (args.includes('--help')) {
         const line = result.stdout.split('\n').find((entry) => entry.startsWith('IDLE_EVENTS='));
         expect(line).toBeDefined();
         const events = JSON.parse(line!.slice('IDLE_EVENTS='.length)) as {
-          type: string; error?: string; errorTransient?: boolean;
+          type: string;
+          error?: string;
+          errorTransient?: boolean;
         }[];
         expect(events.some((event) => event.type === 'content_delta')).toBe(true);
         const errors = events.filter((event) => event.type === 'error');
@@ -264,5 +266,4 @@ if (args.includes('--help')) {
       }
     });
   }
-
 });

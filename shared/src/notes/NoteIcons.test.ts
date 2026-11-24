@@ -78,7 +78,9 @@ describe('note icon records', () => {
 
 describe('emoji quick-pick catalog', () => {
   test('every catalog entry is one valid emoji and entries are unique', () => {
-    const all = NOTE_EMOJI_CATALOG.flatMap((category) => category.entries.map((entry) => entry.emoji));
+    const all = NOTE_EMOJI_CATALOG.flatMap((category) =>
+      category.entries.map((entry) => entry.emoji),
+    );
     expect(all.length).toBeGreaterThan(100);
     for (const emoji of all) expect(isNoteEmoji(emoji)).toBe(true);
     expect(new Set(all).size).toBe(all.length);
@@ -88,6 +90,8 @@ describe('emoji quick-pick catalog', () => {
     expect(searchNoteEmoji('LIGHT').map((row) => row.emoji)).toContain('💡');
     expect(searchNoteEmoji('ideas thinking').map((row) => row.emoji)).toContain('🧠');
     expect(searchNoteEmoji('no-such-word-here')).toEqual([]);
-    expect(searchNoteEmoji('   ')).toHaveLength(NOTE_EMOJI_CATALOG.flatMap((c) => c.entries).length);
+    expect(searchNoteEmoji('   ')).toHaveLength(
+      NOTE_EMOJI_CATALOG.flatMap((c) => c.entries).length,
+    );
   });
 });

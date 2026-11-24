@@ -25,7 +25,15 @@
  * directory instead. HOME, XDG roots, credentials, and temp remain disposable.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -44,10 +52,7 @@ const ASSET_DIRECTORY_ENV = [
   'SDKROOT',
 ] as const;
 const DOCKER_HOST_SELECTOR = 'KORY_DOCKER_HOST';
-const IOS_DEVICE_SELECTORS = [
-  'KORY_IOS_EVAL_IPHONE_UDID',
-  'KORY_IOS_EVAL_IPAD_UDID',
-] as const;
+const IOS_DEVICE_SELECTORS = ['KORY_IOS_EVAL_IPHONE_UDID', 'KORY_IOS_EVAL_IPAD_UDID'] as const;
 const IOS_NATIVE_TESTS_FLAG = 'KORY_IOS_EVAL_NATIVE_TESTS';
 const IOS_SIMULATOR_UDID = /^[A-Fa-f0-9]{8}(?:-[A-Fa-f0-9]{4}){3}-[A-Fa-f0-9]{12}$/u;
 const SAFE_HOST_ENV = new Set([

@@ -67,10 +67,7 @@
         "each basis quote points at the sentence that actually drove the decision",
         "concerns name the defect rather than restating the answer"
       ],
-      "blindTo": [
-        "skill-variant",
-        "expected-outcome"
-      ]
+      "blindTo": ["skill-variant", "expected-outcome"]
     }
   ],
   "requiredEvidence": [

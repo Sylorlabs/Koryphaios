@@ -5,18 +5,11 @@
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "test",
-    "integration"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["test", "integration"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 4300,
-  "broader": [
-    "testing-engineering"
-  ],
+  "broader": ["testing-engineering"],
   "facets": [],
   "requires": [],
   "conflicts": [],
@@ -61,13 +54,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "testing-engineering"
-        ],
-        "tags": [
-          "ambiguous",
-          "neighbor-boundary"
-        ]
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["ambiguous", "neighbor-boundary"]
       },
       {
         "id": "integration-fault-testing-ambiguous-2",
@@ -75,13 +63,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "deterministic-contract-testing"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["deterministic-contract-testing"],
+        "tags": ["ambiguous", "scope-control"]
       },
       {
         "id": "integration-fault-testing-ambiguous-3",
@@ -89,13 +72,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "integration-implementation"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["ambiguous", "scope-control"]
       }
     ],
     "adversarial": [
@@ -105,13 +83,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "testing-engineering"
-        ],
-        "tags": [
-          "adversarial",
-          "neighbor-boundary"
-        ]
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["adversarial", "neighbor-boundary"]
       },
       {
         "id": "integration-fault-testing-adversarial-2",
@@ -119,13 +92,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "deterministic-contract-testing"
-        ],
-        "tags": [
-          "adversarial",
-          "scope-control"
-        ]
+        "adjacentSkills": ["deterministic-contract-testing"],
+        "tags": ["adversarial", "scope-control"]
       },
       {
         "id": "integration-fault-testing-adversarial-3",
@@ -133,13 +101,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "integration-implementation"
-        ],
-        "tags": [
-          "adversarial",
-          "scope-control"
-        ]
+        "adjacentSkills": ["integration-implementation"],
+        "tags": ["adversarial", "scope-control"]
       }
     ]
   },

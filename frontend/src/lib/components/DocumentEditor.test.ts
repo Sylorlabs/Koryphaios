@@ -5,9 +5,14 @@ import DocumentEditor from './DocumentEditor.svelte';
 
 describe('document editing across knowledge workspaces', () => {
   it('switches between writing, exact source, and preview without rewriting the saved document', async () => {
-    const source = '# Findings\n\n| Claim | Evidence |\n| --- | --- |\n| Kept | Exact source |\n\n[[Related note]]\n';
+    const source =
+      '# Findings\n\n| Claim | Evidence |\n| --- | --- |\n| Kept | Exact source |\n\n[[Related note]]\n';
     const onchange = vi.fn();
-    const { container } = render(DocumentEditor, { value: source, onchange, sourceLabel: 'Saved source' });
+    const { container } = render(DocumentEditor, {
+      value: source,
+      onchange,
+      sourceLabel: 'Saved source',
+    });
     await screen.findByRole('textbox', { name: 'Document editor' });
     await fireEvent.click(screen.getByRole('button', { name: 'Source' }));
     await screen.findByRole('textbox', { name: 'Saved source' });
@@ -33,7 +38,10 @@ describe('document editing across knowledge workspaces', () => {
   it('keeps HTML previews sandboxed when a document contains scripts or remote content', async () => {
     const { container } = render(DocumentEditor, {
       value: '<script>window.bad = true</script><h1>Instructions</h1>',
-      format: 'html', renderer: 'html', mode: 'split', onchange: vi.fn(),
+      format: 'html',
+      renderer: 'html',
+      mode: 'split',
+      onchange: vi.fn(),
     });
     const preview = await screen.findByTitle('Sandboxed document HTML preview');
     expect(preview.getAttribute('sandbox')).toBe('');

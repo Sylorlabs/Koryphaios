@@ -11,7 +11,10 @@ function object(value: unknown): Record<string, unknown> {
 
 // Shared stream grammar only: callers validate their own patch/adjudication text.
 // Empty-tool flags prevent dispatch; rejecting events is an additional guard.
-export function parseNativeTextEvents(bytes: Buffer, model: string): {
+export function parseNativeTextEvents(
+  bytes: Buffer,
+  model: string,
+): {
   sessionId: string;
   output: string;
 } {
@@ -29,8 +32,12 @@ export function parseNativeTextEvents(bytes: Buffer, model: string): {
     if (event.type === 'system' && event.subtype === 'ui_invalidate') {
       if (sessionId) fail();
       if (event.session_id !== undefined) {
-        if (typeof event.session_id !== 'string' || !/^[A-Za-z0-9._-]{1,150}$/u.test(event.session_id) ||
-          (invalidateSessionId !== undefined && invalidateSessionId !== event.session_id)) fail();
+        if (
+          typeof event.session_id !== 'string' ||
+          !/^[A-Za-z0-9._-]{1,150}$/u.test(event.session_id) ||
+          (invalidateSessionId !== undefined && invalidateSessionId !== event.session_id)
+        )
+          fail();
         invalidateSessionId = event.session_id;
       }
       continue;
@@ -40,8 +47,12 @@ export function parseNativeTextEvents(bytes: Buffer, model: string): {
       for (const key of ['tools', 'mcp_servers', 'skills']) {
         if (!Array.isArray(event[key]) || event[key].length !== 0) fail();
       }
-      if (typeof event.session_id !== 'string' || !/^[A-Za-z0-9._-]{1,150}$/u.test(event.session_id) ||
-        (invalidateSessionId !== undefined && invalidateSessionId !== event.session_id)) fail();
+      if (
+        typeof event.session_id !== 'string' ||
+        !/^[A-Za-z0-9._-]{1,150}$/u.test(event.session_id) ||
+        (invalidateSessionId !== undefined && invalidateSessionId !== event.session_id)
+      )
+        fail();
       sessionId = event.session_id;
       continue;
     }
@@ -49,10 +60,15 @@ export function parseNativeTextEvents(bytes: Buffer, model: string): {
     if (event.type === 'assistant') {
       if (assistantText !== undefined || event.error !== undefined) fail();
       const message = object(event.message);
-      if (message.role !== 'assistant' || !Array.isArray(message.content) || !message.content.length) fail();
+      if (
+        message.role !== 'assistant' ||
+        !Array.isArray(message.content) ||
+        !message.content.length
+      )
+        fail();
       if (message.stop_reason === 'tool_use' || message.stop_reason === 'max_tokens') fail();
       const contentBlocks = message.content.map(object);
-      if (contentBlocks.every(content => content.type === 'redacted_thinking')) {
+      if (contentBlocks.every((content) => content.type === 'redacted_thinking')) {
         // Measured native 2.1.309 emits a thinking-only envelope before its text.
         // Validate the opaque block shape but never decode, use or publish data.
         for (const content of contentBlocks) {
@@ -72,9 +88,14 @@ export function parseNativeTextEvents(bytes: Buffer, model: string): {
       continue;
     }
     if (event.type === 'result') {
-      if (event.subtype !== 'success' || event.is_error !== false ||
-        typeof event.result !== 'string' || event.result !== assistantText ||
-        (event.errors !== undefined && (!Array.isArray(event.errors) || event.errors.length))) fail();
+      if (
+        event.subtype !== 'success' ||
+        event.is_error !== false ||
+        typeof event.result !== 'string' ||
+        event.result !== assistantText ||
+        (event.errors !== undefined && (!Array.isArray(event.errors) || event.errors.length))
+      )
+        fail();
       output = event.result;
       finished = true;
       continue;

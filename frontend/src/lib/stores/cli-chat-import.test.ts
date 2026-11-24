@@ -35,7 +35,9 @@ function discovery(chatIds: string[]) {
           projectPath: '/work/alpha',
           projectName: 'alpha',
           chatCount: chatIds.length,
-          providers: [{ provider: 'claude', displayName: 'Claude Code', chatCount: chatIds.length }],
+          providers: [
+            { provider: 'claude', displayName: 'Claude Code', chatCount: chatIds.length },
+          ],
           latestUpdatedAt: 1,
           chats: chatIds.map((id) => ({
             id,
@@ -106,10 +108,7 @@ describe('cliChatImportStore', () => {
 
     await cliChatImportStore.refresh();
     expect(mocks.apiFetch).toHaveBeenCalledTimes(2);
-    expect(cliChatImportStore.projects[0].chats.map((c) => c.id)).toEqual([
-      'claude:a',
-      'claude:b',
-    ]);
+    expect(cliChatImportStore.projects[0].chats.map((c) => c.id)).toEqual(['claude:a', 'claude:b']);
   });
 
   it('keeps the last good data and reports an error when a rescan fails', async () => {

@@ -152,7 +152,10 @@ describe('HTTP/REST scorer requires executed candidate regression proof', () => 
     const result = await scoreFixture(
       'http-rest-engineering-full-task-1-individual',
       'http-rest-engineering/conditional-update-etag-scorer@2',
-      'src/resource.ts', etagRepair, 'tests/resource.test.ts', etagTests,
+      'src/resource.ts',
+      etagRepair,
+      'tests/resource.test.ts',
+      etagTests,
     );
     expect(result.passed, result.evidence.join('\n')).toBe(true);
     expect(result.evidence).toContain('candidate tests reject the original defect: yes');
@@ -162,7 +165,9 @@ describe('HTTP/REST scorer requires executed candidate regression proof', () => 
     const result = await scoreFixture(
       'http-rest-engineering-full-task-1-individual',
       'http-rest-engineering/conditional-update-etag-scorer@2',
-      'src/resource.ts', etagRepair, 'tests/resource.test.ts',
+      'src/resource.ts',
+      etagRepair,
+      'tests/resource.test.ts',
       `import { expect, test } from 'bun:test';
 test('428 precondition 412 stale 304 conditional wildcard concurrent retry', () => expect(true).toBe(true));\n`,
     );
@@ -174,7 +179,10 @@ test('428 precondition 412 stale 304 conditional wildcard concurrent retry', () 
     const result = await scoreFixture(
       'http-rest-engineering-full-task-2-individual',
       'http-rest-engineering/problem-details-retryability-scorer@2',
-      'src/endpoint.ts', problemRepair, 'tests/endpoint.test.ts', problemTests,
+      'src/endpoint.ts',
+      problemRepair,
+      'tests/endpoint.test.ts',
+      problemTests,
     );
     expect(result.passed, result.evidence.join('\n')).toBe(true);
     expect(result.evidence).toContain('candidate tests reject the original defect: yes');
@@ -184,12 +192,13 @@ test('428 precondition 412 stale 304 conditional wildcard concurrent retry', () 
     const result = await scoreFixture(
       'http-rest-engineering-full-task-2-individual',
       'http-rest-engineering/problem-details-retryability-scorer@2',
-      'src/endpoint.ts', problemRepair, 'tests/endpoint.test.ts',
+      'src/endpoint.ts',
+      problemRepair,
+      'tests/endpoint.test.ts',
       `import { expect, test } from 'bun:test';
 test('validation forbidden conflict 429 rate-limit 503 dependency legacy deprecation', () => expect(true).toBe(true));\n`,
     );
     expect(result.passed).toBe(false);
     expect(result.evidence).toContain('candidate tests reject the original defect: no');
   });
-
 });

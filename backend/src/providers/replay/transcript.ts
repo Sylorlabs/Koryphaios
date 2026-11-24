@@ -30,7 +30,8 @@ export interface TranscriptHeader {
 
 /** Subset match: every key in `expected` must match `actual`, recursively. Arrays
  *  must have the same length and match element-wise. Primitives compare by value. */
-export type JsonSubset = string | number | boolean | null | JsonSubset[] | { [key: string]: JsonSubset };
+export type JsonSubset =
+  string | number | boolean | null | JsonSubset[] | { [key: string]: JsonSubset };
 
 export type TranscriptFrame =
   | { t: number; stream: 'stdout' | 'stderr'; data: string }
@@ -116,7 +117,11 @@ export function loadTranscript(path: string): Transcript {
   return parseTranscript(readFileSync(path, 'utf8'), path);
 }
 
-function parseHeader(value: Record<string, unknown>, source: string, line: number): TranscriptHeader {
+function parseHeader(
+  value: Record<string, unknown>,
+  source: string,
+  line: number,
+): TranscriptHeader {
   if (typeof value.provider !== 'string' || !value.provider)
     throw new TranscriptFormatError(source, line, 'header.provider must be a non-empty string');
   if (typeof value.cliVersion !== 'string')
@@ -141,7 +146,11 @@ function parseFrame(value: Record<string, unknown>, source: string, line: number
   if (typeof t !== 'number' || !Number.isFinite(t) || t < 0)
     throw new TranscriptFormatError(source, line, 't must be a non-negative number');
   if (typeof value.stream !== 'string' || !STREAMS.has(value.stream))
-    throw new TranscriptFormatError(source, line, 'stream must be stdout, stderr, stdin-expect or exit');
+    throw new TranscriptFormatError(
+      source,
+      line,
+      'stream must be stdout, stderr, stdin-expect or exit',
+    );
   switch (value.stream) {
     case 'stdout':
     case 'stderr':

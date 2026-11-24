@@ -33,10 +33,7 @@ import {
   archiveSessionCoordinated,
   restoreSessionCoordinated,
 } from '../../services/session-archive-service';
-import {
-  forkChatCoordinated,
-  mergeForkCoordinated,
-} from '../../services/session-fork-coordinator';
+import { forkChatCoordinated, mergeForkCoordinated } from '../../services/session-fork-coordinator';
 import { stopChatRun } from '../../services/chat-run-control';
 import { projectRootFromRequest } from '../../runtime/source-control-scope';
 import { sourceControlService } from '../../services/source-control-service';
@@ -190,7 +187,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         agentOverrides: { ...current.agentOverrides, fallbackChain: chain },
       });
       if (!updated) throw new NotFoundError('Session', id);
-      if (updated.agentOverrides !== undefined) setSessionAgentOverrides(id, updated.agentOverrides);
+      if (updated.agentOverrides !== undefined)
+        setSessionAgentOverrides(id, updated.agentOverrides);
       return {
         ok: true,
         data: { chain: describeFallbackChain(chain, runtimeFallbackLookup()) },
@@ -397,7 +395,8 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     const { kory } = getContext();
     const outcome = await kory.resumePendingUsageLimit(id);
     if (outcome === 'not_found') throw new NotFoundError('Pending resume', id);
-    if (outcome === 'already_running') throw new ConflictError('The automatic resume is already running.');
+    if (outcome === 'already_running')
+      throw new ConflictError('The automatic resume is already running.');
     return { ok: true, status: outcome };
   })
   .delete('/:id/pending-resume', async ({ request, params: { id } }) => {
@@ -433,7 +432,10 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       // may still send `purpose: 'steer'`; it is accepted and treated as a plain
       // cancel, and logged so the stale caller shows up in diagnostics.
       if (body?.purpose === 'steer') {
-        serverLog.info({ sessionId: id }, 'Legacy cancel purpose "steer" treated as a plain cancel');
+        serverLog.info(
+          { sessionId: id },
+          'Legacy cancel purpose "steer" treated as a plain cancel',
+        );
       }
       // Shared with the agent interrupt_chat tool so both stops end the same work.
       await stopChatRun(id);
@@ -510,21 +512,23 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       ok: true,
       lastUsage: usageSnapshotMatchesBoundary(lastUsage, boundary) ? lastUsage : null,
       mcpServers,
-      data: entries.filter((e) => since === undefined || e.ts >= since).map((e) => ({
-        id: e.id,
-        ts: e.ts,
-        kind: e.kind,
-        label: e.label,
-        toolInput: e.toolInput,
-        content: e.content.slice(0, 4000),
-        originalByteCount: e.originalByteCount,
-        contentSha256: e.contentSha256,
-        truncated: e.truncated,
-        redacted: e.redacted,
-        isError: e.isError,
-        ...(e.runRef ? { runRef: e.runRef } : {}),
-        prunedForAgent: e.prunedForAgent === true,
-      })),
+      data: entries
+        .filter((e) => since === undefined || e.ts >= since)
+        .map((e) => ({
+          id: e.id,
+          ts: e.ts,
+          kind: e.kind,
+          label: e.label,
+          toolInput: e.toolInput,
+          content: e.content.slice(0, 4000),
+          originalByteCount: e.originalByteCount,
+          contentSha256: e.contentSha256,
+          truncated: e.truncated,
+          redacted: e.redacted,
+          isError: e.isError,
+          ...(e.runRef ? { runRef: e.runRef } : {}),
+          prunedForAgent: e.prunedForAgent === true,
+        })),
     };
   })
   .post(

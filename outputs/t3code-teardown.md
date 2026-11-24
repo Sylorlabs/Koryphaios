@@ -72,7 +72,7 @@ Each item: what t3code does → what Koryphaios does → the change to adopt, wi
 - **Effort:** S (2–3 days). **Risk:** low. **Leverage:** high, because it makes reconnect and
   offline queueing safe.
 
-### B3. Restart *continuation*, not just terminalization
+### B3. Restart _continuation_, not just terminalization
 
 - **t3code.**
   [`ProviderRuntimeRecoveryService.ts`](https://github.com/pingdotgg/t3code/blob/32882540fb1296bd1870253f3fe32bc8369f8a17/apps/server/src/orchestration-v2/ProviderRuntimeRecoveryService.ts)
@@ -201,7 +201,7 @@ Each item: what t3code does → what Koryphaios does → the change to adopt, wi
   it through the adapter in CI. Add a `replay` provider in dev builds.
 - **Effort:** M. **Risk:** none at runtime. This makes every later backend change safer.
 
-### Where t3code is *not* better (don't copy)
+### Where t3code is _not_ better (don't copy)
 
 - `Orchestrator.ts` is 15,399 lines and `ProjectionStore.ts` is 7,856
   (`wc -l` on [`apps/server/src/orchestration-v2/`](https://github.com/pingdotgg/t3code/blob/32882540fb1296bd1870253f3fe32bc8369f8a17/apps/server/src/orchestration-v2)). That is
@@ -258,8 +258,8 @@ The user's critique holds up against t3code's own docs. Taking the three failure
   ([`composer.md` § Voice input on mobile](https://github.com/pingdotgg/t3code/blob/32882540fb1296bd1870253f3fe32bc8369f8a17/docs/user/composer.md)).
 - **Koryphaios can do better.** Offer one obvious default with depth on demand. While the agent
   works, **Enter queues** and the queued chip has a **Send now (steer)** button. One shortcut,
-  everything else discoverable from the chip. Settings get two scopes, *Everywhere* and *This
-  project*, with an "overridden here" dot. Koryphaios's `SettingsDrawer.svelte` (5,658 lines) and
+  everything else discoverable from the chip. Settings get two scopes, _Everywhere_ and _This
+  project_, with an "overridden here" dot. Koryphaios's `SettingsDrawer.svelte` (5,658 lines) and
   `AgentSettings.svelte` (3,707 lines) are already heading toward t3code's sprawl, so put rarely
   used panels behind an "Advanced" disclosure and settings search.
 
@@ -273,7 +273,7 @@ The user's critique holds up against t3code's own docs. Taking the three failure
   composer.
 - **Koryphaios can do better.** Koryphaios actually enforces policy at its own boundary
   (`backend/src/tools/permission-policy.ts`, `kory__*` bridge). Make that visible. Show the
-  *effective* posture next to the mode picker, for example "Ask · enforced by Kory" or "Ask · Codex
+  _effective_ posture next to the mode picker, for example "Ask · enforced by Kory" or "Ask · Codex
   native, edits auto-approved". When the provider can't honor the chosen mode, show a one-line
   reason instead of downgrading silently. The composer already has
   `PERMISSION_OPTIONS` (`frontend/src/lib/components/CommandInput.svelte:936`, which defines
@@ -313,16 +313,16 @@ The user's critique holds up against t3code's own docs. Taking the three failure
 
 Ranked by leverage (how visibly superior it makes Koryphaios) divided by cost.
 
-| # | Move | Why it wins | Effort | Risk |
-|---|------|-------------|--------|------|
-| 1 | **Idempotent send** with `clientMessageId` + receipts (B2) | Removes duplicate turns on reconnect; prerequisite for offline queue and the outbox | S | Low |
-| 2 | **Effective-permission badge**, no silent downgrade (U3) | A trust advantage t3code structurally lacks; Koryphaios already enforces it | S | Low |
-| 3 | **Outbox + single-transaction commit** for `turn.start`/`turn.interrupt` (B1) | Ends the "state no record explains" class, the backend analogue of the transcript-integrity fix | M–L | Medium |
-| 4 | **Restart continuation** for resumable CLIs, a one-click Resume row for the rest (B3) | A server restart stops costing a turn; visible to users immediately | M | Medium |
-| 5 | **Narrated work-group line** built from `parts` (U4) | Simple by default and deep on click, the core of the user's critique | S–M | Low |
-| 6 | **Provider lifecycle interface + capabilities**, replacing name branches (B4) | Shrinks `manager.ts`; makes steer, interrupt and rollback uniform across providers | L (incremental) | Low per step |
-| 7 | **Byte-budgeted replay, wire truncation, event-log pruning** (B6 + B7) | Keeps Koryphaios fast on long sessions; fixes unbounded DB growth | S–M | Low |
-| 8 | **Recorded-CLI replay tests + a dev replay provider** (B9) | Every later backend change gets safer; free UI testing of real streams | M | None |
+| #   | Move                                                                                  | Why it wins                                                                                     | Effort          | Risk         |
+| --- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------- | ------------ |
+| 1   | **Idempotent send** with `clientMessageId` + receipts (B2)                            | Removes duplicate turns on reconnect; prerequisite for offline queue and the outbox             | S               | Low          |
+| 2   | **Effective-permission badge**, no silent downgrade (U3)                              | A trust advantage t3code structurally lacks; Koryphaios already enforces it                     | S               | Low          |
+| 3   | **Outbox + single-transaction commit** for `turn.start`/`turn.interrupt` (B1)         | Ends the "state no record explains" class, the backend analogue of the transcript-integrity fix | M–L             | Medium       |
+| 4   | **Restart continuation** for resumable CLIs, a one-click Resume row for the rest (B3) | A server restart stops costing a turn; visible to users immediately                             | M               | Medium       |
+| 5   | **Narrated work-group line** built from `parts` (U4)                                  | Simple by default and deep on click, the core of the user's critique                            | S–M             | Low          |
+| 6   | **Provider lifecycle interface + capabilities**, replacing name branches (B4)         | Shrinks `manager.ts`; makes steer, interrupt and rollback uniform across providers              | L (incremental) | Low per step |
+| 7   | **Byte-budgeted replay, wire truncation, event-log pruning** (B6 + B7)                | Keeps Koryphaios fast on long sessions; fixes unbounded DB growth                               | S–M             | Low          |
+| 8   | **Recorded-CLI replay tests + a dev replay provider** (B9)                            | Every later backend change gets safer; free UI testing of real streams                          | M               | None         |
 
 Suggested order: 1 → 2 → 7 → 5 (quick wins, under two weeks together), then 3 → 4 as one
 project (the durable write path), then 6 and 8 alongside it.

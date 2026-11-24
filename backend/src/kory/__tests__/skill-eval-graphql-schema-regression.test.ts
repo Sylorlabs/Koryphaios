@@ -123,7 +123,9 @@ async function scorePreparedFixture(tests: string) {
   );
   expect(materializer).toBeDefined();
   expect(scorer).toBeDefined();
-  await materializer!.materialize(root, { id: 'graphql-engineering-full-task-1-individual' } as never);
+  await materializer!.materialize(root, {
+    id: 'graphql-engineering-full-task-1-individual',
+  } as never);
   writeFixtureFile(root, 'schema.graphql', repairedSchema);
   writeFixtureFile(root, 'src/resolvers.ts', repairedResolvers);
   writeFixtureFile(root, 'tests/schema.test.ts', tests);
@@ -165,7 +167,10 @@ test('legacy avatarUrl absent null error partial deprecation schema', () => {
   });
 
   test('rejects tampering with the evaluator-owned mobile query and migration contract', async () => {
-    for (const changedFile of ['persisted-queries/legacy-mobile.graphql', 'migration-contract.md']) {
+    for (const changedFile of [
+      'persisted-queries/legacy-mobile.graphql',
+      'migration-contract.md',
+    ]) {
       const root = workspace();
       const materializer = GRAPHQL_ENGINEERING_SKILL_EVAL_MATERIALIZERS.find(
         (item) => item.id === 'graphql-engineering/nullable-field-evolution@2',
@@ -173,7 +178,9 @@ test('legacy avatarUrl absent null error partial deprecation schema', () => {
       const scorer = GRAPHQL_ENGINEERING_SKILL_EVAL_SCORERS.find(
         (item) => item.id === 'graphql-engineering/nullable-field-evolution-scorer@2',
       )!;
-      await materializer.materialize(root, { id: 'graphql-engineering-full-task-1-individual' } as never);
+      await materializer.materialize(root, {
+        id: 'graphql-engineering-full-task-1-individual',
+      } as never);
       writeFixtureFile(root, 'schema.graphql', repairedSchema);
       writeFixtureFile(root, 'src/resolvers.ts', repairedResolvers);
       writeFixtureFile(root, 'tests/schema.test.ts', meaningfulTests);

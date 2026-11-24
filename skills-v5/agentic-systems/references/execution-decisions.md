@@ -117,19 +117,19 @@ The trace must distinguish the **specialist's claimed status**, the **manager's 
 
 ## Minimum scenario evidence before calling the implementation verified
 
-| Scenario                                       | Evidence that must be inspectable                                                                              |
-| ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Healthy at entry                               | No write was attempted; fresh independent health matched the revision.                                         |
-| Approval denied                                | The matching action stopped and zero mutations occurred.                                                       |
-| Concurrent deployment                          | Pre-write read detected the new revision and the old approval was invalidated.                                 |
-| Timeout after successful remote apply          | Original operation identity persisted, readback reconciled it, no duplicate write, independent health checked. |
-| Repeated tool errors or budget exhaustion      | Finite attempts and explicit unsatisfied predicate in the terminal record.                                     |
-| Verify-only event                              | No current revision or completion is created without a fresh observation; the read remains blocked/unverified. |
+| Scenario                                       | Evidence that must be inspectable                                                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Healthy at entry                               | No write was attempted; fresh independent health matched the revision.                                              |
+| Approval denied                                | The matching action stopped and zero mutations occurred.                                                            |
+| Concurrent deployment                          | Pre-write read detected the new revision and the old approval was invalidated.                                      |
+| Timeout after successful remote apply          | Original operation identity persisted, readback reconciled it, no duplicate write, independent health checked.      |
+| Repeated tool errors or budget exhaustion      | Finite attempts and explicit unsatisfied predicate in the terminal record.                                          |
+| Verify-only event                              | No current revision or completion is created without a fresh observation; the read remains blocked/unverified.      |
 | Fresh unhealthy verification                   | Prior healthy completion is replaced/cleared for the current generation; recovery needs a later fresh healthy read. |
-| Mutation or fresh observation after health     | Previous health evidence is stale immediately; a new-generation independent verification is required.          |
-| Manager resume with one completed specialist   | Prior artifact preserved; only missing/eligible work dispatched.                                               |
-| Scope expansion or missing specialist artifact | Contract violation rejected; no completed investigation claim.                                                 |
-| Contradictory specialists and stale memory     | Primary refs inspected, superseded memory recorded, contradiction resolved only with current evidence.         |
+| Mutation or fresh observation after health     | Previous health evidence is stale immediately; a new-generation independent verification is required.               |
+| Manager resume with one completed specialist   | Prior artifact preserved; only missing/eligible work dispatched.                                                    |
+| Scope expansion or missing specialist artifact | Contract violation rejected; no completed investigation claim.                                                      |
+| Contradictory specialists and stale memory     | Primary refs inspected, superseded memory recorded, contradiction resolved only with current evidence.              |
 
 Retain the trace or replayable test output for these cases, with tool attempts, approvals, observations, op keys, state transitions, budgets and terminal decision. Label mocked evidence as simulation. Demonstrating a state transition in source code alone does not prove it executed, and neither a specialist verdict nor the agent's own prose is an independent completion oracle.
 

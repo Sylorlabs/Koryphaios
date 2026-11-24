@@ -32,8 +32,12 @@ export class NativeComputerController {
     if (this.child) return this.child;
     this.frame = '';
     const child = spawn(this.launch.command, this.launch.args, {
-      cwd: this.launch.cwd, env: this.env, shell: false, windowsHide: true,
-      detached: isUnix(), stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: this.launch.cwd,
+      env: this.env,
+      shell: false,
+      windowsHide: true,
+      detached: isUnix(),
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.child = child;
     child.stdout.setEncoding('utf8');
@@ -42,16 +46,19 @@ export class NativeComputerController {
       this.frame += chunk;
       if (Buffer.byteLength(this.frame) > MAX_FRAME) {
         this.pending?.reject(new Error('Native controller exceeded frame limit'));
-        this.stop(); return;
+        this.stop();
+        return;
       }
       let end: number;
       while ((end = this.frame.indexOf('\n')) !== -1) {
-        const line = this.frame.slice(0, end); this.frame = this.frame.slice(end + 1);
+        const line = this.frame.slice(0, end);
+        this.frame = this.frame.slice(end + 1);
         if (!line.trim()) continue;
         try {
           const value = JSON.parse(line);
           if (value.event === 'stopped') {
-            revokeComputerAuthority(); stopComputerUse('User stopped native computer control');
+            revokeComputerAuthority();
+            stopComputerUse('User stopped native computer control');
           } else if (this.pending && value.id === this.pending.id) {
             this.pending.resolve(value);
           }
@@ -86,16 +93,24 @@ export class NativeComputerController {
     try {
       return await new Promise((resolve, reject) => {
         this.pending = { id, resolve, reject };
-        abort = () => { reject(new Error('Computer operation aborted')); this.stop(); };
+        abort = () => {
+          reject(new Error('Computer operation aborted'));
+          this.stop();
+        };
         signal?.addEventListener('abort', abort, { once: true });
         timer = setTimeout(() => {
-          reject(new Error('Native computer operation timed out')); this.stop();
+          reject(new Error('Native computer operation timed out'));
+          this.stop();
         }, 20_000);
-        if (signal?.aborted) { abort(); return; }
+        if (signal?.aborted) {
+          abort();
+          return;
+        }
         child.stdin.write(JSON.stringify({ ...request, id }) + '\n');
       });
     } finally {
-      signal?.removeEventListener('abort', abort); clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      clearTimeout(timer);
       this.pending = undefined;
       this.idle = setTimeout(() => this.stop(), 60_000);
       this.idle.unref();
@@ -111,12 +126,19 @@ export class NativeComputerController {
     // First let the native controller release held input and its indicator.
     child.stdin.end(JSON.stringify({ kind: 'stop' }) + '\n');
     const timer = setTimeout(() => {
-      try { if (isUnix() && child.pid) process.kill(-child.pid, 'SIGKILL'); else child.kill(); }
-      catch { /* Already exited. */ }
+      try {
+        if (isUnix() && child.pid) process.kill(-child.pid, 'SIGKILL');
+        else child.kill();
+      } catch {
+        /* Already exited. */
+      }
     }, 250);
     timer.unref();
     child.once('close', () => clearTimeout(timer));
   }
 
-  dispose(): void { this.stop(); this.unsubscribe(); }
+  dispose(): void {
+    this.stop();
+    this.unsubscribe();
+  }
 }

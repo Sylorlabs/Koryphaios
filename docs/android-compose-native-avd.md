@@ -19,7 +19,7 @@ ADB serial. Never point these commands at a personal device or another AVD.
   `sdkmanager` requested the new `android-sdk-arm-dbt-license`; the existing
   `android-sdk-license` does not cover it. No new license was accepted. Note that
   `sdkmanager` returned exit status 0 even while reporting `Skipping following
-  packages as the license is not accepted`, so always verify the installed image.
+packages as the license is not accepted`, so always verify the installed image.
 - Both `androidComposeNativeReadiness` scenarios report exactly:
   `Exactly one booted Android device is required (or set KORY_SKILL_EVAL_ANDROID_SERIAL): none`.
 - The edit scenario app and AndroidJUnitRunner APKs compile successfully with

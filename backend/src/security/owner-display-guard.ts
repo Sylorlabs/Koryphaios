@@ -13,10 +13,12 @@ export const OWNER_DISPLAY_FORBIDDEN = [/kory[\s_.-]*operations/iu] as const;
 
 /** The reason recorded everywhere a process is reported as stopped by this guard. */
 export const OWNER_DISPLAY_REASON =
-  'Kory operations belongs on the isolated evaluation virtual machine, not the owner\'s Mac';
+  "Kory operations belongs on the isolated evaluation virtual machine, not the owner's Mac";
 
 export function ownerDisplayRefusal(label: string): string | null {
-  return OWNER_DISPLAY_FORBIDDEN.some((pattern) => pattern.test(label)) ? OWNER_DISPLAY_REASON : null;
+  return OWNER_DISPLAY_FORBIDDEN.some((pattern) => pattern.test(label))
+    ? OWNER_DISPLAY_REASON
+    : null;
 }
 
 export interface StoppedProcess {
@@ -34,7 +36,10 @@ export function killOwnerDisplayProcesses(now: () => number = Date.now): Stopped
   const stopped: StoppedProcess[] = [];
   const listing = (() => {
     try {
-      return execFileSync('ps', ['-Ao', 'pid=,command='], { encoding: 'utf8', maxBuffer: 4_000_000 });
+      return execFileSync('ps', ['-Ao', 'pid=,command='], {
+        encoding: 'utf8',
+        maxBuffer: 4_000_000,
+      });
     } catch {
       return '';
     }

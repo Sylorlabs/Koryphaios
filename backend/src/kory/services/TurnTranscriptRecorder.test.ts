@@ -15,7 +15,13 @@ function observe(
   timestamp = 100,
   sessionId = SESSION,
 ) {
-  return recorder.observe({ sessionId, type, payload, timestamp, managerAgentId: MANAGER }) as Record<string, unknown>;
+  return recorder.observe({
+    sessionId,
+    type,
+    payload,
+    timestamp,
+    managerAgentId: MANAGER,
+  }) as Record<string, unknown>;
 }
 
 describe('TurnTranscriptRecorder', () => {
@@ -34,15 +40,41 @@ describe('TurnTranscriptRecorder', () => {
     const recorder = new TurnTranscriptRecorder();
     recorder.beginTurn(SESSION, 'msg-1');
     observe(recorder, 'stream.thinking', { agentId: MANAGER, thinking: 'plan' }, 10);
-    observe(recorder, 'stream.tool_call', { agentId: MANAGER, toolCall: { id: 'c1', name: 'read_file', input: { path: 'a' } } }, 20);
-    observe(recorder, 'stream.tool_result', { agentId: MANAGER, toolResult: { callId: 'c1', name: 'read_file', output: 'ok', isError: false, durationMs: 5 } }, 30);
+    observe(
+      recorder,
+      'stream.tool_call',
+      { agentId: MANAGER, toolCall: { id: 'c1', name: 'read_file', input: { path: 'a' } } },
+      20,
+    );
+    observe(
+      recorder,
+      'stream.tool_result',
+      {
+        agentId: MANAGER,
+        toolResult: {
+          callId: 'c1',
+          name: 'read_file',
+          output: 'ok',
+          isError: false,
+          durationMs: 5,
+        },
+      },
+      30,
+    );
     observe(recorder, 'stream.thinking', { agentId: MANAGER, thinking: 'more' }, 40);
     observe(recorder, 'stream.delta', { agentId: MANAGER, content: 'Done' }, 50);
     expect(recorder.snapshotParts(SESSION)).toEqual([
       { kind: 'reasoning', text: 'plan', startedAt: 10, endedAt: 20 },
       {
-        kind: 'tool', callId: 'c1', name: 'read_file', input: { path: 'a' }, startedAt: 20,
-        output: 'ok', isError: false, durationMs: 5, endedAt: 30,
+        kind: 'tool',
+        callId: 'c1',
+        name: 'read_file',
+        input: { path: 'a' },
+        startedAt: 20,
+        output: 'ok',
+        isError: false,
+        durationMs: 5,
+        endedAt: 30,
       },
       { kind: 'reasoning', text: 'more', startedAt: 40, endedAt: 50 },
       { kind: 'text', text: 'Done', startedAt: 50 },
@@ -54,7 +86,13 @@ describe('TurnTranscriptRecorder', () => {
     recorder.beginTurn(SESSION, 'msg-1');
     const workerPayload = { agentId: WORKER, content: 'worker text' };
     expect(observe(recorder, 'stream.delta', workerPayload)).toBe(workerPayload);
-    const otherSession = observe(recorder, 'stream.delta', { agentId: MANAGER, content: 'x' }, 100, 'session-2');
+    const otherSession = observe(
+      recorder,
+      'stream.delta',
+      { agentId: MANAGER, content: 'x' },
+      100,
+      'session-2',
+    );
     expect(otherSession).not.toHaveProperty('messageId');
     expect(recorder.snapshotParts(SESSION)).toEqual([]);
   });
@@ -89,7 +127,9 @@ describe('TurnTranscriptRecorder', () => {
     recorder.beginTurn(SESSION, 'msg-2');
     recorder.endTurn(SESSION, 'msg-1');
     expect(recorder.currentMessageId(SESSION)).toBe('msg-2');
-    expect(observe(recorder, 'stream.delta', { agentId: MANAGER, content: 'x' })).toMatchObject({ messageId: 'msg-2' });
+    expect(observe(recorder, 'stream.delta', { agentId: MANAGER, content: 'x' })).toMatchObject({
+      messageId: 'msg-2',
+    });
   });
 
   test('a new turn starts with empty parts and its own id', () => {
@@ -98,7 +138,9 @@ describe('TurnTranscriptRecorder', () => {
     observe(recorder, 'stream.delta', { agentId: MANAGER, content: 'first' });
     recorder.beginTurn(SESSION, 'msg-2');
     expect(recorder.snapshotParts(SESSION)).toEqual([]);
-    expect(observe(recorder, 'stream.delta', { agentId: MANAGER, content: 'second' })).toMatchObject({ messageId: 'msg-2' });
+    expect(
+      observe(recorder, 'stream.delta', { agentId: MANAGER, content: 'second' }),
+    ).toMatchObject({ messageId: 'msg-2' });
   });
 
   test('EventEmitterService publishes the stamped payload with the same timestamp it folded', () => {
@@ -111,11 +153,20 @@ describe('TurnTranscriptRecorder', () => {
     try {
       const emitter = new EventEmitterService({ managerAgentId: MANAGER });
       emitter.transcript.beginTurn(SESSION, 'msg-9');
-      emitter.emit(SESSION, 'stream.delta', { agentId: MANAGER, content: 'hello' } as WSMessage['payload']);
-      emitter.emit(SESSION, 'stream.delta', { agentId: WORKER, content: 'w' } as WSMessage['payload']);
+      emitter.emit(SESSION, 'stream.delta', {
+        agentId: MANAGER,
+        content: 'hello',
+      } as WSMessage['payload']);
+      emitter.emit(SESSION, 'stream.delta', {
+        agentId: WORKER,
+        content: 'w',
+      } as WSMessage['payload']);
       const folded = emitter.transcript.snapshotParts(SESSION);
       emitter.transcript.endTurn(SESSION, 'msg-9');
-      emitter.emit(SESSION, 'stream.delta', { agentId: MANAGER, content: 'after' } as WSMessage['payload']);
+      emitter.emit(SESSION, 'stream.delta', {
+        agentId: MANAGER,
+        content: 'after',
+      } as WSMessage['payload']);
 
       const [manager, worker, after] = published;
       expect((manager.payload as { messageId?: string }).messageId).toBe('msg-9');
@@ -131,11 +182,22 @@ describe('TurnTranscriptRecorder', () => {
 describe('finalizeParts', () => {
   const reasoning: TranscriptPart = { kind: 'reasoning', text: 'r', startedAt: 1, endedAt: 2 };
   const tool: TranscriptPart = {
-    kind: 'tool', callId: 'c', name: 'n', input: {}, startedAt: 2, output: 'o', endedAt: 3,
+    kind: 'tool',
+    callId: 'c',
+    name: 'n',
+    input: {},
+    startedAt: 2,
+    output: 'o',
+    endedAt: 3,
   };
 
   test('keeps parts unchanged when text parts already equal the persisted content', () => {
-    const parts: TranscriptPart[] = [reasoning, { kind: 'text', text: 'Hel', startedAt: 3 }, tool, { kind: 'text', text: 'lo', startedAt: 4 }];
+    const parts: TranscriptPart[] = [
+      reasoning,
+      { kind: 'text', text: 'Hel', startedAt: 3 },
+      tool,
+      { kind: 'text', text: 'lo', startedAt: 4 },
+    ];
     expect(finalizeParts(parts, 'Hello', 99)).toEqual(parts);
   });
 
@@ -152,32 +214,53 @@ describe('finalizeParts', () => {
     // Live regression: the model wrote a paragraph, called tools, reasoned, then
     // answered. The persisted content is only the final answer; the earlier
     // paragraph must stay in the transcript.
-    const narration: TranscriptPart = { kind: 'text', text: 'Thinking first (before any tool).', startedAt: 3 };
+    const narration: TranscriptPart = {
+      kind: 'text',
+      text: 'Thinking first (before any tool).',
+      startedAt: 3,
+    };
     const answer: TranscriptPart = { kind: 'text', text: 'It returns 43.', startedAt: 9 };
-    const parts: TranscriptPart[] = [reasoning, narration, tool, { ...reasoning, startedAt: 8 }, answer];
+    const parts: TranscriptPart[] = [
+      reasoning,
+      narration,
+      tool,
+      { ...reasoning, startedAt: 8 },
+      answer,
+    ];
     expect(finalizeParts(parts, 'It returns 43.', 99)).toEqual(parts);
   });
 
   test('replaces only the final answer when the persisted text differs (withheld or rewritten)', () => {
     const narration: TranscriptPart = { kind: 'text', text: 'Reading the file.', startedAt: 3 };
     const parts: TranscriptPart[] = [
-      reasoning, narration, tool, { kind: 'text', text: 'draft', startedAt: 5 },
+      reasoning,
+      narration,
+      tool,
+      { kind: 'text', text: 'draft', startedAt: 5 },
     ];
     expect(finalizeParts(parts, 'withheld notice', 99)).toEqual([
-      reasoning, narration, tool, { kind: 'text', text: 'withheld notice', startedAt: 5 },
+      reasoning,
+      narration,
+      tool,
+      { kind: 'text', text: 'withheld notice', startedAt: 5 },
     ]);
   });
 
   test('deferred response with no streamed text gets a single authoritative text part', () => {
     expect(finalizeParts([reasoning, tool], 'Answer', 50)).toEqual([
-      reasoning, tool, { kind: 'text', text: 'Answer', startedAt: 50 },
+      reasoning,
+      tool,
+      { kind: 'text', text: 'Answer', startedAt: 50 },
     ]);
   });
 
   test('empty persisted content drops only the trailing answer, never earlier narration', () => {
     const narration: TranscriptPart = { kind: 'text', text: 'Reading the file.', startedAt: 3 };
     const parts: TranscriptPart[] = [
-      reasoning, narration, tool, { kind: 'text', text: 'stopped partial', startedAt: 4 },
+      reasoning,
+      narration,
+      tool,
+      { kind: 'text', text: 'stopped partial', startedAt: 4 },
     ];
     expect(finalizeParts(parts, '', 50)).toEqual([reasoning, narration, tool]);
     expect(finalizeParts([], '', 50)).toEqual([]);

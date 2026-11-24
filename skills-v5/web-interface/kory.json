@@ -4,23 +4,11 @@
   "version": "5.0.7",
   "skillKind": "workflow",
   "selectionMode": "conditional",
-  "domains": [
-    "ui",
-    "web",
-    "browser"
-  ],
-  "targetMedia": [
-    "web"
-  ],
+  "domains": ["ui", "web", "browser"],
+  "targetMedia": ["web"],
   "contextBudget": 3900,
-  "broader": [
-    "visual-interface-design",
-    "frontend-engineering"
-  ],
-  "facets": [
-    "interaction-design",
-    "accessibility-practice"
-  ],
+  "broader": ["visual-interface-design", "frontend-engineering"],
+  "facets": ["interaction-design", "accessibility-practice"],
   "requires": [],
   "conflicts": [],
   "activation": [
@@ -73,15 +61,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "react-engineering",
-          "svelte-engineering",
-          "vue-engineering"
-        ],
-        "tags": [
-          "framework-unknown",
-          "browser-confirmed"
-        ]
+        "adjacentSkills": ["react-engineering", "svelte-engineering", "vue-engineering"],
+        "tags": ["framework-unknown", "browser-confirmed"]
       },
       {
         "id": "web-interface-ambiguous-visual",
@@ -89,14 +70,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "visual-interface-design",
-          "interaction-design"
-        ],
-        "tags": [
-          "visual-direction",
-          "anti-generic"
-        ]
+        "adjacentSkills": ["visual-interface-design", "interaction-design"],
+        "tags": ["visual-direction", "anti-generic"]
       },
       {
         "id": "web-interface-ambiguous-async",
@@ -104,16 +79,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "interaction-design",
-          "content-error-design",
-          "functional-verification"
-        ],
-        "tags": [
-          "async",
-          "navigation",
-          "recovery"
-        ]
+        "adjacentSkills": ["interaction-design", "content-error-design", "functional-verification"],
+        "tags": ["async", "navigation", "recovery"]
       }
     ],
     "adversarial": [
@@ -123,13 +90,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "debugging",
-          "relational-data-modeling"
-        ],
-        "tags": [
-          "quoted-decoy"
-        ]
+        "adjacentSkills": ["debugging", "relational-data-modeling"],
+        "tags": ["quoted-decoy"]
       },
       {
         "id": "web-interface-adversarial-negated",
@@ -137,14 +99,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "terminal-interface",
-          "shell-cli-engineering"
-        ],
-        "tags": [
-          "negation",
-          "medium-boundary"
-        ]
+        "adjacentSkills": ["terminal-interface", "shell-cli-engineering"],
+        "tags": ["negation", "medium-boundary"]
       },
       {
         "id": "web-interface-adversarial-pasted",
@@ -152,13 +108,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "backup-recovery",
-          "database-design"
-        ],
-        "tags": [
-          "pasted-decoy"
-        ]
+        "adjacentSkills": ["backup-recovery", "database-design"],
+        "tags": ["pasted-decoy"]
       }
     ]
   },

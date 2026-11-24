@@ -90,8 +90,7 @@ describe('provider CLI environment confidentiality', () => {
       // holding for the shared key after the loop above, and providers sharing
       // the tested provider's key cannot be expected to see it absent.
       const sharesSecretKey = (other: NativeCliProvider) =>
-        other !== provider &&
-        PROVIDER_CLI_SECRET_KEYS_FOR_TESTING[other] === secretKey;
+        other !== provider && PROVIDER_CLI_SECRET_KEYS_FOR_TESTING[other] === secretKey;
       expect(env[secretKey]).toBe(source[secretKey]);
       expect(env[CONFIG_KEYS[provider]]).toBe(`/private/${provider}-home`);
       expect(env.KORY_BACKEND_URL).toBe('http://127.0.0.1:3001');

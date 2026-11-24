@@ -70,7 +70,10 @@ describe('list_sessions', () => {
   test('reports processing for a session with a live run', async () => {
     const busy = await seedSession('Busy chat');
     configure(new Set([busy.id]));
-    const result = await listTool.run(caller(busy.id), callFor('list_sessions', { query: busy.id }));
+    const result = await listTool.run(
+      caller(busy.id),
+      callFor('list_sessions', { query: busy.id }),
+    );
     expect(result.output).toContain('processing');
   });
 
@@ -78,7 +81,10 @@ describe('list_sessions', () => {
     const match = await seedSession('Needle in the haystack');
     const miss = await seedSession('Unrelated chat zqx');
     configure();
-    const result = await listTool.run(caller(match.id), callFor('list_sessions', { query: 'needle' }));
+    const result = await listTool.run(
+      caller(match.id),
+      callFor('list_sessions', { query: 'needle' }),
+    );
     expect(result.output).toContain(match.id);
     expect(result.output).not.toContain(miss.id);
   });
@@ -114,15 +120,44 @@ describe('read_session', () => {
   test('reads the active lineage oldest to newest with message ids', async () => {
     const chat = await seedSession('Transcript chat');
     const ids = { u1: 'rd-u1', a1: 'rd-a1', u2: 'rd-u2', a2: 'rd-a2' };
-    await messages.add(chat.id, { id: ids.u1, sessionId: chat.id, role: 'user', content: 'first question', createdAt: 2_000 });
-    await messages.add(chat.id, { id: ids.a1, sessionId: chat.id, role: 'assistant', content: 'first answer', createdAt: 3_000 });
-    await messages.add(chat.id, { id: ids.u2, sessionId: chat.id, role: 'user', content: 'second question', createdAt: 4_000 });
-    await messages.add(chat.id, { id: ids.a2, sessionId: chat.id, role: 'assistant', content: 'second answer', createdAt: 5_000 });
+    await messages.add(chat.id, {
+      id: ids.u1,
+      sessionId: chat.id,
+      role: 'user',
+      content: 'first question',
+      createdAt: 2_000,
+    });
+    await messages.add(chat.id, {
+      id: ids.a1,
+      sessionId: chat.id,
+      role: 'assistant',
+      content: 'first answer',
+      createdAt: 3_000,
+    });
+    await messages.add(chat.id, {
+      id: ids.u2,
+      sessionId: chat.id,
+      role: 'user',
+      content: 'second question',
+      createdAt: 4_000,
+    });
+    await messages.add(chat.id, {
+      id: ids.a2,
+      sessionId: chat.id,
+      role: 'assistant',
+      content: 'second answer',
+      createdAt: 5_000,
+    });
     configure();
 
-    const result = await readTool.run(caller('some-other-chat'), callFor('read_session', { sessionId: chat.id }));
+    const result = await readTool.run(
+      caller('some-other-chat'),
+      callFor('read_session', { sessionId: chat.id }),
+    );
     expect(result.isError).toBe(false);
-    const positions = [ids.u1, ids.a1, ids.u2, ids.a2].map((id) => result.output.indexOf(`[${id}]`));
+    const positions = [ids.u1, ids.a1, ids.u2, ids.a2].map((id) =>
+      result.output.indexOf(`[${id}]`),
+    );
     for (const pos of positions) expect(pos).toBeGreaterThan(-1);
     expect(positions).toEqual([...positions].sort((x, y) => x - y));
     expect(result.output).toContain('first question');
@@ -145,7 +180,10 @@ describe('read_session', () => {
     }
     configure();
 
-    const first = await readTool.run(caller('reader'), callFor('read_session', { sessionId: chat.id, limit: 2 }));
+    const first = await readTool.run(
+      caller('reader'),
+      callFor('read_session', { sessionId: chat.id, limit: 2 }),
+    );
     expect(first.isError).toBe(false);
     expect(first.output).toContain('[pg-3]');
     expect(first.output).toContain('[pg-4]');
@@ -173,7 +211,10 @@ describe('read_session', () => {
       createdAt: 2_000,
     });
     configure();
-    const result = await readTool.run(caller('reader'), callFor('read_session', { sessionId: chat.id }));
+    const result = await readTool.run(
+      caller('reader'),
+      callFor('read_session', { sessionId: chat.id }),
+    );
     expect(result.output).toContain('truncated 1000 chars');
   });
 
@@ -218,7 +259,10 @@ describe('read_session', () => {
     });
     await sessions.archive(chat.id);
     configure();
-    const result = await readTool.run(caller('reader'), callFor('read_session', { sessionId: chat.id }));
+    const result = await readTool.run(
+      caller('reader'),
+      callFor('read_session', { sessionId: chat.id }),
+    );
     expect(result.isError).toBe(false);
     expect(result.output).toContain('archived: yes');
     expect(result.output).toContain('old conversation');
@@ -226,7 +270,10 @@ describe('read_session', () => {
 
   test('an unknown chat id errors with a list_sessions hint', async () => {
     configure();
-    const result = await readTool.run(caller('reader'), callFor('read_session', { sessionId: 'no-such-chat' }));
+    const result = await readTool.run(
+      caller('reader'),
+      callFor('read_session', { sessionId: 'no-such-chat' }),
+    );
     expect(result.isError).toBe(true);
     expect(result.output).toContain("No chat with id 'no-such-chat'");
     expect(result.output).toContain('list_sessions');
@@ -248,7 +295,10 @@ describe('read_session', () => {
       createdAt: 2_000,
     });
     configure();
-    const result = await readTool.run(caller('reader'), callFor('read_session', { sessionId: chat.id }));
+    const result = await readTool.run(
+      caller('reader'),
+      callFor('read_session', { sessionId: chat.id }),
+    );
     expect(result.isError).toBe(false);
     expect(result.output).toContain('here are the files');
     expect(result.output).toContain('[image]');
@@ -268,7 +318,10 @@ describe('read_session', () => {
       createdAt: 2_000,
     });
     configure();
-    const result = await readTool.run(caller('reader'), callFor('read_session', { sessionId: chat.id }));
+    const result = await readTool.run(
+      caller('reader'),
+      callFor('read_session', { sessionId: chat.id }),
+    );
     expect(result.output).toContain('[att-only] [image]');
   });
 

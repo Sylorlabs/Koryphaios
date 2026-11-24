@@ -4,9 +4,9 @@ import type { ToolContext } from '../registry';
 
 describe('normalizeAskUserInput', () => {
   test('keeps plain string options', () => {
-    expect(
-      normalizeAskUserInput({ question: 'Pick one', options: ['Alpha', 'Beta'] }),
-    ).toEqual([{ question: 'Pick one', options: ['Alpha', 'Beta'] }]);
+    expect(normalizeAskUserInput({ question: 'Pick one', options: ['Alpha', 'Beta'] })).toEqual([
+      { question: 'Pick one', options: ['Alpha', 'Beta'] },
+    ]);
   });
 
   test('maps object options to their labels', () => {
@@ -52,10 +52,7 @@ describe('normalizeAskUserInput', () => {
           {
             question: 'Which database?',
             header: 'Storage',
-            options: [
-              { label: 'SQLite', description: 'Zero-config' },
-              { label: 'Postgres' },
-            ],
+            options: [{ label: 'SQLite', description: 'Zero-config' }, { label: 'Postgres' }],
           },
           { prompt: 'Which region?', options: ['us-east', 'eu-west'] },
           { text: 'Confirm the plan' },
@@ -101,10 +98,14 @@ describe('AskUserTool.run', () => {
               opts?: { allowOther?: boolean; allowKeepChatting?: boolean },
             ) => {
               calls.push({ question, options, opts });
-              return wait(question, options, opts as {
-                allowOther: boolean;
-                allowKeepChatting: boolean;
-              });
+              return wait(
+                question,
+                options,
+                opts as {
+                  allowOther: boolean;
+                  allowKeepChatting: boolean;
+                },
+              );
             },
           }
         : {}),
@@ -114,7 +115,11 @@ describe('AskUserTool.run', () => {
 
   test('always passes allowOther and allowKeepChatting, even when options are omitted', async () => {
     const { ctx, calls } = ctxWithWait(async () => 'Yes');
-    const result = await tool.run(ctx, { id: 'c1', name: 'ask_user', input: { question: 'Proceed?' } });
+    const result = await tool.run(ctx, {
+      id: 'c1',
+      name: 'ask_user',
+      input: { question: 'Proceed?' },
+    });
     expect(result.isError).toBe(false);
     expect(result.output).toBe('User selected: Yes');
     expect(calls).toEqual([

@@ -3,8 +3,14 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
-  symlinkSync, unlinkSync, writeFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -16,17 +22,26 @@ const EXECUTABLE = join(APP, 'Contents/MacOS/kory-tauri-v5-scenario2');
 
 function inspectPackage() {
   const plist = join(APP, 'Contents/Info.plist');
-  const id = execFileSync('/usr/bin/plutil',
+  const id = execFileSync(
+    '/usr/bin/plutil',
     ['-extract', 'CFBundleIdentifier', 'raw', '-o', '-', plist],
-    { encoding: 'utf8', timeout: 3_000 }).trim();
-  const executableName = execFileSync('/usr/bin/plutil',
+    { encoding: 'utf8', timeout: 3_000 },
+  ).trim();
+  const executableName = execFileSync(
+    '/usr/bin/plutil',
     ['-extract', 'CFBundleExecutable', 'raw', '-o', '-', plist],
-    { encoding: 'utf8', timeout: 3_000 }).trim();
-  const fileType = execFileSync('/usr/bin/file', ['-b', EXECUTABLE],
-    { encoding: 'utf8', timeout: 3_000 }).trim();
-  if (id !== 'dev.koryphaios.v5.tauri.scenario2' ||
+    { encoding: 'utf8', timeout: 3_000 },
+  ).trim();
+  const fileType = execFileSync('/usr/bin/file', ['-b', EXECUTABLE], {
+    encoding: 'utf8',
+    timeout: 3_000,
+  }).trim();
+  if (
+    id !== 'dev.koryphaios.v5.tauri.scenario2' ||
     executableName !== 'kory-tauri-v5-scenario2' ||
-    !fileType.includes('Mach-O') || !fileType.includes('arm64')) {
+    !fileType.includes('Mach-O') ||
+    !fileType.includes('arm64')
+  ) {
     throw new Error('Packaged executable identity/architecture invalid');
   }
   return { bundleId: id, fileType, executable: realpathSync(EXECUTABLE) };
@@ -34,16 +49,24 @@ function inspectPackage() {
 
 const readLog = (path) => {
   if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8').trim().split('\n')
-    .filter(Boolean).flatMap((line) => {
-      try { return [JSON.parse(line)]; } catch { return []; }
+  return readFileSync(path, 'utf8')
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
     });
 };
 
 function liveProcessMatches(pid) {
   try {
     const path = execFileSync('/bin/ps', ['-ww', '-p', String(pid), '-o', 'comm='], {
-      encoding: 'utf8', timeout: 3_000,
+      encoding: 'utf8',
+      timeout: 3_000,
     }).trim();
     return realpathSync(path) === realpathSync(EXECUTABLE);
   } catch {
@@ -68,17 +91,23 @@ async function launch({ parent, state, log, expectedRoot, expectedReads }) {
     stdio: ['ignore', 'ignore', 'pipe'],
   });
   let stderr = '';
-  child.stderr.on('data', (chunk) => { stderr = (stderr + chunk.toString()).slice(-2_000); });
+  child.stderr.on('data', (chunk) => {
+    stderr = (stderr + chunk.toString()).slice(-2_000);
+  });
   const before = readLog(log).length;
   try {
     for (let elapsed = 0; elapsed < 12_000; elapsed += 250) {
-      const entries = readLog(log).slice(before).filter((event) => event.pid === child.pid);
+      const entries = readLog(log)
+        .slice(before)
+        .filter((event) => event.pid === child.pid);
       const startup = entries.find((event) => event.kind === 'startup');
       const ipc = entries.find((event) => event.kind === 'state-query');
       const reads = entries.filter((event) => event.kind === 'read');
       const observedReads = expectedReads.every(({ relative, outcome }) =>
-        reads.some((event) => event.detail?.relative === relative &&
-          event.detail?.outcome === outcome));
+        reads.some(
+          (event) => event.detail?.relative === relative && event.detail?.outcome === outcome,
+        ),
+      );
       if (startup && ipc && observedReads && liveProcessMatches(child.pid)) {
         const actualRoot = ipc.detail?.root ?? null;
         if (actualRoot !== expectedRoot) {
@@ -88,8 +117,12 @@ async function launch({ parent, state, log, expectedRoot, expectedReads }) {
           pid: child.pid,
           executable: realpathSync(EXECUTABLE),
           host: 'macOS packaged Tauri',
-          observed: ['real Mach-O process', 'Rust setup event',
-            'WebView-to-Rust state-query IPC', 'WebView-to-Rust filesystem IPC'],
+          observed: [
+            'real Mach-O process',
+            'Rust setup event',
+            'WebView-to-Rust state-query IPC',
+            'WebView-to-Rust filesystem IPC',
+          ],
           events: [startup, ipc, ...reads],
         };
       }
@@ -131,7 +164,10 @@ export async function packagedSmoke() {
   const state = join(runDir, 'state');
   const log = join(runDir, 'events.jsonl');
   const cleanStart = await launch({
-    parent, state, log, expectedRoot: null,
+    parent,
+    state,
+    log,
+    expectedRoot: null,
     expectedReads: [
       { relative: 'marker.txt', outcome: 'denied' },
       { relative: 'linked.txt', outcome: 'denied' },
@@ -141,7 +177,10 @@ export async function packagedSmoke() {
   // Externally seeded state is NOT evidence of OS folder selection.
   writeFileSync(state, root);
   const seededRestart = await launch({
-    parent, state, log, expectedRoot: root,
+    parent,
+    state,
+    log,
+    expectedRoot: root,
     expectedReads: [
       { relative: 'marker.txt', outcome: 'allowed' },
       { relative: 'linked.txt', outcome: 'allowed' },
@@ -153,7 +192,10 @@ export async function packagedSmoke() {
   unlinkSync(linked);
   symlinkSync(join(outside, 'secret.txt'), linked);
   const retargetedRestart = await launch({
-    parent, state, log, expectedRoot: root,
+    parent,
+    state,
+    log,
+    expectedRoot: root,
     expectedReads: [
       { relative: 'marker.txt', outcome: 'allowed' },
       { relative: 'linked.txt', outcome: 'denied' },
@@ -168,7 +210,10 @@ export async function packagedSmoke() {
     seededState: true,
     executableSha256: createHash('sha256').update(readFileSync(EXECUTABLE)).digest('hex'),
     packageIdentity,
-    runDir, cleanStart, seededRestart, retargetedRestart,
+    runDir,
+    cleanStart,
+    seededRestart,
+    retargetedRestart,
   };
   writeFileSync(join(runDir, 'partial-native-result.json'), JSON.stringify(report, null, 2));
   return report;
@@ -178,10 +223,17 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     console.log(JSON.stringify(await packagedSmoke(), null, 2));
   } catch (error) {
-    console.error(JSON.stringify({
-      classification: 'native-smoke-failed', nativeDeviceVerified: false,
-      error: String(error.message),
-    }, null, 2));
+    console.error(
+      JSON.stringify(
+        {
+          classification: 'native-smoke-failed',
+          nativeDeviceVerified: false,
+          error: String(error.message),
+        },
+        null,
+        2,
+      ),
+    );
     process.exitCode = 1;
   }
 }

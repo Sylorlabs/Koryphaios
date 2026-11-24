@@ -33,16 +33,13 @@ export function continuationTargetKey(
  * a new row so event order survives. Content is allowed to continue across tool
  * activity, so only thinking is constrained to the immediately previous row.
  */
-export function thinkingContinuesLatest(
-  latest: FeedEntry | undefined,
-  entry: FeedEntry,
-): boolean {
+export function thinkingContinuesLatest(latest: FeedEntry | undefined, entry: FeedEntry): boolean {
   if (entry.type !== 'thinking') return true;
   return Boolean(
     latest &&
-      latest.type === 'thinking' &&
-      latest.agentId === entry.agentId &&
-      Boolean(latest.userHidden) === Boolean(entry.userHidden),
+    latest.type === 'thinking' &&
+    latest.agentId === entry.agentId &&
+    Boolean(latest.userHidden) === Boolean(entry.userHidden),
   );
 }
 

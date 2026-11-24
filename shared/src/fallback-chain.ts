@@ -90,7 +90,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isReasoningLevel(value: unknown): value is FallbackReasoningLevel {
-  return typeof value === 'string' && (FALLBACK_REASONING_LEVELS as readonly string[]).includes(value);
+  return (
+    typeof value === 'string' && (FALLBACK_REASONING_LEVELS as readonly string[]).includes(value)
+  );
 }
 
 /**
@@ -139,13 +141,20 @@ export function normalizeFallbackChain(input: unknown): FallbackChain {
   if (!isRecord(input)) return base;
   const triggersInput = isRecord(input.triggers) ? input.triggers : {};
   const triggers: FallbackTriggers = {
-    usageLimit: typeof triggersInput.usageLimit === 'boolean' ? triggersInput.usageLimit : base.triggers.usageLimit,
-    rateLimit: typeof triggersInput.rateLimit === 'boolean' ? triggersInput.rateLimit : base.triggers.rateLimit,
+    usageLimit:
+      typeof triggersInput.usageLimit === 'boolean'
+        ? triggersInput.usageLimit
+        : base.triggers.usageLimit,
+    rateLimit:
+      typeof triggersInput.rateLimit === 'boolean'
+        ? triggersInput.rateLimit
+        : base.triggers.rateLimit,
     providerError:
       typeof triggersInput.providerError === 'boolean'
         ? triggersInput.providerError
         : base.triggers.providerError,
-    timeout: typeof triggersInput.timeout === 'boolean' ? triggersInput.timeout : base.triggers.timeout,
+    timeout:
+      typeof triggersInput.timeout === 'boolean' ? triggersInput.timeout : base.triggers.timeout,
   };
   const returnToPrimary = (FALLBACK_RETURN_TO_PRIMARY as readonly string[]).includes(
     input.returnToPrimary as string,
@@ -160,7 +169,8 @@ export function normalizeFallbackChainSettings(input: unknown): FallbackChainSet
   const out: FallbackChainSettings = {};
   if (!isRecord(input)) return out;
   for (const role of FALLBACK_CHAIN_ROLES) {
-    if (input[role] !== undefined && input[role] !== null) out[role] = normalizeFallbackChain(input[role]);
+    if (input[role] !== undefined && input[role] !== null)
+      out[role] = normalizeFallbackChain(input[role]);
   }
   return out;
 }

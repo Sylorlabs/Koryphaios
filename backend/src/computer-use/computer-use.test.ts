@@ -271,7 +271,10 @@ describe('computer tools', () => {
     const f = fixture();
     const result = await f.run('computer_click', {
       ...ctx,
-      permissionPolicy: { mode: 'guarded', interactionMode: 'plan' } as ToolContext['permissionPolicy'],
+      permissionPolicy: {
+        mode: 'guarded',
+        interactionMode: 'plan',
+      } as ToolContext['permissionPolicy'],
       waitForUserInput: async () => 'Allow once',
     });
     expect(result.isError).toBe(false);
@@ -304,7 +307,19 @@ describe('computer tools', () => {
       if (action.kind === 'discover') return { targets: [target] };
       if (action.kind === 'listElements')
         return {
-          elements: [{ elementId: 'element-1', role: 'button', name: 'Save', x: 4, y: 5, width: 20, height: 20, enabled: true, actions: ['press'] }],
+          elements: [
+            {
+              elementId: 'element-1',
+              role: 'button',
+              name: 'Save',
+              x: 4,
+              y: 5,
+              width: 20,
+              height: 20,
+              enabled: true,
+              actions: ['press'],
+            },
+          ],
         };
       return { text: 'pressed' };
     };

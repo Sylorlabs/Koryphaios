@@ -205,8 +205,12 @@ describe('Kory MCP bridge — tool catalog integrity', () => {
   });
 
   it('manager role sees its tools and leaves specialist-team management to the Critic', () => {
-    expect(toolsForRole('manager')).toHaveLength(KORY_TOOLS.filter((tool) => tool.role !== 'critic').length);
-    expect(toolsForRole('critic').some((tool) => tool.name === 'kory__manage_review_agents')).toBe(true);
+    expect(toolsForRole('manager')).toHaveLength(
+      KORY_TOOLS.filter((tool) => tool.role !== 'critic').length,
+    );
+    expect(toolsForRole('critic').some((tool) => tool.name === 'kory__manage_review_agents')).toBe(
+      true,
+    );
   });
 
   it('unknown role sees no tools', () => {

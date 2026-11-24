@@ -6,7 +6,14 @@ import {
   reconcileContextBreakdown,
 } from './context-accounting';
 
-const breakdown = { system: 4_000, memory: 500, skills: 500, tools: 1_000, chat: 2_000, output: 300 };
+const breakdown = {
+  system: 4_000,
+  memory: 500,
+  skills: 500,
+  tools: 1_000,
+  chat: 2_000,
+  output: 300,
+};
 const measured = 8_000;
 
 describe('boundOpaqueCumulativeOccupancy', () => {
@@ -56,6 +63,8 @@ describe('boundOpaqueCumulativeOccupancy', () => {
 describe('reconcileContextBreakdown (unchanged semantics)', () => {
   test('API remainder stays request context; CLI remainder stays runtime overhead', () => {
     expect(reconcileContextBreakdown(breakdown, 20_000, 'openai').request).toBeUndefined();
-    expect(reconcileContextBreakdown(breakdown, 20_000, 'codex').cliHarness).toBe(20_000 - 300 - measured);
+    expect(reconcileContextBreakdown(breakdown, 20_000, 'codex').cliHarness).toBe(
+      20_000 - 300 - measured,
+    );
   });
 });

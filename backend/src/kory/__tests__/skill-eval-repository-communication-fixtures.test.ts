@@ -48,8 +48,8 @@ describe('repository communication and planning fixtures', () => {
   });
 
   test('planning scorer rejects dangling, forward, duplicate, and malformed phase dependencies', async () => {
-    const planning = loadV5SkillPackages().packages.find((candidate) =>
-      candidate.sidecar.name === 'planning',
+    const planning = loadV5SkillPackages().packages.find(
+      (candidate) => candidate.sidecar.name === 'planning',
     )!;
     const scenario = buildSkillEvalSuiteV3(planning).scenarios.find(
       (candidate) => candidate.id === 'planning-full-task-2-individual',
@@ -86,10 +86,16 @@ describe('repository communication and planning fixtures', () => {
     };
     expect((await score(plan.phases)).passed).toBe(true);
     const invalid = [
-      plan.phases.map((phase, index) => index === 1 ? { ...phase, dependsOn: ['missing'] } : phase),
-      plan.phases.map((phase, index) => index === 2 ? { ...phase, dependsOn: ['retire'] } : phase),
-      plan.phases.map((phase, index) => index === 3 ? { ...phase, dependsOn: ['shadow-reconcile'] } : phase),
-      plan.phases.map((phase, index) => index === 3 ? { ...phase, id: 'outbox' } : phase),
+      plan.phases.map((phase, index) =>
+        index === 1 ? { ...phase, dependsOn: ['missing'] } : phase,
+      ),
+      plan.phases.map((phase, index) =>
+        index === 2 ? { ...phase, dependsOn: ['retire'] } : phase,
+      ),
+      plan.phases.map((phase, index) =>
+        index === 3 ? { ...phase, dependsOn: ['shadow-reconcile'] } : phase,
+      ),
+      plan.phases.map((phase, index) => (index === 3 ? { ...phase, id: 'outbox' } : phase)),
       [null, ...plan.phases.slice(1)],
     ];
     for (const phases of invalid) {

@@ -5,25 +5,15 @@
   "skillKind": "verification",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "verification"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["verification"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 3200,
-  "broader": [
-    "verification"
-  ],
+  "broader": ["verification"],
   "facets": [],
   "requires": [],
   "conflicts": [],
-  "activation": [
-    "critic auto",
-    "request a critic",
-    "needs independent review"
-  ],
+  "activation": ["critic auto", "request a critic", "needs independent review"],
   "excludes": [],
   "evidence": [
     "Reasoned review choice",
@@ -50,32 +40,19 @@
         "id": "critic-auto-selection-ambiguous-1",
         "prompt": "In Auto mode, decide about this answer and then review it yourself if you decide a review is warranted.",
         "expectedSelection": true,
-        "expectedSkills": [
-          "critic-review"
-        ],
+        "expectedSkills": ["critic-review"],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "critic-review"
-        ],
-        "tags": [
-          "ambiguous",
-          "hierarchy-boundary"
-        ]
+        "adjacentSkills": ["critic-review"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
       },
       {
         "id": "critic-auto-selection-ambiguous-2",
         "prompt": "Should this turn get a critic, and separately confirm that the suite actually ran?",
         "expectedSelection": true,
-        "expectedSkills": [
-          "verification"
-        ],
+        "expectedSkills": ["verification"],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "verification"
-        ],
-        "tags": [
-          "ambiguous"
-        ]
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous"]
       },
       {
         "id": "critic-auto-selection-ambiguous-3",
@@ -83,12 +60,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "critic-review"
-        ],
-        "tags": [
-          "ambiguous"
-        ]
+        "adjacentSkills": ["critic-review"],
+        "tags": ["ambiguous"]
       }
     ],
     "adversarial": [
@@ -99,10 +72,7 @@
         "expectedSkills": [],
         "forbiddenSkills": [],
         "adjacentSkills": [],
-        "tags": [
-          "adversarial",
-          "mode-boundary"
-        ]
+        "tags": ["adversarial", "mode-boundary"]
       },
       {
         "id": "critic-auto-selection-adversarial-2",
@@ -111,10 +81,7 @@
         "expectedSkills": [],
         "forbiddenSkills": [],
         "adjacentSkills": [],
-        "tags": [
-          "adversarial",
-          "negated"
-        ]
+        "tags": ["adversarial", "negated"]
       },
       {
         "id": "critic-auto-selection-adversarial-3",
@@ -122,13 +89,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "implementation"
-        ],
-        "tags": [
-          "adversarial",
-          "quoted-instruction"
-        ]
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "quoted-instruction"]
       }
     ]
   },

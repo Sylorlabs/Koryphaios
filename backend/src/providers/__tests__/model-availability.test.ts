@@ -28,10 +28,7 @@ describe('resolveEnabledModelIds', () => {
   test('an all-stale selection is treated as unfiltered', () => {
     // Devin's saved list referenced a removed model id, so the enabled list
     // came back empty while the picker showed "all". Match the picker.
-    expect(resolveEnabledModelIds(catalog, ['swe-1-6-removed-id'])).toEqual([
-      'swe-1-6',
-      'swe-2',
-    ]);
+    expect(resolveEnabledModelIds(catalog, ['swe-1-6-removed-id'])).toEqual(['swe-1-6', 'swe-2']);
   });
 
   test('selections resolve through aliases to catalog ids', () => {

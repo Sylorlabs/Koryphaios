@@ -49,7 +49,12 @@ beforeAll(() => {
       state: 'active',
       path: join(scratch, definition.name, 'SKILL.md'),
       storageVersion: 1,
-      document: { kind: 'markdown', extension: 'md', renderer: 'markdown', mediaType: 'text/markdown' },
+      document: {
+        kind: 'markdown',
+        extension: 'md',
+        renderer: 'markdown',
+        mediaType: 'text/markdown',
+      },
       sourceContent: content,
       coreInstructions: instructions!.trim(),
       content,
@@ -82,15 +87,15 @@ test('package validates, citations resolve, and every task has the evidence cont
     expect(task.falsifiableChecks.some((check) => /allowed|permitted/u.test(check.assertion))).toBe(
       true,
     );
-    expect(task.falsifiableChecks.some((check) => /denied|reject|negative/u.test(check.assertion))).toBe(
-      true,
-    );
+    expect(
+      task.falsifiableChecks.some((check) => /denied|reject|negative/u.test(check.assertion)),
+    ).toBe(true);
     expect(task.falsifiableChecks.some((check) => /rollback|recovery/u.test(check.assertion))).toBe(
       true,
     );
-    expect(task.falsifiableChecks.some((check) => /unavailable|unverified/u.test(check.assertion))).toBe(
-      true,
-    );
+    expect(
+      task.falsifiableChecks.some((check) => /unavailable|unverified/u.test(check.assertion)),
+    ).toBe(true);
     expect(task.prompt).toMatch(/runtime|effective|enforc|running/u);
     expect(task.prompt).toMatch(/port|control-plane/u);
     expect(task.prompt).toMatch(/default-deny|dependency/u);

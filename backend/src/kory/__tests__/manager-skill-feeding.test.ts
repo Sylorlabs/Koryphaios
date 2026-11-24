@@ -64,10 +64,7 @@ function internals(manager: KoryManager): {
       peek(id: string): SessionRuntime | undefined;
       dispose(id: string): void;
     };
-    manageSessionSkillFeeding(
-      sessionId: string,
-      request: Record<string, unknown>,
-    ): Promise<string>;
+    manageSessionSkillFeeding(sessionId: string, request: Record<string, unknown>): Promise<string>;
   };
   return {
     runtimes: internal.runtimes,

@@ -13,7 +13,8 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-const cacheRepair = [
+const cacheRepair =
+  [
     'export interface Entry<T>{value:T;expiresAt:number;staleUntil:number}',
     'type Flight<T>={promise:Promise<T>;controller:AbortController;waiters:number}',
     'export class MetadataCache<T> {',
@@ -73,9 +74,10 @@ const cacheRepair = [
     '  }',
     '  size(){return this.entries.size;}',
     '}',
-].join('\n') + '\n';
+  ].join('\n') + '\n';
 
-const authored = [
+const authored =
+  [
     "import { expect, test } from 'bun:test';",
     "import { MetadataCache } from '../src/cache';",
     "test('coalesce one-key herd and bounded eviction',async()=>{",
@@ -112,7 +114,7 @@ const authored = [
     '  expect(rejected).toBe(true);',
     "  expect(await cache.get('z',async()=>9,10,0,signal)).toBe(9);",
     '});',
-].join('\n') + '\n';
+  ].join('\n') + '\n';
 
 test('cache scorer requires tests that catch unbounded loads and abandoned refresh ownership', async () => {
   const scenario = 'in-process-backend-full-task-2-individual';
@@ -122,9 +124,7 @@ test('cache scorer requires tests that catch unbounded loads and abandoned refre
     m.matches({ id: scenario } as never),
   )!;
   await materializer.materialize(root, { id: scenario } as never);
-  const scorer = BACKEND_STATE_SKILL_EVAL_SCORERS.find((s) =>
-    s.scenarioIds.includes(scenario),
-  )!;
+  const scorer = BACKEND_STATE_SKILL_EVAL_SCORERS.find((s) => s.scenarioIds.includes(scenario))!;
   writeFixtureFile(root, 'src/cache.ts', cacheRepair);
   writeFixtureFile(root, 'tests/cache.test.ts', authored);
   writeFixtureFile(

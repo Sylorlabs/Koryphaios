@@ -20,4 +20,5 @@ export interface EmbeddedCurrentV5SkillEvaluationContracts {
 // The genuine backend build replaces ONLY this module with a freshly collected,
 // deeply frozen source-registry literal. Source and unsupported raw bundles have
 // no embedded authority; never populate this stub with a checked-in manifest.
-export const EMBEDDED_CURRENT_V5_SKILL_EVALUATION_CONTRACTS: EmbeddedCurrentV5SkillEvaluationContracts | null = null;
+export const EMBEDDED_CURRENT_V5_SKILL_EVALUATION_CONTRACTS: EmbeddedCurrentV5SkillEvaluationContracts | null =
+  null;

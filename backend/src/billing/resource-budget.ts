@@ -1,4 +1,8 @@
-import { getSubscriptionStatuses, getUsageCostBreakdown, type SubscriptionStatus } from '../credit-accountant';
+import {
+  getSubscriptionStatuses,
+  getUsageCostBreakdown,
+  type SubscriptionStatus,
+} from '../credit-accountant';
 import type { ProviderRateLimitSnapshot } from '@koryphaios/shared';
 import { getCliUsageReports, type CliUsageReport } from './cli-usage';
 import { getProviderRateLimitSnapshots } from './rate-limits';
@@ -82,15 +86,26 @@ export async function collectResourceBudgetSnapshot(
       timeoutMs,
     ),
   ]);
-  if (!balances) limitations.push('API balance refresh exceeded the bounded collection window; no stale value was invented.');
-  if (!cliUsage) limitations.push('CLI quota refresh exceeded the bounded collection window; no stale value was invented.');
+  if (!balances)
+    limitations.push(
+      'API balance refresh exceeded the bounded collection window; no stale value was invented.',
+    );
+  if (!cliUsage)
+    limitations.push(
+      'CLI quota refresh exceeded the bounded collection window; no stale value was invented.',
+    );
 
   const entries: ResourceBudgetEntry[] = [];
   for (const balance of balances ?? []) {
     entries.push({
       provider: balance.provider,
       kind: 'api_balance',
-      state: balance.availableUsd == null ? 'unknown' : balance.availableUsd <= 0 ? 'exhausted' : 'available',
+      state:
+        balance.availableUsd == null
+          ? 'unknown'
+          : balance.availableUsd <= 0
+            ? 'exhausted'
+            : 'available',
       ...(balance.availableUsd == null ? {} : { availableUsd: balance.availableUsd }),
       source: 'provider_api',
       authoritative: true,
@@ -121,7 +136,14 @@ export async function collectResourceBudgetSnapshot(
     entries.push({
       provider: status.provider,
       kind: 'subscription_quota',
-      state: normalized === 'rejected' ? 'rate_limited' : normalized === 'allowed_warning' ? 'low' : normalized === 'allowed' ? 'available' : 'unknown',
+      state:
+        normalized === 'rejected'
+          ? 'rate_limited'
+          : normalized === 'allowed_warning'
+            ? 'low'
+            : normalized === 'allowed'
+              ? 'available'
+              : 'unknown',
       ...(status.resetsAt == null ? {} : { resetsAt: status.resetsAt * 1_000 }),
       ...(status.rateLimitType ? { window: status.rateLimitType } : {}),
       source: 'runtime_observation',
@@ -156,6 +178,7 @@ export async function collectResourceBudgetSnapshot(
     rateLimits,
     ...(sessionCost ? { sessionCost } : {}),
     limitations,
-    decisionPolicy: 'Treat only exhausted or rate_limited authoritative entries as unavailable. Treat missing or unknown data as unknown and preserve explicit user provider choices.',
+    decisionPolicy:
+      'Treat only exhausted or rate_limited authoritative entries as unavailable. Treat missing or unknown data as unknown and preserve explicit user provider choices.',
   };
 }

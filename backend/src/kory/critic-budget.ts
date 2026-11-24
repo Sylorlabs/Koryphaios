@@ -22,8 +22,9 @@ export function criticOutputTokenBudget(input: CriticBudgetInput): number {
     providerFloor,
     4_096 + evidenceUnits * 2_048 + pathUnits * 2_048 + skillUnits * 1_024,
   );
-  const ceiling = Number.isFinite(input.modelMaxOutputTokens) && (input.modelMaxOutputTokens ?? 0) > 0
-    ? Math.floor(input.modelMaxOutputTokens as number)
-    : 32_768;
+  const ceiling =
+    Number.isFinite(input.modelMaxOutputTokens) && (input.modelMaxOutputTokens ?? 0) > 0
+      ? Math.floor(input.modelMaxOutputTokens as number)
+      : 32_768;
   return Math.max(1, Math.min(ceiling, requested));
 }

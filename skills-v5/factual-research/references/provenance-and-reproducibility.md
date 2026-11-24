@@ -27,7 +27,7 @@ Keep one row for every source used to support or reject a material claim. Preser
 | `url`                           | Exact HTTPS URL requested and verified                   |
 | `status`                        | Observed HTTP status                                     |
 | `retrievedAt`                   | UTC retrieval time                                       |
-| `sha256`                        | SHA256 of the raw response body when available          |
+| `sha256`                        | SHA256 of the raw response body when available           |
 | `lastModified`                  | HTTP value, or `null` when absent                        |
 | `publishedAt` / `effectiveDate` | Date asserted by the source, not the retrieval date      |
 | `scope`                         | What the source actually covers                          |

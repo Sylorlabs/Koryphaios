@@ -5,7 +5,11 @@
  * Usage: bun run scripts/eval-permission-profile.ts --mode=yolo -- <command> [args...]
  */
 import { spawn } from 'node:child_process';
-import { applyPermissionMode, isEvalPermissionMode, restorePermissionMode } from './eval-permission';
+import {
+  applyPermissionMode,
+  isEvalPermissionMode,
+  restorePermissionMode,
+} from './eval-permission';
 
 const argv = process.argv.slice(2);
 const modeArgument = argv.find((argument) => argument.startsWith('--mode='));

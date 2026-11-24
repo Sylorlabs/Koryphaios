@@ -86,7 +86,9 @@ export function applyCollapse(row: HTMLElement, collapsed: ReadonlySet<number>):
 /** Ranks currently collapsed, read back from the DOM. */
 export function collapsedRanks(row: HTMLElement): number[] {
   const ranks = new Set<number>();
-  for (const el of Array.from(row.querySelectorAll<HTMLElement>(`[${RANK_ATTR}][${COLLAPSED_ATTR}]`))) {
+  for (const el of Array.from(
+    row.querySelectorAll<HTMLElement>(`[${RANK_ATTR}][${COLLAPSED_ATTR}]`),
+  )) {
     ranks.add(Number(el.getAttribute(RANK_ATTR)));
   }
   return [...ranks].sort((a, b) => a - b);

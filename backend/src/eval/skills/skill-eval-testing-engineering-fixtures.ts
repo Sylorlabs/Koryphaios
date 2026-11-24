@@ -130,7 +130,11 @@ export function run(argv:string[]):number{
 if(import.meta.main) process.exitCode=run(process.argv.slice(2));
 `;
 
-function runTests(root: string): { passed: boolean; infrastructureFailure: boolean; output: string } {
+function runTests(root: string): {
+  passed: boolean;
+  infrastructureFailure: boolean;
+  output: string;
+} {
   const result = spawnSync(process.execPath, ['test', '--no-env-file', 'tests'], {
     cwd: root,
     encoding: 'utf8',
@@ -140,7 +144,8 @@ function runTests(root: string): { passed: boolean; infrastructureFailure: boole
   });
   return {
     passed: result.status === 0,
-    infrastructureFailure: result.status === null || result.signal !== null || result.error !== undefined,
+    infrastructureFailure:
+      result.status === null || result.signal !== null || result.error !== undefined,
     output: `${result.stdout ?? ''}\n${result.stderr ?? ''}`.slice(-5000),
   };
 }
@@ -199,7 +204,10 @@ function scoreRetry(root: string): SkillEvalDeterministicScore {
   const noRetryMutation = mutationRun(root, { 'src/client.ts': CLIENT_NO_RETRY });
   const abortKilled = !abortMutation.passed && !abortMutation.infrastructureFailure;
   const noRetryKilled = !noRetryMutation.passed && !noRetryMutation.infrastructureFailure;
-  const runtimeHealthy = !fixed.infrastructureFailure && !abortMutation.infrastructureFailure && !noRetryMutation.infrastructureFailure;
+  const runtimeHealthy =
+    !fixed.infrastructureFailure &&
+    !abortMutation.infrastructureFailure &&
+    !noRetryMutation.infrastructureFailure;
   const text = candidateTestText(root);
   const publicBoundary =
     /requestWithRetry/u.test(text) && !/pending\(\)|jobs|nextId|private/u.test(text);
@@ -259,11 +267,7 @@ function scoreCli(root: string): SkillEvalDeterministicScore {
     /(spawn|Bun\.spawn|subprocess|cli\.ts)/u.test(text) &&
     !/toMatchSnapshot/u.test(text);
   const passed =
-    runtimeHealthy && fixed.passed &&
-    argsKilled &&
-    serializationKilled &&
-    stderrKilled &&
-    layered;
+    runtimeHealthy && fixed.passed && argsKilled && serializationKilled && stderrKilled && layered;
   return {
     passed,
     quality:
@@ -275,9 +279,7 @@ function scoreCli(root: string): SkillEvalDeterministicScore {
         layered,
       ].filter(Boolean).length / 5,
     verification:
-      runtimeHealthy && fixed.passed && argsKilled && serializationKilled && stderrKilled
-        ? 1
-        : 0,
+      runtimeHealthy && fixed.passed && argsKilled && serializationKilled && stderrKilled ? 1 : 0,
     integrityFailure: false,
     evidence: [
       `fixed suite: ${fixed.passed ? 'pass' : 'fail'}`,

@@ -207,8 +207,11 @@ async function evaluate(
 describe('API contract evaluator requires executed regression detection', () => {
   test('export repair passes when the authored tests detect the original defect', async () => {
     const result = await evaluate(
-      'api-contract-design-full-task-1-individual', 'src/export-contract.ts', repairedExport,
-      'tests/export-contract.test.ts', exportRegressions,
+      'api-contract-design-full-task-1-individual',
+      'src/export-contract.ts',
+      repairedExport,
+      'tests/export-contract.test.ts',
+      exportRegressions,
     );
     expect(result.passed, result.evidence.join('\n')).toBe(true);
     expect(result.evidence).toContain('candidate tests reject the original defect: yes');
@@ -216,7 +219,9 @@ describe('API contract evaluator requires executed regression detection', () => 
 
   test('export keyword-only tests cannot claim regression coverage', async () => {
     const result = await evaluate(
-      'api-contract-design-full-task-1-individual', 'src/export-contract.ts', repairedExport,
+      'api-contract-design-full-task-1-individual',
+      'src/export-contract.ts',
+      repairedExport,
       'tests/export-contract.test.ts',
       `import { expect, test } from 'bun:test';\ntest('idempotency retry collision cancel retryable terminal failure legacy compatibility', () => expect(true).toBe(true));\n`,
     );
@@ -226,19 +231,28 @@ describe('API contract evaluator requires executed regression detection', () => 
 
   test('cursor repair passes when tests detect unstable pagination', async () => {
     const result = await evaluate(
-      'api-contract-design-full-task-2-individual', 'src/events-contract.ts', repairedCursor,
-      'tests/events-contract.test.ts', cursorRegressions,
+      'api-contract-design-full-task-2-individual',
+      'src/events-contract.ts',
+      repairedCursor,
+      'tests/events-contract.test.ts',
+      cursorRegressions,
     );
     expect(result.passed, result.evidence.join('\n')).toBe(true);
     expect(result.evidence).toContain('candidate tests reject the original defect: yes');
   });
 
   test('cursor expiry boundary mutant is rejected at the exact allowed lifetime', async () => {
-    const mutant = repairedCursor.replace('request.now - cursor.issued > 3600', 'request.now - cursor.issued >= 3600');
+    const mutant = repairedCursor.replace(
+      'request.now - cursor.issued > 3600',
+      'request.now - cursor.issued >= 3600',
+    );
     expect(mutant).not.toBe(repairedCursor);
     const result = await evaluate(
-      'api-contract-design-full-task-2-individual', 'src/events-contract.ts', mutant,
-      'tests/events-contract.test.ts', cursorRegressions,
+      'api-contract-design-full-task-2-individual',
+      'src/events-contract.ts',
+      mutant,
+      'tests/events-contract.test.ts',
+      cursorRegressions,
     );
     expect(result.passed).toBe(false);
     expect(result.evidence.join('\n')).toContain('hidden pagination/version compatibility: fail');
@@ -246,7 +260,9 @@ describe('API contract evaluator requires executed regression detection', () => 
 
   test('cursor keyword-only tests cannot claim regression coverage', async () => {
     const result = await evaluate(
-      'api-contract-design-full-task-2-individual', 'src/events-contract.ts', repairedCursor,
+      'api-contract-design-full-task-2-individual',
+      'src/events-contract.ts',
+      repairedCursor,
       'tests/events-contract.test.ts',
       `import { expect, test } from 'bun:test';\ntest('concurrent insert invalid tamper expiry legacy page enum restored compatibility telemetry deprecation', () => expect(true).toBe(true));\n`,
     );
@@ -256,7 +272,8 @@ describe('API contract evaluator requires executed regression detection', () => 
 
   test('export missing repair-only import cannot count as behavioral regression', async () => {
     const result = await evaluate(
-      'api-contract-design-full-task-1-individual', 'src/export-contract.ts',
+      'api-contract-design-full-task-1-individual',
+      'src/export-contract.ts',
       `${repairedExport}\nexport const repairOnly = true;\n`,
       'tests/export-contract.test.ts',
       `import { expect, test } from 'bun:test';
@@ -272,7 +289,8 @@ test('idempotent retry collision cancel retryable terminal failure legacy compat
 
   test('cursor missing repair-only import cannot count as behavioral regression', async () => {
     const result = await evaluate(
-      'api-contract-design-full-task-2-individual', 'src/events-contract.ts',
+      'api-contract-design-full-task-2-individual',
+      'src/events-contract.ts',
       `${repairedCursor}\nexport const repairOnly = true;\n`,
       'tests/events-contract.test.ts',
       `import { expect, test } from 'bun:test';
@@ -307,7 +325,12 @@ test('concurrent insert invalid tamper expiry legacy page restored enum compatib
     ];
     for (const item of cases) {
       const result = await evaluate(
-        item.scenario, item.source, item.repair, item.testPath, item.tests, item.contract,
+        item.scenario,
+        item.source,
+        item.repair,
+        item.testPath,
+        item.tests,
+        item.contract,
       );
       expect(result).toMatchObject({ passed: false, integrityFailure: true });
     }

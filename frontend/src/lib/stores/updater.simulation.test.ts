@@ -402,7 +402,8 @@ describe('update simulation: manifest to user-visible state', () => {
   it('keeps an install error through a background check that fails', async () => {
     invoke.mockImplementation(async (command: string) => {
       if (command === 'should_auto_update_at_launch') return false;
-      if (command === 'check_for_updates') return { available: true, version: '0.6.0', notes: null, pub_date: null };
+      if (command === 'check_for_updates')
+        return { available: true, version: '0.6.0', notes: null, pub_date: null };
       if (command === 'install_update') throw 'signature mismatch';
       return undefined;
     });

@@ -200,7 +200,10 @@ export class DevinAcpClient {
           eventQueue.push({ type: 'thinking_delta', thinking: event.text });
           break;
         case 'tool_call':
-          pendingTools.set(event.toolCallId, recordedToolIdentity(recordedToolName({ name: event.toolName }), event.input));
+          pendingTools.set(
+            event.toolCallId,
+            recordedToolIdentity(recordedToolName({ name: event.toolName }), event.input),
+          );
           // Intercept: ask the caller whether to approve/block/rewrite.
           if (opts?.onToolCall) {
             opts

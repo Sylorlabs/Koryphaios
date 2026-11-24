@@ -8,8 +8,7 @@ mock.module('../cache-capability-store', () => ({
   readProviderReasoningCacheProbe: () => undefined,
 }));
 const { AnthropicProvider } = await import('../anthropic');
-const { AzureProvider, OpenAIProvider, OpenRouterProvider } =
-  await import('../openai');
+const { AzureProvider, OpenAIProvider, OpenRouterProvider } = await import('../openai');
 
 // Exercise the installed SDKs and their real header construction, with every
 // fetch intercepted. No registry, credential store, config files or discovery.
@@ -217,5 +216,4 @@ describe('outgoing SDK credential isolation', () => {
       expect(headers.get('openai-project')).toBeNull();
     });
   }
-
 });

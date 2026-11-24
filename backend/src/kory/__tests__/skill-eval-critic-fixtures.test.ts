@@ -30,9 +30,11 @@ function materialize(scenarioId: string): string {
 }
 
 function score(scenarioId: string, root: string) {
-  return CRITIC_SKILL_EVAL_SCORERS.find((scorer) => scorer.scenarioIds.includes(scenarioId))!.score({
-    workingDirectory: root,
-  } as Parameters<(typeof CRITIC_SKILL_EVAL_SCORERS)[number]['score']>[0]);
+  return CRITIC_SKILL_EVAL_SCORERS.find((scorer) => scorer.scenarioIds.includes(scenarioId))!.score(
+    {
+      workingDirectory: root,
+    } as Parameters<(typeof CRITIC_SKILL_EVAL_SCORERS)[number]['score']>[0],
+  );
 }
 
 function writeArtifact(root: string, path: string, value: unknown): void {
@@ -146,9 +148,21 @@ describe('critic skill evaluation fixtures', () => {
 
     writeArtifact(root, 'review/decisions.json', {
       decisions: [
-        { caseId: 'acknowledge-file-list', requestReview: false, reason: 'Routine confirmation with nothing at stake.' },
-        { caseId: 'readiness-check', requestReview: false, reason: 'Routine confirmation with nothing at stake.' },
-        { caseId: 'user-says-test-later', requestReview: false, reason: 'Routine confirmation with nothing at stake.' },
+        {
+          caseId: 'acknowledge-file-list',
+          requestReview: false,
+          reason: 'Routine confirmation with nothing at stake.',
+        },
+        {
+          caseId: 'readiness-check',
+          requestReview: false,
+          reason: 'Routine confirmation with nothing at stake.',
+        },
+        {
+          caseId: 'user-says-test-later',
+          requestReview: false,
+          reason: 'Routine confirmation with nothing at stake.',
+        },
         {
           caseId: 'unobserved-suite',
           requestReview: true,
@@ -167,7 +181,11 @@ describe('critic skill evaluation fixtures', () => {
           reason: 'Irreversible production change.',
           concern: 'Whether the dropped table is recoverable.',
         },
-        { caseId: 'long-low-risk', requestReview: false, reason: 'Routine confirmation with nothing at stake.' },
+        {
+          caseId: 'long-low-risk',
+          requestReview: false,
+          reason: 'Routine confirmation with nothing at stake.',
+        },
       ],
     });
     expect(score(MATRIX, root).passed).toBe(true);
@@ -286,7 +304,8 @@ describe('critic skill evaluation fixtures', () => {
           verdict: 'omitted-risk',
           severity: 'blocking',
           evidence: { path: 'evidence/diff.patch' },
-          detail: 'the diff only guards the chat handler, so the shared budget requirement is unaddressed',
+          detail:
+            'the diff only guards the chat handler, so the shared budget requirement is unaddressed',
         },
         {
           id: 'runbook',
@@ -294,7 +313,8 @@ describe('critic skill evaluation fixtures', () => {
           verdict: 'omitted-risk',
           severity: 'advisory',
           evidence: { path: 'request.md' },
-          detail: 'the request asks for an on call runbook entry and the delivery never mentions one',
+          detail:
+            'the request asks for an on call runbook entry and the delivery never mentions one',
         },
         {
           id: 'window-covered',

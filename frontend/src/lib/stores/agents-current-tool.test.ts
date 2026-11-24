@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  getAgentCurrentTool,
-  noteAgentToolCall,
-  noteAgentToolResult,
-} from './agents.svelte';
+import { getAgentCurrentTool, noteAgentToolCall, noteAgentToolResult } from './agents.svelte';
 
 describe('agent current-tool derivation', () => {
   it('sets the current tool on tool_call and clears it on tool_result', () => {

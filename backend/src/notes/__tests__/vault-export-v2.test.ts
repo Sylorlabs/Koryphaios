@@ -13,9 +13,8 @@ process.env.DATABASE_URL = `sqlite://${join(databaseDirectory, 'vault-export.sql
 const { getDb, initDb } = await import('../../db');
 const { createNoteBase, trashNoteBase, updateNoteBase } = await import('../note-bases-service');
 const { noteDraftService } = await import('../note-draft-service');
-const { createNote, createVaultExport, listNotes, syncProjectDocuments } = await import(
-  '../notes-service'
-);
+const { createNote, createVaultExport, listNotes, syncProjectDocuments } =
+  await import('../notes-service');
 const { parseVaultArchive } = await import('../vault-archive');
 
 let fixtureRoot = '';
@@ -183,13 +182,13 @@ describe('whole-vault export v2', () => {
       },
     });
     expect(basePayload.current.trashedAt).toBeString();
-    expect(basePayload.revisions.map(({ revision, operation }) => ({ revision, operation }))).toEqual(
-      [
-        { revision: 1, operation: 'create' },
-        { revision: 2, operation: 'update' },
-        { revision: 3, operation: 'trash' },
-      ],
-    );
+    expect(
+      basePayload.revisions.map(({ revision, operation }) => ({ revision, operation })),
+    ).toEqual([
+      { revision: 1, operation: 'create' },
+      { revision: 2, operation: 'update' },
+      { revision: 3, operation: 'trash' },
+    ]);
 
     const exportedLiveDraft = archive.manifest.drafts.find((draft) => draft.id === liveDraft.id)!;
     expect(exportedLiveDraft).toMatchObject({

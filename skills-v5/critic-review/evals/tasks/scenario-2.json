@@ -53,10 +53,7 @@
         "findings are actionable",
         "no fabricated evidence pointer"
       ],
-      "blindTo": [
-        "skill-variant",
-        "expected-outcome"
-      ]
+      "blindTo": ["skill-variant", "expected-outcome"]
     }
   ],
   "requiredEvidence": [

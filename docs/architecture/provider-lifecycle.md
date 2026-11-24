@@ -35,11 +35,11 @@ The status object from `ProviderRegistry.getStatus()` carries `lifecycle?: Lifec
 
 ## Adapters (verified in code, 2026-11)
 
-| Adapter | interrupt | resume | rollback | fork | terminalStatusQuality | Evidence |
-|---|---|---|---|---|---|---|
-| codex (`codex-cli.ts`) | false | false | false | false | weak | `exec --ephemeral` (argv); the abort kills the child but returns with no status; `complete` is still yielded on exit 0 without `turn.completed`; prompt built from messages but no `supportsFreshConversation` declared |
-| claude (`claude-code.ts`) | false | false | false | false | weak | No `--resume`/`--continue`/`--session-id` in argv; `system/init` `session_id` not read; abort kills the child with no status; `complete` yielded on exit 0 without a `result` envelope |
-| opencode (`opencode-cli.ts`) | true | false | true | false | strong | Cancel is ACP `session/cancel` (`opencode-acp.ts` `cancel()`), with the stop reason captured. `session/new` runs every turn and `session/load` is never sent. `supportsFreshConversation = true`. The `session/prompt` response is the terminal signal. |
+| Adapter                      | interrupt | resume | rollback | fork  | terminalStatusQuality | Evidence                                                                                                                                                                                                                                                |
+| ---------------------------- | --------- | ------ | -------- | ----- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| codex (`codex-cli.ts`)       | false     | false  | false    | false | weak                  | `exec --ephemeral` (argv); the abort kills the child but returns with no status; `complete` is still yielded on exit 0 without `turn.completed`; prompt built from messages but no `supportsFreshConversation` declared                                 |
+| claude (`claude-code.ts`)    | false     | false  | false    | false | weak                  | No `--resume`/`--continue`/`--session-id` in argv; `system/init` `session_id` not read; abort kills the child with no status; `complete` yielded on exit 0 without a `result` envelope                                                                  |
+| opencode (`opencode-cli.ts`) | true      | false  | true     | false | strong                | Cancel is ACP `session/cancel` (`opencode-acp.ts` `cancel()`), with the stop reason captured. `session/new` runs every turn and `session/load` is never sent. `supportsFreshConversation = true`. The `session/prompt` response is the terminal signal. |
 
 Judgement calls:
 

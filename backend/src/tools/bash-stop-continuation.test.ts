@@ -49,10 +49,7 @@ describe('Bash stop semantics', () => {
       },
     );
 
-    setTimeout(
-      () => controller.abort(new DOMException('Stopped by user', 'AbortError')),
-      150,
-    );
+    setTimeout(() => controller.abort(new DOMException('Stopped by user', 'AbortError')), 150);
 
     const result = await pending;
     expect(Date.now() - startedAt).toBeLessThan(700);

@@ -6,8 +6,16 @@
  */
 import { spawnSync } from 'node:child_process';
 import {
-  accessSync, closeSync, constants, existsSync, lstatSync, openSync,
-  readFileSync, readSync, realpathSync, statSync,
+  accessSync,
+  closeSync,
+  constants,
+  existsSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  statSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, delimiter, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -38,7 +46,9 @@ export const REQUIRED_NATIVE_EVENTS = Object.freeze([
 ]);
 
 function shortened(value) {
-  return String(value ?? '').trim().slice(0, 300);
+  return String(value ?? '')
+    .trim()
+    .slice(0, 300);
 }
 
 function executable(path) {
@@ -68,7 +78,10 @@ function onPath(name, env, platform) {
 function commandProbe(command, args) {
   if (!command) return { ok: false, detail: 'not found' };
   const result = spawnSync(command, args, {
-    encoding: 'utf8', timeout: 4000, maxBuffer: 16 * 1024, windowsHide: true,
+    encoding: 'utf8',
+    timeout: 4000,
+    maxBuffer: 16 * 1024,
+    windowsHide: true,
     shell: false,
   });
   if (result.error) return { ok: false, detail: shortened(result.error.message) };
@@ -132,10 +145,10 @@ export function inspectEnvironment({
   const candidates = override
     ? [override]
     : [
-      join(repoRoot, 'desktop', 'node_modules', '.bin', 'tauri'),
-      join(repoRoot, 'node_modules', '.bin', 'tauri'),
-      onPath('tauri', env, platform),
-    ];
+        join(repoRoot, 'desktop', 'node_modules', '.bin', 'tauri'),
+        join(repoRoot, 'node_modules', '.bin', 'tauri'),
+        onPath('tauri', env, platform),
+      ];
   const cliPath = candidates.find((candidate) => candidate && executable(candidate)) ?? null;
   const cliProbe = run(cliPath, ['--version']);
   const cliV2 = cliProbe.ok && tauriVersion(cliProbe.detail);
@@ -146,16 +159,19 @@ export function inspectEnvironment({
   if (!rust.ok) blockers.push('Rust compiler missing or not responding');
   if (!cargo.ok) blockers.push('Cargo missing or not responding');
   if (!cliV2) {
-    blockers.push(override
-      ? 'Configured Tauri CLI unavailable or does not report v2'
-      : 'Tauri v2 CLI missing (project-local and PATH)');
+    blockers.push(
+      override
+        ? 'Configured Tauri CLI unavailable or does not report v2'
+        : 'Tauri v2 CLI missing (project-local and PATH)',
+    );
   }
   if (!driver.available) blockers.push('Trusted external Tauri native driver unavailable');
   if (!['darwin', 'linux', 'win32'].includes(platform)) {
     blockers.push('Unsupported desktop host');
   }
   return {
-    schemaVersion: VERSION, scenarioId: SCENARIO_ID,
+    schemaVersion: VERSION,
+    scenarioId: SCENARIO_ID,
     checkedAt: new Date().toISOString(),
     host: { platform, arch },
     rust: { path: rustBin, ...rust },
@@ -242,7 +258,8 @@ export function inspectReceipt(receipt, { expectedChallenge, receiptPath } = {})
   const issues = [];
   if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
     return {
-      classification: 'rejected', nativeDeviceVerified: false,
+      classification: 'rejected',
+      nativeDeviceVerified: false,
       issues: ['receipt must be an object'],
     };
   }
@@ -251,8 +268,11 @@ export function inspectReceipt(receipt, { expectedChallenge, receiptPath } = {})
   if (receipt.runtime !== 'tauri' || receipt.launchMode !== 'packaged') {
     issues.push('packaged Tauri runtime not declared');
   }
-  if (typeof expectedChallenge !== 'string' || expectedChallenge.length < 16
-    || receipt.challenge !== expectedChallenge) {
+  if (
+    typeof expectedChallenge !== 'string' ||
+    expectedChallenge.length < 16 ||
+    receipt.challenge !== expectedChallenge
+  ) {
     issues.push('fresh external challenge missing or mismatched');
   }
   if (receiptPath && safeFile(receiptPath, { requireExternal: true })) {
@@ -262,9 +282,14 @@ export function inspectReceipt(receipt, { expectedChallenge, receiptPath } = {})
   const started = Date.parse(receipt.startedAt);
   const finished = Date.parse(receipt.finishedAt);
   const now = Date.now();
-  if (!Number.isFinite(started) || !Number.isFinite(finished)
-    || finished < started || started > now + 30000
-    || finished > now + 30000 || now - started > 15 * 60 * 1000) {
+  if (
+    !Number.isFinite(started) ||
+    !Number.isFinite(finished) ||
+    finished < started ||
+    started > now + 30000 ||
+    finished > now + 30000 ||
+    now - started > 15 * 60 * 1000
+  ) {
     issues.push('receipt is stale, future-dated, or temporally inconsistent');
   }
 
@@ -292,25 +317,36 @@ export function inspectReceipt(receipt, { expectedChallenge, receiptPath } = {})
     const event = (kind) => events.find((entry) => entry?.kind === kind);
     const initialPid = event('packaged-launch')?.pid;
     const restartedPid = event('packaged-relaunch')?.pid;
-    if (!Number.isSafeInteger(initialPid) || initialPid <= 1
-      || !Number.isSafeInteger(restartedPid) || restartedPid <= 1
-      || initialPid === restartedPid
-      || event('app-quit')?.pid !== initialPid
-      || event('state-restored')?.pid !== restartedPid
-      || event('native-capture')?.pid !== restartedPid) {
+    if (
+      !Number.isSafeInteger(initialPid) ||
+      initialPid <= 1 ||
+      !Number.isSafeInteger(restartedPid) ||
+      restartedPid <= 1 ||
+      initialPid === restartedPid ||
+      event('app-quit')?.pid !== initialPid ||
+      event('state-restored')?.pid !== restartedPid ||
+      event('native-capture')?.pid !== restartedPid
+    ) {
       issues.push('native process identity or relaunch linkage invalid');
     }
-    if (event('dialog-cancel')?.outcome !== 'cancelled'
-      || event('dialog-cancel')?.selection !== null) {
+    if (
+      event('dialog-cancel')?.outcome !== 'cancelled' ||
+      event('dialog-cancel')?.selection !== null
+    ) {
       issues.push('dialog cancellation must be explicit, with null selection');
     }
     const selectedRoot = event('dialog-select')?.workspaceRoot;
-    if (typeof selectedRoot !== 'string' || !isAbsolute(selectedRoot)
-      || event('state-restored')?.workspaceRoot !== selectedRoot) {
+    if (
+      typeof selectedRoot !== 'string' ||
+      !isAbsolute(selectedRoot) ||
+      event('state-restored')?.workspaceRoot !== selectedRoot
+    ) {
       issues.push('restored root is missing or differs from selected root');
     }
-    if (event('allowed-read')?.outcome !== 'allowed'
-      || event('escaped-read-denied')?.outcome !== 'denied') {
+    if (
+      event('allowed-read')?.outcome !== 'allowed' ||
+      event('escaped-read-denied')?.outcome !== 'denied'
+    ) {
       issues.push('allowed and denied command outcomes missing');
     }
     if (event('native-capture')?.source !== 'os-compositor') {
@@ -329,9 +365,13 @@ export function inspectReceipt(receipt, { expectedChallenge, receiptPath } = {})
   if (capture) {
     if (receipt.capture?.sha256 !== capture.sha256) issues.push('capture hash mismatch');
     const header = capture.header;
-    if (capture.bytes < 32 || !header.subarray(0, 8).equals(PNG_SIGNATURE)
-      || header.toString('ascii', 12, 16) !== 'IHDR'
-      || header.readUInt32BE(16) < 320 || header.readUInt32BE(20) < 200) {
+    if (
+      capture.bytes < 32 ||
+      !header.subarray(0, 8).equals(PNG_SIGNATURE) ||
+      header.toString('ascii', 12, 16) !== 'IHDR' ||
+      header.readUInt32BE(16) < 320 ||
+      header.readUInt32BE(20) < 200
+    ) {
       issues.push('native capture is not a plausible desktop PNG');
     }
   }
@@ -339,9 +379,9 @@ export function inspectReceipt(receipt, { expectedChallenge, receiptPath } = {})
   return {
     classification: issues.length ? 'rejected' : 'structural-only',
     nativeDeviceVerified: false,
-    issues: issues.length ? issues : [
-      'Self-reported receipts cannot independently prove native device execution',
-    ],
+    issues: issues.length
+      ? issues
+      : ['Self-reported receipts cannot independently prove native device execution'],
   };
 }
 
@@ -355,12 +395,16 @@ function usage() {
   );
 }
 
-const calledAsProgram = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+const calledAsProgram =
+  process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (calledAsProgram) {
   const argv = process.argv.slice(2);
   const allowed = new Set(['--strict', '--receipt', '--challenge']);
-  if (argv.some((arg) => arg.startsWith('--') && !allowed.has(arg))
-    || argv.includes('--help') || argv.includes('-h')) {
+  if (
+    argv.some((arg) => arg.startsWith('--') && !allowed.has(arg)) ||
+    argv.includes('--help') ||
+    argv.includes('-h')
+  ) {
     usage();
     process.exitCode = 64;
   } else if (argv.includes('--receipt')) {
@@ -372,10 +416,15 @@ if (calledAsProgram) {
       const receiptBytes = safeReadArtifact(path, 'receipt', []);
       if (!receiptBytes) throw new Error('receipt missing or unsafe');
       verdict = inspectReceipt(JSON.parse(receiptBytes.toString('utf8')), {
-        expectedChallenge: challenge, receiptPath: path,
+        expectedChallenge: challenge,
+        receiptPath: path,
       });
     } catch (error) {
-      verdict = { classification: 'rejected', nativeDeviceVerified: false, issues: [String(error.message)] };
+      verdict = {
+        classification: 'rejected',
+        nativeDeviceVerified: false,
+        issues: [String(error.message)],
+      };
     }
     print(verdict);
     // A receipt alone can never satisfy a native qualification gate.

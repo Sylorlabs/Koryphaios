@@ -201,10 +201,7 @@ export function resolveWorkBuddyDesktopRuntime(
 function readDesktopVersion(app: WorkBuddyDesktopApp): string | null {
   try {
     if (app.os === 'darwin') {
-      const plist = readFileSync(
-        join(app.appPath, 'Contents', 'Info.plist'),
-        'utf-8',
-      );
+      const plist = readFileSync(join(app.appPath, 'Contents', 'Info.plist'), 'utf-8');
       const match = plist.match(
         /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/,
       );

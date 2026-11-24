@@ -21,7 +21,10 @@ interface Receipt {
 function waitForReady(child: ChildProcessWithoutNullStreams): Promise<void> {
   return new Promise((resolve, reject) => {
     let output = '';
-    const timer = setTimeout(() => reject(new Error(`Native fixture did not become ready: ${output}`)), 20_000);
+    const timer = setTimeout(
+      () => reject(new Error(`Native fixture did not become ready: ${output}`)),
+      20_000,
+    );
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       output = (output + chunk).slice(-4000);
@@ -57,7 +60,8 @@ async function main(): Promise<void> {
         target = discovered.targets?.find((item) => item.pid === child.pid);
         if (!target) await new Promise((resolve) => setTimeout(resolve, 250));
       }
-      if (!target) failures.push(`Fixture PID ${child.pid} was not exposed as an authorized target`);
+      if (!target)
+        failures.push(`Fixture PID ${child.pid} was not exposed as an authorized target`);
       if (target) {
         const listed = await adapter.execute({ kind: 'listElements', target });
         elements = listed.elements?.length ?? 0;
@@ -71,13 +75,36 @@ async function main(): Promise<void> {
           if (!observed) failures.push('Observation returned no PNG');
         }
       }
-      const receipt: Receipt = { platform: status.platform, status, target, elementCount: elements, focused, observed, failures };
+      const receipt: Receipt = {
+        platform: status.platform,
+        status,
+        target,
+        elementCount: elements,
+        focused,
+        observed,
+        failures,
+      };
       console.log(JSON.stringify({ output, ...receipt }, null, 2));
       if (failures.length) process.exitCode = 1;
     } catch (error) {
       failures.push(`Qualification action failed closed: ${String(error).slice(0, 1200)}`);
       const status = await adapter.status();
-      console.log(JSON.stringify({ output, platform: status.platform, status, target, elementCount: elements, focused, observed, failures }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            output,
+            platform: status.platform,
+            status,
+            target,
+            elementCount: elements,
+            focused,
+            observed,
+            failures,
+          },
+          null,
+          2,
+        ),
+      );
       process.exitCode = 1;
     }
   } finally {

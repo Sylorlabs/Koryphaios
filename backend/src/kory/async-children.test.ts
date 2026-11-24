@@ -8,7 +8,11 @@ import {
   type AsyncChildRecord,
 } from './async-children';
 
-function start(ledger: AsyncChildLedger, agentId: string, extra: Partial<{ compareGroupId: string; now: number }> = {}) {
+function start(
+  ledger: AsyncChildLedger,
+  agentId: string,
+  extra: Partial<{ compareGroupId: string; now: number }> = {},
+) {
   return ledger.start({
     agentId,
     task: `task for ${agentId}`,
@@ -29,7 +33,10 @@ describe('async child ledger', () => {
     const batch = ledger.claimPending('batch-1');
     expect(batch.map((record) => record.agentId)).toEqual(['b', 'a']);
     expect(ledger.claimPending('batch-2')).toEqual([]);
-    expect(ledger.markBatchDelivered('batch-1').map((record) => record.agentId)).toEqual(['b', 'a']);
+    expect(ledger.markBatchDelivered('batch-1').map((record) => record.agentId)).toEqual([
+      'b',
+      'a',
+    ]);
     expect(ledger.hasOutstanding()).toBe(false);
   });
 
@@ -59,7 +66,9 @@ describe('async child ledger', () => {
     ledger.settle('a', { status: 'completed', result: 'A' });
     const selected = ledger.selectForWait(undefined);
     expect(selected.records.map((record) => record.agentId)).toEqual(['a', 'b']);
-    const claimed = ledger.claimForWait(selected.records.filter((record) => record.status !== 'running'));
+    const claimed = ledger.claimForWait(
+      selected.records.filter((record) => record.status !== 'running'),
+    );
     expect(claimed.map((record) => record.agentId)).toEqual(['a']);
     expect(ledger.pending()).toEqual([]);
     expect(ledger.hasOutstanding()).toBe(true);
@@ -111,17 +120,33 @@ describe('compare groups', () => {
 
   test('attempts are recorded per group and re-recording an agent replaces it', () => {
     const groups = new CompareGroupLedger();
-    expect(groups.record('g1', { agentId: 'x', model: 'a:one', status: 'completed', result: 'r1' })).toBe(1);
-    expect(groups.record('g1', { agentId: 'y', model: 'a:two', status: 'failed', result: 'r2' })).toBe(2);
-    expect(groups.record('g1', { agentId: 'x', model: 'a:one', status: 'completed', result: 'r1b' })).toBe(2);
+    expect(
+      groups.record('g1', { agentId: 'x', model: 'a:one', status: 'completed', result: 'r1' }),
+    ).toBe(1);
+    expect(
+      groups.record('g1', { agentId: 'y', model: 'a:two', status: 'failed', result: 'r2' }),
+    ).toBe(2);
+    expect(
+      groups.record('g1', { agentId: 'x', model: 'a:one', status: 'completed', result: 'r1b' }),
+    ).toBe(2);
     expect(groups.attempts('g1').map((attempt) => attempt.result)).toEqual(['r1b', 'r2']);
     expect(groups.has('g2')).toBe(false);
   });
 
   test('a ranking section names every attempt and asks the critic to rank them', () => {
     const groups = new CompareGroupLedger();
-    groups.record('g1', { agentId: 'x', model: 'a:one', status: 'completed', result: 'first answer' });
-    groups.record('g1', { agentId: 'y', model: 'a:two', status: 'completed', result: 'second answer' });
+    groups.record('g1', {
+      agentId: 'x',
+      model: 'a:one',
+      status: 'completed',
+      result: 'first answer',
+    });
+    groups.record('g1', {
+      agentId: 'y',
+      model: 'a:two',
+      status: 'completed',
+      result: 'second answer',
+    });
     const section = groups.renderRankingSection('g1') ?? '';
     expect(section).toContain('COMPARE GROUP g1: 2 independent attempt(s)');
     expect(section).toContain('Attempt 1 (x, a:one, completed)');

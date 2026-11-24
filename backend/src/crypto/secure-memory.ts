@@ -304,7 +304,10 @@ export class SecureKeyStorage {
       await execAsync(`security delete-generic-password -s "${key}" 2>/dev/null`);
     } catch (err: unknown) {
       // Ignore if doesn't exist
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'macOS keychain entry does not exist, ignoring');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'macOS keychain entry does not exist, ignoring',
+      );
     }
 
     await execAsync(
@@ -321,7 +324,10 @@ export class SecureKeyStorage {
       const { stdout } = await execAsync(`security find-generic-password -s "${key}" -w`);
       return Buffer.from(stdout.trim(), 'base64').toString('utf8');
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'macOS keychain entry not found');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'macOS keychain entry not found',
+      );
       return null;
     }
   }
@@ -335,7 +341,10 @@ export class SecureKeyStorage {
       await execAsync(`security delete-generic-password -s "${key}"`);
     } catch (err: unknown) {
       // Ignore
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'macOS keychain entry already removed, ignoring');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'macOS keychain entry already removed, ignoring',
+      );
     }
   }
 
@@ -403,7 +412,10 @@ export class SecureKeyStorage {
       const envelope = secureEncryption.parse(serialized);
       return await secureEncryption.decrypt(envelope);
     } catch (err: unknown) {
-      serverLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'Failed to read or decrypt fallback key');
+      serverLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Failed to read or decrypt fallback key',
+      );
       return null;
     }
   }

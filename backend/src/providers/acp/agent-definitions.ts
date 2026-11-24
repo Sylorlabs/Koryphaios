@@ -7,10 +7,7 @@
 import { isAbsolute } from 'node:path';
 import type { AcpAgentProviderConfig } from '@koryphaios/shared';
 import type { AcpProbeVerdict } from './agent-store';
-import {
-  ACP_PERMISSION_PROFILES,
-  type AcpPermissionProfile,
-} from './protocol';
+import { ACP_PERMISSION_PROFILES, type AcpPermissionProfile } from './protocol';
 
 export type AcpAgentSource = 'manual' | 'registry' | 'autodetect';
 export type AcpCwdPolicy = 'workspace' | 'private';
@@ -208,7 +205,9 @@ export function toAcpAgentProviderConfig(
 }
 
 /** Project a stored probe verdict onto the provider-config probe shape. */
-export function toAcpProbeConfig(verdict: AcpProbeVerdict): NonNullable<AcpAgentProviderConfig['probe']> {
+export function toAcpProbeConfig(
+  verdict: AcpProbeVerdict,
+): NonNullable<AcpAgentProviderConfig['probe']> {
   return {
     ok: verdict.ok,
     checkedAt: verdict.checkedAt,

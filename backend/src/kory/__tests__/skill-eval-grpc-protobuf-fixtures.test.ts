@@ -161,7 +161,9 @@ decodeOld(encodeNew({ name: 'new', priority: 'HIGH', priorityNumeric: 2, unknown
     observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
   });
 
-   expect(score.evidence).toContain('representative compatibility tests with executable assertions: missing');
+  expect(score.evidence).toContain(
+    'representative compatibility tests with executable assertions: missing',
+  );
   expect(score.passed).toBe(false);
 });
 

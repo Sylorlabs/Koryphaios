@@ -109,11 +109,11 @@ still alive at quit, or timeout fails the attempt.
 
 The supervisor emits three nonzero exit codes:
 
-| Exit | `status` | Meaning |
-| --- | --- | --- |
-| 2 | `blocked` | Prerequisite missing; driver never started. |
-| 1 | `native-attempt-failed` | Driver or independent OS witness failed. |
-| 3 | `native-window-observed` | Packaged process, native window, relaunch and OS screenshots were witnessed; receipt passed **structural inspection only**. |
+| Exit | `status`                 | Meaning                                                                                                                     |
+| ---- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| 2    | `blocked`                | Prerequisite missing; driver never started.                                                                                 |
+| 1    | `native-attempt-failed`  | Driver or independent OS witness failed.                                                                                    |
+| 3    | `native-window-observed` | Packaged process, native window, relaunch and OS screenshots were witnessed; receipt passed **structural inspection only**. |
 
 Even at exit 3, `nativeDeviceVerified: false` and
 `scenarioQualified: false` remain mandatory. Dialogue interaction, symlink

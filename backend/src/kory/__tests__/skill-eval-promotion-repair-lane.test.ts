@@ -11,7 +11,10 @@ import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
 } from '../../eval/skills/skill-eval-fixtures';
-import { buildSkillEvalSuiteV3, type SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
+import {
+  buildSkillEvalSuiteV3,
+  type SkillEvalScenarioV3,
+} from '../../eval/skills/skill-eval-harness';
 import { loadV5SkillPackages } from '../skill-packages';
 import { hasRegressionText } from '../../eval/skills/skill-eval-fixture-helpers';
 
@@ -493,7 +496,8 @@ describe('regression evidence scan recognises the fixture language', () => {
 
   test('keeps the existing JavaScript convention working', () => {
     const root = fixture({
-      'tests/migrate.test.ts': 'test("rollback", () => { expect(foreign_key_check()).toBe(true); });\n',
+      'tests/migrate.test.ts':
+        'test("rollback", () => { expect(foreign_key_check()).toBe(true); });\n',
     });
     expect(hasRegressionText(root, patterns)).toBe(true);
   });
@@ -511,7 +515,9 @@ describe('mysql transfer scorer accepts the shape it documents', () => {
       (item) => item.id === 'mysql-engineering-full-task-2-individual',
     )!;
     const materializer = BUILTIN_SKILL_EVAL_MATERIALIZERS.find((item) => item.matches(scenario))!;
-    const scorer = BUILTIN_SKILL_EVAL_SCORERS.find((item) => item.scenarioIds.includes(scenario.id))!;
+    const scorer = BUILTIN_SKILL_EVAL_SCORERS.find((item) =>
+      item.scenarioIds.includes(scenario.id),
+    )!;
     const root = mkdtempSync(join(tmpdir(), 'kory-mysql-shape-'));
     roots.push(root);
     await materializer.materialize(root, scenario);
@@ -533,11 +539,14 @@ describe('mysql transfer scorer accepts the shape it documents', () => {
 test('opposite direction concurrent retry and idempotency',()=>{expect('lock order retry exhaust rollback insufficient opposite concurrent').toBeTruthy();});
 `,
     );
-    const score = () => scorer.score({
-      scenario, experiment: {} as never, workingDirectory: root, observation: {} as never,
-    });
-    const writeTransfer = (body: string) =>
-      writeFileSync(join(root, 'src/transfer.ts'), body);
+    const score = () =>
+      scorer.score({
+        scenario,
+        experiment: {} as never,
+        workingDirectory: root,
+        observation: {} as never,
+      });
+    const writeTransfer = (body: string) => writeFileSync(join(root, 'src/transfer.ts'), body);
     return { root, score, writeTransfer };
   };
 
@@ -569,10 +578,8 @@ export class TransferStore {
 
   test('a transfer without idempotency still fails the hidden contract', async () => {
     const { score, writeTransfer } = await fixture();
-    writeTransfer(store(false).replace('if (this.ledger.has(id)) return \'ok\';', ''));
-    expect((await score()).evidence.join('\n')).toContain(
-      'transfer/idempotency/lock order: fail',
-    );
+    writeTransfer(store(false).replace("if (this.ledger.has(id)) return 'ok';", ''));
+    expect((await score()).evidence.join('\n')).toContain('transfer/idempotency/lock order: fail');
   });
 });
 
@@ -588,7 +595,9 @@ describe('sqlite copy-table migration scorer grades against the supplied legacy 
       (item) => item.id === 'sqlite-engineering-full-task-2-individual',
     )!;
     const materializer = BUILTIN_SKILL_EVAL_MATERIALIZERS.find((item) => item.matches(scenario))!;
-    const scorer = BUILTIN_SKILL_EVAL_SCORERS.find((item) => item.scenarioIds.includes(scenario.id))!;
+    const scorer = BUILTIN_SKILL_EVAL_SCORERS.find((item) =>
+      item.scenarioIds.includes(scenario.id),
+    )!;
     const root = mkdtempSync(join(tmpdir(), 'kory-sqlite-schema-'));
     roots.push(root);
     await materializer.materialize(root, scenario);
@@ -647,7 +656,10 @@ def test_bad_row_is_rejected_by_constraint():
       }),
     );
     const result = await scorer.score({
-      scenario, experiment: {} as never, workingDirectory: root, observation: {} as never,
+      scenario,
+      experiment: {} as never,
+      workingDirectory: root,
+      observation: {} as never,
     });
     expect(result.evidence.join('\n')).toContain('copy-table migration behavior: pass');
     expect(result.evidence.join('\n')).toContain('rollback/integrity regressions: present');

@@ -187,9 +187,13 @@ function createShortcutStore() {
     // instead of disappearing whenever the remote copy is applied.
     const remoteIds = new Set(remote.map((shortcut) => shortcut.id));
     const localOnly = shortcuts.filter((shortcut) => !remoteIds.has(shortcut.id));
-    const merged = [...remote, ...localOnly.map((shortcut) => ({ ...shortcut, keys: [...shortcut.keys] }))];
+    const merged = [
+      ...remote,
+      ...localOnly.map((shortcut) => ({ ...shortcut, keys: [...shortcut.keys] })),
+    ];
     for (const def of defaultShortcuts) {
-      if (!merged.some((shortcut) => shortcut.id === def.id)) merged.push({ ...def, keys: [...def.keys] });
+      if (!merged.some((shortcut) => shortcut.id === def.id))
+        merged.push({ ...def, keys: [...def.keys] });
     }
     shortcuts = merged;
     persistLocal();

@@ -59,7 +59,8 @@ const specs = [
   },
   {
     name: 'computer_double_click',
-    description: 'Double-click an elementId, or use window-relative x/y as a fallback. Refresh elements after UI changes.',
+    description:
+      'Double-click an elementId, or use window-relative x/y as a fallback. Refresh elements after UI changes.',
     capability: 'interact',
     properties: {
       ...targetProperties,
@@ -83,7 +84,8 @@ const specs = [
   },
   {
     name: 'computer_drag',
-    description: 'Drag through a bounded window-relative path. An optional elementId anchors the start precisely; the path supplies the destination.',
+    description:
+      'Drag through a bounded window-relative path. An optional elementId anchors the start precisely; the path supplies the destination.',
     capability: 'interact',
     properties: {
       ...targetProperties,
@@ -140,7 +142,11 @@ const specs = [
     description:
       'Send a key/chord to the authorized target, optionally focusing elementId first. Use Mod for the platform primary modifier, e.g. Mod+A, Enter, Tab, Escape, ArrowDown.',
     capability: 'interact',
-    properties: { ...targetProperties, ...elementProperty, key: { type: 'string', minLength: 1, maxLength: 80 } },
+    properties: {
+      ...targetProperties,
+      ...elementProperty,
+      key: { type: 'string', minLength: 1, maxLength: 80 },
+    },
     required: ['appId', 'windowId', 'key'],
   },
   {
@@ -148,13 +154,17 @@ const specs = [
     description:
       'Scroll the authorized control/window. Prefer elementId; positive delta scrolls down, negative up.',
     capability: 'interact',
-    properties: { ...targetProperties, ...elementProperty, delta: { type: 'integer', minimum: -100, maximum: 100 } },
+    properties: {
+      ...targetProperties,
+      ...elementProperty,
+      delta: { type: 'integer', minimum: -100, maximum: 100 },
+    },
     required: ['appId', 'windowId', 'delta'],
   },
   {
     name: 'computer_place_window',
     description:
-      'Move an authorized window off screen so a task can run out of the person\'s way, or put it back where it was. Input is still directed to the window and observations still work; the window is simply not visible to the person.',
+      "Move an authorized window off screen so a task can run out of the person's way, or put it back where it was. Input is still directed to the window and observations still work; the window is simply not visible to the person.",
     capability: 'manageWindows',
     properties: { ...targetProperties, hidden: { type: 'boolean' } },
     required: ['appId', 'windowId', 'hidden'],
@@ -296,14 +306,26 @@ export function createComputerUseTools(deps: ComputerUseToolDependencies = {}): 
     async run(ctx, call): Promise<ToolCallOutput> {
       const started = Date.now();
       const receipt: ComputerUseReceipt = {
-        version: 1, action: spec.name, status: 'failed', message: '',
+        version: 1,
+        action: spec.name,
+        status: 'failed',
+        message: '',
       };
       try {
         validateInput(call.input, spec);
         // Approval binds immutable primitive arguments, never a caller-owned mutable object.
         const input = structuredClone(call.input);
         // An explicit allowlist keeps typed content and arbitrary payloads out of display evidence.
-        for (const key of ['elementId', 'x', 'y', 'button', 'path', 'key', 'delta', 'ms'] as const) {
+        for (const key of [
+          'elementId',
+          'x',
+          'y',
+          'button',
+          'path',
+          'key',
+          'delta',
+          'ms',
+        ] as const) {
           if (input[key] !== undefined) Object.assign(receipt, { [key]: input[key] });
         }
         if (typeof input.text === 'string') receipt.textLength = [...input.text].length;
@@ -330,7 +352,8 @@ export function createComputerUseTools(deps: ComputerUseToolDependencies = {}): 
             const check = () => {
               signal.throwIfAborted();
               const settings = load(ctx);
-              const tier = ctx.permissionPolicy?.interactionMode === 'plan' ? 'ask' : settings.permissionMode;
+              const tier =
+                ctx.permissionPolicy?.interactionMode === 'plan' ? 'ask' : settings.permissionMode;
               const decision = decideComputerPermission(
                 settings.computerUse,
                 tier,
@@ -402,7 +425,9 @@ export function createComputerUseTools(deps: ComputerUseToolDependencies = {}): 
                     kind: 'doubleClick',
                     target: resolved,
                     ...(input.elementId ? { elementId: input.elementId as string } : {}),
-                    ...(input.x !== undefined ? { x: input.x as number, y: input.y as number } : {}),
+                    ...(input.x !== undefined
+                      ? { x: input.x as number, y: input.y as number }
+                      : {}),
                   };
                   break;
                 case 'computer_move':
@@ -410,7 +435,9 @@ export function createComputerUseTools(deps: ComputerUseToolDependencies = {}): 
                     kind: 'move',
                     target: resolved,
                     ...(input.elementId ? { elementId: input.elementId as string } : {}),
-                    ...(input.x !== undefined ? { x: input.x as number, y: input.y as number } : {}),
+                    ...(input.x !== undefined
+                      ? { x: input.x as number, y: input.y as number }
+                      : {}),
                   };
                   break;
                 case 'computer_drag':
@@ -425,9 +452,13 @@ export function createComputerUseTools(deps: ComputerUseToolDependencies = {}): 
                   action = {
                     kind: 'click',
                     target: resolved,
-                    ...(input.button ? { button: input.button as 'left' | 'right' | 'middle' } : {}),
+                    ...(input.button
+                      ? { button: input.button as 'left' | 'right' | 'middle' }
+                      : {}),
                     ...(input.elementId ? { elementId: input.elementId as string } : {}),
-                    ...(input.x !== undefined ? { x: input.x as number, y: input.y as number } : {}),
+                    ...(input.x !== undefined
+                      ? { x: input.x as number, y: input.y as number }
+                      : {}),
                   };
                   break;
                 case 'computer_type':
@@ -464,7 +495,9 @@ export function createComputerUseTools(deps: ComputerUseToolDependencies = {}): 
                   action = {
                     kind: 'sequence',
                     steps: input.steps as import('@koryphaios/shared').ComputerStep[],
-                    ...(input.observationId ? { observationId: input.observationId as string } : {}),
+                    ...(input.observationId
+                      ? { observationId: input.observationId as string }
+                      : {}),
                     ...(input.background ? { background: true } : {}),
                   };
                   break;
@@ -504,18 +537,27 @@ export function createComputerUseTools(deps: ComputerUseToolDependencies = {}): 
             receipt.status = 'completed';
             receipt.message = redactSecretsInText(native.text ?? 'Completed', 2000);
             if (action.kind === 'discover') receipt.targets = native.targets ?? [];
-            if (action.kind === 'listElements') receipt.elements = (native.elements ?? []).map(
-              ({ elementId, role, name, enabled, actions }) => ({ elementId, role, name, enabled, actions }),
-            );
-            if (native.imageBase64) receipt.screenshot = computerScreenshots.put(ctx.sessionId, native.imageBase64);
+            if (action.kind === 'listElements')
+              receipt.elements = (native.elements ?? []).map(
+                ({ elementId, role, name, enabled, actions }) => ({
+                  elementId,
+                  role,
+                  name,
+                  enabled,
+                  actions,
+                }),
+              );
+            if (native.imageBase64)
+              receipt.screenshot = computerScreenshots.put(ctx.sessionId, native.imageBase64);
             return {
-              output: JSON.stringify(
-                { computerUse: receipt, ...(action.kind === 'discover'
+              output: JSON.stringify({
+                computerUse: receipt,
+                ...(action.kind === 'discover'
                   ? { targets: native.targets ?? [] }
                   : action.kind === 'listElements'
                     ? { elements: native.elements ?? [], target }
-                    : { text: native.text ?? 'Completed', target }) },
-              ),
+                    : { text: native.text ?? 'Completed', target }),
+              }),
               ...(native.imageBase64
                 ? { images: [{ mimeType: 'image/png', data: native.imageBase64 }] }
                 : {}),
@@ -533,7 +575,10 @@ export function createComputerUseTools(deps: ComputerUseToolDependencies = {}): 
         };
       } catch (error) {
         receipt.status = 'failed';
-        receipt.message = redactSecretsInText(error instanceof Error ? error.message : 'Computer use failed', 2000);
+        receipt.message = redactSecretsInText(
+          error instanceof Error ? error.message : 'Computer use failed',
+          2000,
+        );
         return {
           callId: call.id,
           name: spec.name,

@@ -5,25 +5,13 @@
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "ai",
-    "ml",
-    "audio",
-    "speech"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["ai", "ml", "audio", "speech"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 7000,
-  "broader": [
-    "implementation"
-  ],
+  "broader": ["implementation"],
   "facets": [],
-  "requires": [
-    "verification",
-    "ml-evaluation"
-  ],
+  "requires": ["verification", "ml-evaluation"],
   "conflicts": [],
   "activation": [
     "speech recognition",
@@ -94,13 +82,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "agentic-systems"
-        ],
-        "tags": [
-          "ambiguous",
-          "neighbor-boundary"
-        ]
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["ambiguous", "neighbor-boundary"]
       },
       {
         "id": "speech-audio-ai-ambiguous-2",
@@ -108,13 +91,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "fine-tuning-training"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["fine-tuning-training"],
+        "tags": ["ambiguous", "scope-control"]
       },
       {
         "id": "speech-audio-ai-ambiguous-3",
@@ -122,13 +100,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "embedding-systems"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["embedding-systems"],
+        "tags": ["ambiguous", "scope-control"]
       }
     ],
     "adversarial": [
@@ -138,13 +111,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "implementation"
-        ],
-        "tags": [
-          "adversarial",
-          "quoted-decoy"
-        ]
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "quoted-decoy"]
       },
       {
         "id": "speech-audio-ai-adversarial-2",
@@ -152,13 +120,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "documentation"
-        ],
-        "tags": [
-          "adversarial",
-          "inert-evidence"
-        ]
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "inert-evidence"]
       },
       {
         "id": "speech-audio-ai-adversarial-3",
@@ -166,13 +129,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "documentation"
-        ],
-        "tags": [
-          "adversarial",
-          "filename-decoy"
-        ]
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "filename-decoy"]
       }
     ]
   },

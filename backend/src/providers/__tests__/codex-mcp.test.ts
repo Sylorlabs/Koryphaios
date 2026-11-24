@@ -49,27 +49,60 @@ describe('serializeCodexMcpProfile', () => {
 
 describe('codexJsonEvents MCP items (display-only, never re-executed)', () => {
   it('keeps structured results and marks missing names as unknown', () => {
-    const { events } = codexJsonEvents({ type: 'item.completed', item: {
-      type: 'mcp_tool_call', server: 'kory', arguments: '{"path":"a.ts"}',
-      result: { content: [{ type: 'text', text: 'contents' }] },
-    } }, []);
+    const { events } = codexJsonEvents(
+      {
+        type: 'item.completed',
+        item: {
+          type: 'mcp_tool_call',
+          server: 'kory',
+          arguments: '{"path":"a.ts"}',
+          result: { content: [{ type: 'text', text: 'contents' }] },
+        },
+      },
+      [],
+    );
     expect(events[0]?.toolName).toBeUndefined();
     expect(events[0]?.toolInput).toBe('{"path":"a.ts"}');
-    expect(JSON.parse(events[0]!.toolOutput!)).toEqual({ content: [{ type: 'text', text: 'contents' }] });
+    expect(JSON.parse(events[0]!.toolOutput!)).toEqual({
+      content: [{ type: 'text', text: 'contents' }],
+    });
   });
 
   it('prefers exact native tool identifiers to protocol categories', () => {
-    const { events } = codexJsonEvents({ type: 'item.completed', item: {
-      type: 'command_execution', tool_name: 'exec_command', command: 'git status', aggregated_output: 'clean', exit_code: 0,
-    } }, []);
-    expect(events[0]).toMatchObject({ type: 'tool_executed', toolName: 'exec_command', toolInput: '{"command":"git status"}', toolOutput: 'clean' });
+    const { events } = codexJsonEvents(
+      {
+        type: 'item.completed',
+        item: {
+          type: 'command_execution',
+          tool_name: 'exec_command',
+          command: 'git status',
+          aggregated_output: 'clean',
+          exit_code: 0,
+        },
+      },
+      [],
+    );
+    expect(events[0]).toMatchObject({
+      type: 'tool_executed',
+      toolName: 'exec_command',
+      toolInput: '{"command":"git status"}',
+      toolOutput: 'clean',
+    });
   });
 
   it('retains the MCP result failure flag', () => {
-    const { events } = codexJsonEvents({ type: 'item.completed', item: {
-      type: 'mcp_tool_call', server: 'kory', tool_name: 'kory__read_file',
-      result: { isError: true, content: [{ type: 'text', text: 'denied' }] },
-    } }, []);
+    const { events } = codexJsonEvents(
+      {
+        type: 'item.completed',
+        item: {
+          type: 'mcp_tool_call',
+          server: 'kory',
+          tool_name: 'kory__read_file',
+          result: { isError: true, content: [{ type: 'text', text: 'denied' }] },
+        },
+      },
+      [],
+    );
     expect(events[0]).toMatchObject({ toolName: 'mcp__kory__kory__read_file', isError: true });
   });
 

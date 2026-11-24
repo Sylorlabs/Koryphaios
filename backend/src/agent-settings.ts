@@ -598,8 +598,8 @@ export function loadAgentSettings(projectRoot: string): AgentSettings {
       persistedSettings?.worktreeMode === 'auto'
         ? persistedSettings.worktreeMode
         : // Legacy persisted boolean: on was the auto default, off meant never.
-          (persistedSettings as { worktreeIsolation?: boolean } | undefined)
-            ?.worktreeIsolation === false
+          (persistedSettings as { worktreeIsolation?: boolean } | undefined)?.worktreeIsolation ===
+            false
           ? 'never'
           : 'auto',
     sandbox: mergeSandboxSettings(DEFAULT_AGENT_SETTINGS.sandbox, persistedSettings?.sandbox),

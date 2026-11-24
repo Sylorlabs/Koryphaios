@@ -2,7 +2,18 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
-import { appendFileSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
 import { canonicalizePath, directoryLinkType, findExecutableOnPath } from '../../runtime/platform';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -27,39 +38,50 @@ afterEach(() => {
 });
 
 describe('public contract capture reader', () => {
-  const unavailable = { available: false, sha256: null, byteLength: 0, text: null, reason: 'not-present' };
+  const unavailable = {
+    available: false,
+    sha256: null,
+    byteLength: 0,
+    text: null,
+    reason: 'not-present',
+  };
   function fixture() {
     const root = canonicalizePath(mkdtempSync(join(tmpdir(), 'kory-public-capture-')));
     cleanups.push(() => rmSync(root, { recursive: true, force: true }));
     return { root, path: join(root, 'README.md') };
   }
 
-  for (const mutation of ['replacement', 'symlink', 'growth'] as const) test(`refuses ${mutation} after the initial pathname stat`, () => {
-    const { root, path } = fixture();
-    writeFileSync(path, 'original');
-    const target = join(root, 'outside-canary');
-    writeFileSync(target, 'replacement must not become public evidence');
-    const original = fs.lstatSync;
-    let changed = false;
-    const stat = spyOn(fs, 'lstatSync').mockImplementation(((...args: Parameters<typeof fs.lstatSync>) => {
-      const result = original(...args);
-      if (args[0] === path && !changed) {
-        changed = true;
-        if (mutation === 'growth') appendFileSync(path, 'concurrent-growth');
-        else {
-          rmSync(path);
-          if (mutation === 'symlink') symlinkSync(target, path);
-          else writeFileSync(path, 'replacement must not become public evidence');
+  for (const mutation of ['replacement', 'symlink', 'growth'] as const)
+    test(`refuses ${mutation} after the initial pathname stat`, () => {
+      const { root, path } = fixture();
+      writeFileSync(path, 'original');
+      const target = join(root, 'outside-canary');
+      writeFileSync(target, 'replacement must not become public evidence');
+      const original = fs.lstatSync;
+      let changed = false;
+      const stat = spyOn(fs, 'lstatSync').mockImplementation(((
+        ...args: Parameters<typeof fs.lstatSync>
+      ) => {
+        const result = original(...args);
+        if (args[0] === path && !changed) {
+          changed = true;
+          if (mutation === 'growth') appendFileSync(path, 'concurrent-growth');
+          else {
+            rmSync(path);
+            if (mutation === 'symlink') symlinkSync(target, path);
+            else writeFileSync(path, 'replacement must not become public evidence');
+          }
         }
+        return result;
+      }) as typeof fs.lstatSync);
+      try {
+        const snapshot = captureSkillEvalPublicContractSnapshot(root, 'task');
+        expect(changed).toBe(true);
+        expect(snapshot.fixtureFiles['README.md']).toEqual(unavailable);
+      } finally {
+        stat.mockRestore();
       }
-      return result;
-    }) as typeof fs.lstatSync);
-    try {
-      const snapshot = captureSkillEvalPublicContractSnapshot(root, 'task');
-      expect(changed).toBe(true);
-      expect(snapshot.fixtureFiles['README.md']).toEqual(unavailable);
-    } finally { stat.mockRestore(); }
-  });
+    });
 
   test('keeps exact UTF-8 bytes, raw hashes, empty files, and frozen before-execution evidence', () => {
     const { root, path } = fixture();
@@ -70,92 +92,134 @@ describe('public contract capture reader', () => {
     writeFileSync(join(root, 'contract.json'), Buffer.alloc(0));
     const snapshot = captureSkillEvalPublicContractSnapshot(root, prompt);
     expect(snapshot.fixtureFiles['README.md']).toEqual({
-      available: true, sha256: createHash('sha256').update(bytes).digest('hex'), byteLength: bytes.length, text,
+      available: true,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      byteLength: bytes.length,
+      text,
     });
     expect(snapshot.fixtureFiles['contract.json']).toEqual({
-      available: true, sha256: createHash('sha256').update(Buffer.alloc(0)).digest('hex'), byteLength: 0, text: '',
+      available: true,
+      sha256: createHash('sha256').update(Buffer.alloc(0)).digest('hex'),
+      byteLength: 0,
+      text: '',
     });
     expect(snapshot.taskPrompt).toEqual({
-      available: true, sha256: createHash('sha256').update(Buffer.from(prompt)).digest('hex'), byteLength: Buffer.byteLength(prompt), text: prompt,
+      available: true,
+      sha256: createHash('sha256').update(Buffer.from(prompt)).digest('hex'),
+      byteLength: Buffer.byteLength(prompt),
+      text: prompt,
     });
-    for (const value of [snapshot, snapshot.taskPrompt, snapshot.fixtureFiles, ...Object.values(snapshot.fixtureFiles)]) {
+    for (const value of [
+      snapshot,
+      snapshot.taskPrompt,
+      snapshot.fixtureFiles,
+      ...Object.values(snapshot.fixtureFiles),
+    ]) {
       expect(Object.isFrozen(value)).toBe(true);
     }
     writeFileSync(path, 'later candidate mutation');
     expect(snapshot.fixtureFiles['README.md'].text).toBe(text);
   });
 
-  for (const kind of ['missing', 'directory', 'symlink', 'invalid-utf8', 'oversized'] as const) test(`marks ${kind} unavailable without truncating or inventing content`, () => {
-    const { root, path } = fixture();
-    if (kind === 'directory') mkdirSync(path);
-    else if (kind === 'symlink') {
-      const target = join(root, 'outside-canary');
-      writeFileSync(target, 'not public evidence');
-      symlinkSync(target, path);
-    } else if (kind === 'invalid-utf8') writeFileSync(path, Buffer.from([0xff, 0xfe]));
-    else if (kind === 'oversized') {
-      writeFileSync(path, 'small');
-      truncateSync(path, 67_108_865); // Sparse fixture: exceeds the 64 MiB contract by one byte.
-    }
-    expect(captureSkillEvalPublicContractSnapshot(root, 'task').fixtureFiles['README.md']).toEqual(unavailable);
-  });
-
-  for (const mutation of ['grow', 'truncate', 'replace-path'] as const) test(`rejects concurrent ${mutation} during a bounded descriptor read`, () => {
-    const { root, path } = fixture();
-    writeFileSync(path, 'original');
-    const original = fs.readSync;
-    const lengths: number[] = [];
-    let changed = false;
-    const read = spyOn(fs, 'readSync').mockImplementation((fd: number, buffer: NodeJS.ArrayBufferView,
-      offsetOrOptions?: number | fs.ReadOptions, length?: number, position?: fs.ReadPosition | null) => {
-      if (typeof offsetOrOptions === 'number') lengths.push(length!);
-      if (!changed) {
-        changed = true;
-        if (mutation === 'grow') appendFileSync(path, Buffer.alloc(100_000, 32));
-        else if (mutation === 'truncate') truncateSync(path, 3);
-        else { rmSync(path); writeFileSync(path, 'original'); }
+  for (const kind of ['missing', 'directory', 'symlink', 'invalid-utf8', 'oversized'] as const)
+    test(`marks ${kind} unavailable without truncating or inventing content`, () => {
+      const { root, path } = fixture();
+      if (kind === 'directory') mkdirSync(path);
+      else if (kind === 'symlink') {
+        const target = join(root, 'outside-canary');
+        writeFileSync(target, 'not public evidence');
+        symlinkSync(target, path);
+      } else if (kind === 'invalid-utf8') writeFileSync(path, Buffer.from([0xff, 0xfe]));
+      else if (kind === 'oversized') {
+        writeFileSync(path, 'small');
+        truncateSync(path, 67_108_865); // Sparse fixture: exceeds the 64 MiB contract by one byte.
       }
-      return typeof offsetOrOptions === 'number'
-        ? original(fd, buffer, offsetOrOptions, length!, position ?? null)
-        : original(fd, buffer, offsetOrOptions);
+      expect(
+        captureSkillEvalPublicContractSnapshot(root, 'task').fixtureFiles['README.md'],
+      ).toEqual(unavailable);
     });
-    try {
-      expect(captureSkillEvalPublicContractSnapshot(root, 'task').fixtureFiles['README.md']).toEqual(unavailable);
-      expect(changed).toBe(true);
-      expect(lengths[0]).toBe(9);
-      expect(Math.max(...lengths)).toBeLessThanOrEqual(9);
-    } finally { read.mockRestore(); }
-  });
+
+  for (const mutation of ['grow', 'truncate', 'replace-path'] as const)
+    test(`rejects concurrent ${mutation} during a bounded descriptor read`, () => {
+      const { root, path } = fixture();
+      writeFileSync(path, 'original');
+      const original = fs.readSync;
+      const lengths: number[] = [];
+      let changed = false;
+      const read = spyOn(fs, 'readSync').mockImplementation(
+        (
+          fd: number,
+          buffer: NodeJS.ArrayBufferView,
+          offsetOrOptions?: number | fs.ReadOptions,
+          length?: number,
+          position?: fs.ReadPosition | null,
+        ) => {
+          if (typeof offsetOrOptions === 'number') lengths.push(length!);
+          if (!changed) {
+            changed = true;
+            if (mutation === 'grow') appendFileSync(path, Buffer.alloc(100_000, 32));
+            else if (mutation === 'truncate') truncateSync(path, 3);
+            else {
+              rmSync(path);
+              writeFileSync(path, 'original');
+            }
+          }
+          return typeof offsetOrOptions === 'number'
+            ? original(fd, buffer, offsetOrOptions, length!, position ?? null)
+            : original(fd, buffer, offsetOrOptions);
+        },
+      );
+      try {
+        expect(
+          captureSkillEvalPublicContractSnapshot(root, 'task').fixtureFiles['README.md'],
+        ).toEqual(unavailable);
+        expect(changed).toBe(true);
+        expect(lengths[0]).toBe(9);
+        expect(Math.max(...lengths)).toBeLessThanOrEqual(9);
+      } finally {
+        read.mockRestore();
+      }
+    });
 
   const mkfifo = findExecutableOnPath('mkfifo');
-  (mkfifo ? test : test.skip)('refuses a real FIFO replacement before open without blocking', () => {
-    const { root, path } = fixture();
-    writeFileSync(path, 'original');
-    const original = fs.openSync;
-    let flags = 0;
-    let changed = false;
-    let created = false;
-    const open = spyOn(fs, 'openSync').mockImplementation((...args: Parameters<typeof fs.openSync>) => {
-      if (args[0] === path && !changed) {
-        changed = true;
-        flags = args[1] as number;
-        // Guard before opening so this regression cannot hang on an unsafe reader;
-        // assertions stay outside capture's catch so a swallowed error cannot pass.
-        if (!(flags & constants.O_NONBLOCK) || !(flags & constants.O_NOFOLLOW)) throw new Error('Unsafe FIFO open');
-        rmSync(path);
-        const result = spawnSync(mkfifo!, [path], { timeout: 1000, stdio: 'ignore' });
-        created = result.status === 0;
+  (mkfifo ? test : test.skip)(
+    'refuses a real FIFO replacement before open without blocking',
+    () => {
+      const { root, path } = fixture();
+      writeFileSync(path, 'original');
+      const original = fs.openSync;
+      let flags = 0;
+      let changed = false;
+      let created = false;
+      const open = spyOn(fs, 'openSync').mockImplementation(
+        (...args: Parameters<typeof fs.openSync>) => {
+          if (args[0] === path && !changed) {
+            changed = true;
+            flags = args[1] as number;
+            // Guard before opening so this regression cannot hang on an unsafe reader;
+            // assertions stay outside capture's catch so a swallowed error cannot pass.
+            if (!(flags & constants.O_NONBLOCK) || !(flags & constants.O_NOFOLLOW))
+              throw new Error('Unsafe FIFO open');
+            rmSync(path);
+            const result = spawnSync(mkfifo!, [path], { timeout: 1000, stdio: 'ignore' });
+            created = result.status === 0;
+          }
+          return original(...args);
+        },
+      );
+      try {
+        expect(
+          captureSkillEvalPublicContractSnapshot(root, 'task').fixtureFiles['README.md'],
+        ).toEqual(unavailable);
+        expect(changed).toBe(true);
+        expect(created).toBe(true);
+        expect(flags & constants.O_NONBLOCK).toBe(constants.O_NONBLOCK);
+        expect(flags & constants.O_NOFOLLOW).toBe(constants.O_NOFOLLOW);
+      } finally {
+        open.mockRestore();
       }
-      return original(...args);
-    });
-    try {
-      expect(captureSkillEvalPublicContractSnapshot(root, 'task').fixtureFiles['README.md']).toEqual(unavailable);
-      expect(changed).toBe(true);
-      expect(created).toBe(true);
-      expect(flags & constants.O_NONBLOCK).toBe(constants.O_NONBLOCK);
-      expect(flags & constants.O_NOFOLLOW).toBe(constants.O_NOFOLLOW);
-    } finally { open.mockRestore(); }
-  });
+    },
+  );
 });
 
 describe('V5 skill evaluation execution', () => {
@@ -186,25 +250,32 @@ describe('V5 skill evaluation execution', () => {
     const projectRoot = mkdtempSync(join(tmpdir(), 'kory-regression-link-control-'));
     cleanups.push(() => rmSync(projectRoot, { recursive: true, force: true }));
     let calls = 0;
-    await expect(runPairedSkillEvaluationV3({
-      projectRoot,
-      skillPackage,
-      scenarioId: scenario.id,
-      skillRevisionHash: 'a'.repeat(64),
-      harnessVersion: 'regression-link-control',
-      regressionId: 'unobserved-failure',
-      materializers: [materializer],
-      scorers: [scorer],
-      executor: {
-        id: 'should-not-dispatch', subject: 'other', provider: 'synthetic',
-        model: 'control', runtimeIdentity: 'test', tools: [], budget: { wallClockMs: 1000 },
-        execute: async () => {
-          calls++;
-          return { output: '', evidence: [], artifacts: [], durationMs: 0 };
+    await expect(
+      runPairedSkillEvaluationV3({
+        projectRoot,
+        skillPackage,
+        scenarioId: scenario.id,
+        skillRevisionHash: 'a'.repeat(64),
+        harnessVersion: 'regression-link-control',
+        regressionId: 'unobserved-failure',
+        materializers: [materializer],
+        scorers: [scorer],
+        executor: {
+          id: 'should-not-dispatch',
+          subject: 'other',
+          provider: 'synthetic',
+          model: 'control',
+          runtimeIdentity: 'test',
+          tools: [],
+          budget: { wallClockMs: 1000 },
+          execute: async () => {
+            calls++;
+            return { output: '', evidence: [], artifacts: [], durationMs: 0 };
+          },
         },
-      },
-      persist: true,
-    })).rejects.toThrow('regression source is not open for this task');
+        persist: true,
+      }),
+    ).rejects.toThrow('regression source is not open for this task');
     expect(calls).toBe(0);
     expect(listSkillEvaluationRuns(projectRoot)).toHaveLength(0);
   });
@@ -252,13 +323,15 @@ describe('V5 skill evaluation execution', () => {
         skillRevisionHash: 'a'.repeat(64),
         harnessVersion: 'missing-runtime-gate-test',
         materializers,
-        scorers: [{
-          ...scorer,
-          score: (context) => {
-            calls.push('score');
-            return scorer.score(context);
+        scorers: [
+          {
+            ...scorer,
+            score: (context) => {
+              calls.push('score');
+              return scorer.score(context);
+            },
           },
-        }],
+        ],
         executor: {
           id: 'must-not-run',
           subject: 'other',
@@ -437,37 +510,52 @@ describe('V5 skill evaluation execution', () => {
     const artifactsParent = join(projectRoot, '.koryphaios', 'skills');
     mkdirSync(artifactsParent, { recursive: true });
     let archivePath = '';
-    await expect(runPairedSkillEvaluationV3({
-      projectRoot,
-      skillPackage,
-      scenarioId: scenario.id,
-      skillRevisionHash: 'a'.repeat(64),
-      harnessVersion: 'native-archive-boundary-test',
-      evaluationContractHash: 'a'.repeat(16),
-      evaluationContractVersion: 1,
-      pairId: 'native-archive-boundary',
-      materializers: [materializer],
-      scorers: [scorer],
-      persist: true,
-      executor: {
-        id: 'native-archive-boundary', subject: 'other', provider: 'native-cli',
-        model: 'gpt-6.1-sol', runtimeIdentity: 'test', tools: [],
-        budget: { wallClockMs: 1_000 },
-        execute: async ({ workingDirectory }) => {
-          const candidateRoot = join(workingDirectory, '..', 'without-skill');
-          symlinkSync(candidateRoot, join(artifactsParent, 'eval-artifacts'), directoryLinkType());
-          archivePath = join(candidateRoot, 'native-archive-boundary', 'with-skill', 'native-text-events.jsonl');
-          const observation = { output: 'done', evidence: [], artifacts: [], durationMs: 1 };
-          Object.defineProperty(observation, 'nativeTextEventStream', {
-            value: Buffer.from('private raw native stream'),
-          });
-          return observation;
+    await expect(
+      runPairedSkillEvaluationV3({
+        projectRoot,
+        skillPackage,
+        scenarioId: scenario.id,
+        skillRevisionHash: 'a'.repeat(64),
+        harnessVersion: 'native-archive-boundary-test',
+        evaluationContractHash: 'a'.repeat(16),
+        evaluationContractVersion: 1,
+        pairId: 'native-archive-boundary',
+        materializers: [materializer],
+        scorers: [scorer],
+        persist: true,
+        executor: {
+          id: 'native-archive-boundary',
+          subject: 'other',
+          provider: 'native-cli',
+          model: 'gpt-6.1-sol',
+          runtimeIdentity: 'test',
+          tools: [],
+          budget: { wallClockMs: 1_000 },
+          execute: async ({ workingDirectory }) => {
+            const candidateRoot = join(workingDirectory, '..', 'without-skill');
+            symlinkSync(
+              candidateRoot,
+              join(artifactsParent, 'eval-artifacts'),
+              directoryLinkType(),
+            );
+            archivePath = join(
+              candidateRoot,
+              'native-archive-boundary',
+              'with-skill',
+              'native-text-events.jsonl',
+            );
+            const observation = { output: 'done', evidence: [], artifacts: [], durationMs: 1 };
+            Object.defineProperty(observation, 'nativeTextEventStream', {
+              value: Buffer.from('private raw native stream'),
+            });
+            return observation;
+          },
         },
-      },
-    }).then((result) => {
-      cleanups.push(result.cleanup);
-      return result;
-    })).rejects.toThrow('Native text event archive must be outside the evaluation workspace');
+      }).then((result) => {
+        cleanups.push(result.cleanup);
+        return result;
+      }),
+    ).rejects.toThrow('Native text event archive must be outside the evaluation workspace');
     expect(archivePath).not.toBe('');
     expect(existsSync(archivePath)).toBe(false);
     expect(listSkillEvaluationRuns(projectRoot)).toEqual([]);
@@ -806,8 +894,7 @@ describe('V5 skill evaluation execution', () => {
     const registeredRealRuntimeScenarioIds = readiness
       .filter(
         (item) =>
-          item.materializerId !== null &&
-          realRuntimeMaterializerIds.has(item.materializerId),
+          item.materializerId !== null && realRuntimeMaterializerIds.has(item.materializerId),
       )
       .map((item) => item.scenarioId)
       .sort();

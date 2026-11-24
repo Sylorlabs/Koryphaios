@@ -50,7 +50,12 @@ function chunk(type: string, data: Buffer): Buffer {
 }
 
 /** Build a flat background with one centred square, as a real PNG. */
-function syntheticPng(options: { width: number; height: number; markShare: number; markColor: ReturnType<typeof parseHexColor> }): Buffer {
+function syntheticPng(options: {
+  width: number;
+  height: number;
+  markShare: number;
+  markColor: ReturnType<typeof parseHexColor>;
+}): Buffer {
   const { width, height, markShare, markColor } = options;
   const side = Math.max(2, Math.round(Math.sqrt(width * height * markShare)));
   const startX = Math.round((width - side) / 2);
@@ -109,24 +114,48 @@ const SCENARIO_2_SPEC = {
       id: 'hero',
       description: 'hero render',
       variants: [
-        { seed: 911, prompt: `${IDENTITY}; flat vector hero image, solid #F2EFE9 background, one orange #E8552D mark centred with wide empty margins, no text, no green, no gradient`, size: '1024x1024' },
-        { seed: 912, prompt: `${IDENTITY}; flat vector hero image, solid #F2EFE9 background, single orange #E8552D mark centred, generous clean margins, no text, no green`, size: '1024x1024' },
+        {
+          seed: 911,
+          prompt: `${IDENTITY}; flat vector hero image, solid #F2EFE9 background, one orange #E8552D mark centred with wide empty margins, no text, no green, no gradient`,
+          size: '1024x1024',
+        },
+        {
+          seed: 912,
+          prompt: `${IDENTITY}; flat vector hero image, solid #F2EFE9 background, single orange #E8552D mark centred, generous clean margins, no text, no green`,
+          size: '1024x1024',
+        },
       ],
     },
     {
       id: 'avatar',
       description: 'avatar render',
       variants: [
-        { seed: 913, prompt: `${IDENTITY}; flat vector avatar, solid #F2EFE9 background, orange #E8552D mark filling most of the frame, close crop, no text, no green`, size: '1024x1024' },
-        { seed: 914, prompt: `${IDENTITY}; flat vector avatar close-up, solid #F2EFE9 background, large orange #E8552D mark centred and prominent, no text, no green`, size: '1024x1024' },
+        {
+          seed: 913,
+          prompt: `${IDENTITY}; flat vector avatar, solid #F2EFE9 background, orange #E8552D mark filling most of the frame, close crop, no text, no green`,
+          size: '1024x1024',
+        },
+        {
+          seed: 914,
+          prompt: `${IDENTITY}; flat vector avatar close-up, solid #F2EFE9 background, large orange #E8552D mark centred and prominent, no text, no green`,
+          size: '1024x1024',
+        },
       ],
     },
     {
       id: 'footer-card',
       description: 'footer card render',
       variants: [
-        { seed: 915, prompt: `${IDENTITY}; bottom-anchored composition: large orange #E8552D mark in the lower part of a solid #F2EFE9 canvas, 60 percent empty background above it, flat vector, no text, no green`, size: '1024x1024' },
-        { seed: 916, prompt: `${IDENTITY}; flat vector layout, solid #F2EFE9 background, one big orange #E8552D circle positioned at the bottom centre of the canvas, empty space above, no text, no green`, size: '1024x1024' },
+        {
+          seed: 915,
+          prompt: `${IDENTITY}; bottom-anchored composition: large orange #E8552D mark in the lower part of a solid #F2EFE9 canvas, 60 percent empty background above it, flat vector, no text, no green`,
+          size: '1024x1024',
+        },
+        {
+          seed: 916,
+          prompt: `${IDENTITY}; flat vector layout, solid #F2EFE9 background, one big orange #E8552D circle positioned at the bottom centre of the canvas, empty space above, no text, no green`,
+          size: '1024x1024',
+        },
       ],
     },
   ],
@@ -134,7 +163,9 @@ const SCENARIO_2_SPEC = {
 
 describe('image generation measurement', () => {
   test('a flat frame decodes to the palette and coverage the brief asks for', () => {
-    const image = decodePng(syntheticPng({ width: 128, height: 128, markShare: 0.1, markColor: ACCENT }));
+    const image = decodePng(
+      syntheticPng({ width: 128, height: 128, markShare: 0.1, markColor: ACCENT }),
+    );
     const measurements = measureImage(image, BACKGROUND, ACCENT, FORBIDDEN);
     expect(measurements.width).toBe(128);
     expect(measurements.height).toBe(128);
@@ -196,7 +227,10 @@ describe('image generation against the live model', () => {
       expect(starter.passed).toBe(false);
       expect(starter.checks.find((check) => check.id === 'contract')?.passed).toBe(false);
 
-      writeFileSync(join(root, 'generation', 'spec.json'), JSON.stringify(SCENARIO_1_SPEC, null, 2));
+      writeFileSync(
+        join(root, 'generation', 'spec.json'),
+        JSON.stringify(SCENARIO_1_SPEC, null, 2),
+      );
       const result = await runImagegenScenario(root, 1);
       expect(result.checks.map((check) => check.id)).toEqual([
         'contract',
@@ -219,7 +253,10 @@ describe('image generation against the live model', () => {
       expect(starter.passed).toBe(false);
       expect(starter.checks.find((check) => check.id === 'identity-reuse')?.passed).toBe(false);
 
-      writeFileSync(join(root, 'generation', 'spec.json'), JSON.stringify(SCENARIO_2_SPEC, null, 2));
+      writeFileSync(
+        join(root, 'generation', 'spec.json'),
+        JSON.stringify(SCENARIO_2_SPEC, null, 2),
+      );
       const result = await runImagegenScenario(root, 2);
       expect(result.checks.map((check) => check.id)).toEqual([
         'contract',

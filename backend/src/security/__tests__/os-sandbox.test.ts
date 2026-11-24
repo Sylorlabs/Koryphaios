@@ -178,7 +178,12 @@ describe('resolveCommandPath', () => {
   });
 });
 
-async function runSandbox(argv: string[], workspace: string, readOnlyRoots: string[] = [], blockSubprocesses = false) {
+async function runSandbox(
+  argv: string[],
+  workspace: string,
+  readOnlyRoots: string[] = [],
+  blockSubprocesses = false,
+) {
   const { proc, cleanup } = spawnSandboxed(argv, {
     allowedRoots: [workspace],
     requiredWorkspaceRoot: workspace,
@@ -189,8 +194,12 @@ async function runSandbox(argv: string[], workspace: string, readOnlyRoots: stri
   });
   let stdout = '';
   let stderr = '';
-  proc.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
-  proc.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+  proc.stdout?.on('data', (chunk) => {
+    stdout += chunk.toString();
+  });
+  proc.stderr?.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
   try {
     const code = await new Promise<number>((resolve, reject) => {
       proc.once('error', reject);
@@ -206,17 +215,20 @@ const kernelSandboxAvailable = isUnix() && osSandboxEnabled();
 const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
 describe('macOS subprocess confinement', () => {
-  it.skipIf(!isMac() || !osSandboxEnabled())('permits the initial exec but blocks descendant commands', async () => {
-    const workspace = canonicalizePath(mkdtempSync(join(tmpdir(), 'kory-one-exec-')));
-    try {
-      const initial = await runSandbox(['/usr/bin/true'], workspace, [], true);
-      expect(initial.code, initial.stderr).toBe(0);
-      const child = await runSandbox(['/bin/bash', '-c', '/usr/bin/true'], workspace, [], true);
-      expect(child.code).not.toBe(0);
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
+  it.skipIf(!isMac() || !osSandboxEnabled())(
+    'permits the initial exec but blocks descendant commands',
+    async () => {
+      const workspace = canonicalizePath(mkdtempSync(join(tmpdir(), 'kory-one-exec-')));
+      try {
+        const initial = await runSandbox(['/usr/bin/true'], workspace, [], true);
+        expect(initial.code, initial.stderr).toBe(0);
+        const child = await runSandbox(['/bin/bash', '-c', '/usr/bin/true'], workspace, [], true);
+        expect(child.code).not.toBe(0);
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe('read-only source roots', () => {
@@ -239,8 +251,18 @@ describe('read-only source roots', () => {
         writeFileSync(join(source, 'original.txt'), 'original\n');
         runGit(source, 'init');
         runGit(source, 'add', '.');
-        runGit(source, '-c', 'user.name=Test', '-c', 'user.email=test@example.com',
-          '-c', 'commit.gpgsign=false', 'commit', '-m', 'source');
+        runGit(
+          source,
+          '-c',
+          'user.name=Test',
+          '-c',
+          'user.email=test@example.com',
+          '-c',
+          'commit.gpgsign=false',
+          'commit',
+          '-m',
+          'source',
+        );
         const commit = runGit(source, 'rev-parse', 'HEAD');
         const config = readFileSync(join(source, '.git/config'), 'utf8');
         runGit(workspace, 'init');
@@ -275,30 +297,35 @@ describe('read-only source roots', () => {
     },
   );
 
-  it.skipIf(!kernelSandboxAvailable)('rejects a read-only root containing private writable scratch', () => {
-    const previous = process.env.TMPDIR;
-    const fixture = canonicalizePath(mkdtempSync(join(tmpdir(), 'kory-scratch-overlap-')));
-    const workspace = join(fixture, 'workspace');
-    const readOnly = join(fixture, 'read-only');
-    mkdirSync(workspace);
-    mkdirSync(readOnly);
-    process.env.TMPDIR = readOnly;
-    try {
-      expect(() => spawnSandboxed(['/bin/echo', 'must-not-run'], {
-        allowedRoots: [workspace],
-        requiredWorkspaceRoot: workspace,
-        readOnlyRoots: [readOnly],
-        cwd: workspace,
-        blockNetwork: true,
-        blockSubprocesses: false,
-      })).toThrow('Read-only root overlaps a writable sandbox root');
-      expect(readdirSync(readOnly)).toEqual([]);
-    } finally {
-      if (previous === undefined) delete process.env.TMPDIR;
-      else process.env.TMPDIR = previous;
-      rmSync(fixture, { recursive: true, force: true });
-    }
-  });
+  it.skipIf(!kernelSandboxAvailable)(
+    'rejects a read-only root containing private writable scratch',
+    () => {
+      const previous = process.env.TMPDIR;
+      const fixture = canonicalizePath(mkdtempSync(join(tmpdir(), 'kory-scratch-overlap-')));
+      const workspace = join(fixture, 'workspace');
+      const readOnly = join(fixture, 'read-only');
+      mkdirSync(workspace);
+      mkdirSync(readOnly);
+      process.env.TMPDIR = readOnly;
+      try {
+        expect(() =>
+          spawnSandboxed(['/bin/echo', 'must-not-run'], {
+            allowedRoots: [workspace],
+            requiredWorkspaceRoot: workspace,
+            readOnlyRoots: [readOnly],
+            cwd: workspace,
+            blockNetwork: true,
+            blockSubprocesses: false,
+          }),
+        ).toThrow('Read-only root overlaps a writable sandbox root');
+        expect(readdirSync(readOnly)).toEqual([]);
+      } finally {
+        if (previous === undefined) delete process.env.TMPDIR;
+        else process.env.TMPDIR = previous;
+        rmSync(fixture, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.skipIf(!kernelSandboxAvailable)('rejects overlapping writable and read-only roots', () => {
     const fixture = canonicalizePath(mkdtempSync(join(tmpdir(), 'kory-root-overlap-')));
@@ -307,14 +334,16 @@ describe('read-only source roots', () => {
     mkdirSync(nested, { recursive: true });
     try {
       for (const readOnlyRoot of [fixture, workspace, nested]) {
-        expect(() => spawnSandboxed(['/bin/echo', 'must-not-run'], {
-          allowedRoots: [fixture],
-          requiredWorkspaceRoot: workspace,
-          readOnlyRoots: [readOnlyRoot],
-          cwd: workspace,
-          blockNetwork: true,
-          blockSubprocesses: false,
-        })).toThrow('Read-only root overlaps a writable sandbox root');
+        expect(() =>
+          spawnSandboxed(['/bin/echo', 'must-not-run'], {
+            allowedRoots: [fixture],
+            requiredWorkspaceRoot: workspace,
+            readOnlyRoots: [readOnlyRoot],
+            cwd: workspace,
+            blockNetwork: true,
+            blockSubprocesses: false,
+          }),
+        ).toThrow('Read-only root overlaps a writable sandbox root');
       }
     } finally {
       rmSync(fixture, { recursive: true, force: true });

@@ -9,7 +9,15 @@
  * `process.platform`. Tests and `__tests__` support code are out of scope.
  */
 import { describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 
@@ -23,15 +31,31 @@ const MODULE_EXEMPT = 'runtime/platform.ts';
  * many times it may occur in that file.
  */
 const ALLOWED: ReadonlyArray<{ file: string; line: string; count: number }> = [
-  { file: 'security/resource-limits.ts', line: 'platform: NodeJS.Platform = process.platform,', count: 2 },
-  { file: 'providers/freebuff-credentials.ts', line: 'platform: NodeJS.Platform = process.platform,', count: 1 },
+  {
+    file: 'security/resource-limits.ts',
+    line: 'platform: NodeJS.Platform = process.platform,',
+    count: 2,
+  },
+  {
+    file: 'providers/freebuff-credentials.ts',
+    line: 'platform: NodeJS.Platform = process.platform,',
+    count: 1,
+  },
   {
     file: 'providers/freebuff-credentials.ts',
     line: 'dependencies: FreebuffCredentialDependencies = { platform: process.platform, execFile },',
     count: 1,
   },
-  { file: 'kory/skill-eval-bun-runtime-fixtures.ts', line: 'platform: string = process.platform,', count: 1 },
-  { file: 'eval/skills/skill-eval-bun-runtime-fixtures.ts', line: 'platform: string = process.platform,', count: 1 },
+  {
+    file: 'kory/skill-eval-bun-runtime-fixtures.ts',
+    line: 'platform: string = process.platform,',
+    count: 1,
+  },
+  {
+    file: 'eval/skills/skill-eval-bun-runtime-fixtures.ts',
+    line: 'platform: string = process.platform,',
+    count: 1,
+  },
 ];
 
 function isExcludedPath(rel: string): boolean {
@@ -93,7 +117,9 @@ describe('process.platform is read only by runtime/platform.ts', () => {
         join(root, 'security', 'resource-limits.ts'),
         '  platform: NodeJS.Platform = process.platform,\n  platform: NodeJS.Platform = process.platform,\n',
       );
-      expect(findViolations(root)).toEqual(['routes/bad.ts: if (process.platform === \'darwin\') {}']);
+      expect(findViolations(root)).toEqual([
+        "routes/bad.ts: if (process.platform === 'darwin') {}",
+      ]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -59,7 +59,12 @@ describe('reasoning traces survive relaunch/reload', () => {
     // terminal history write can round the assistant timestamp earlier than
     // the replayed event timestamps. Placement is decided by the turn's message
     // id and its parts, never by the assistant timestamp or by matching text.
-    const turnEvent = (type: string, payload: Record<string, unknown>, timestamp: number, sequence: number) =>
+    const turnEvent = (
+      type: string,
+      payload: Record<string, unknown>,
+      timestamp: number,
+      sequence: number,
+    ) =>
       ({
         type,
         payload: { agentId: 'kory-manager', messageId: 'm2', ...payload },
@@ -69,8 +74,14 @@ describe('reasoning traces survive relaunch/reload', () => {
         sequence,
         replayed: true,
       }) as unknown as WSMessage;
-    feedStore.applyManagerTurnEvent(sessionId, turnEvent('stream.thinking', { thinking: 'Reasoning summary from the replay.' }, 5000, 29));
-    feedStore.applyManagerTurnEvent(sessionId, turnEvent('stream.delta', { content: 'Final answer text.' }, 5100, 38));
+    feedStore.applyManagerTurnEvent(
+      sessionId,
+      turnEvent('stream.thinking', { thinking: 'Reasoning summary from the replay.' }, 5000, 29),
+    );
+    feedStore.applyManagerTurnEvent(
+      sessionId,
+      turnEvent('stream.delta', { content: 'Final answer text.' }, 5100, 38),
+    );
 
     const ok = await feedStore.loadSessionMessages(sessionId, [
       { id: 'm1', role: 'user', content: 'hello', createdAt: 100 },
@@ -82,7 +93,12 @@ describe('reasoning traces survive relaunch/reload', () => {
         content: 'Final answer text.',
         createdAt: 200,
         parts: [
-          { kind: 'reasoning', text: 'Reasoning summary from the replay.', startedAt: 5000, endedAt: 5100 },
+          {
+            kind: 'reasoning',
+            text: 'Reasoning summary from the replay.',
+            startedAt: 5000,
+            endedAt: 5100,
+          },
           { kind: 'text', text: 'Final answer text.', startedAt: 5100 },
         ],
       },
@@ -95,11 +111,7 @@ describe('reasoning traces survive relaunch/reload', () => {
       'content',
     ]);
     // The live turn and the persisted turn are the same rows: one per part.
-    expect(feedStore.feed.map((entry) => entry.id)).toEqual([
-      'hist-m1',
-      'turn-m2-0',
-      'turn-m2-1',
-    ]);
+    expect(feedStore.feed.map((entry) => entry.id)).toEqual(['hist-m1', 'turn-m2-0', 'turn-m2-1']);
     expect(feedStore.feed[2]?.metadata?.turnMessageId).toBe('m2');
   });
 

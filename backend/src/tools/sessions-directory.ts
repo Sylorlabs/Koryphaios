@@ -88,7 +88,7 @@ export class ListSessionsTool implements Tool {
   readonly name = 'list_sessions';
   readonly role = 'any' as const;
   readonly description =
-    'List open (non-archived) chats, newest-updated first: each chat\'s id, title, folder, whether it runs in an isolated Git copy, runtime state, message count and last update. Use a chat id with send_agent_message (toSessionId) to message that chat or with read_session to read its transcript.';
+    "List open (non-archived) chats, newest-updated first: each chat's id, title, folder, whether it runs in an isolated Git copy, runtime state, message count and last update. Use a chat id with send_agent_message (toSessionId) to message that chat or with read_session to read its transcript.";
   readonly inputSchema = {
     type: 'object',
     properties: {
@@ -145,11 +145,7 @@ export class ListSessionsTool implements Tool {
           `${session.id} | ${session.title}${marker} | ${folder} | isolated copy: ${isolated} | ${state} | messages: ${session.messageCount} | updated: ${updated}`,
         );
       }
-      return done(
-        call,
-        this.name,
-        lines.length > 0 ? lines.join('\n') : 'No matching chats.',
-      );
+      return done(call, this.name, lines.length > 0 ? lines.join('\n') : 'No matching chats.');
     } catch (err: unknown) {
       return fail(call, this.name, err instanceof Error ? err.message : String(err));
     }
@@ -174,9 +170,7 @@ export function messageText(message: StoredMessage): string {
   }
   if (message.attachments && message.attachments.length > 0) {
     const markers = message.attachments
-      .map((attachment) =>
-        attachment.type === 'image' ? '[image]' : `[${attachment.name}]`,
-      )
+      .map((attachment) => (attachment.type === 'image' ? '[image]' : `[${attachment.name}]`))
       .join(' ');
     text = text ? `${text}\n${markers}` : markers;
   }

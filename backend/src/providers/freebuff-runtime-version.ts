@@ -34,10 +34,7 @@ export function compareFreebuffVersions(a: string, b: string): number {
  * /opt/kory/freebuff/ARCHIVE_SHA256, matching the official launcher's
  * unverified download behavior.
  */
-export const KNOWN_FREEBUFF_ARCHIVE_SHA256: Record<
-  string,
-  { amd64: string; arm64: string }
-> = {
+export const KNOWN_FREEBUFF_ARCHIVE_SHA256: Record<string, { amd64: string; arm64: string }> = {
   '0.2.36': {
     amd64: '7991a166aba6f374792ac8e9d9300280f6e5a2044935b268dfd96ff4b7d103e3',
     arm64: 'ed752a58958a01a3172eebdda3b7fabff27d4dc099e94c5d8a3a6da5d97692a3',

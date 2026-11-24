@@ -2,8 +2,8 @@
 description: Produces a bounded text patch for Koryphaios V5 qualification tasks without using tools.
 mode: subagent
 permissions:
-  - action: "*"
-    resource: "*"
+  - action: '*'
+    resource: '*'
     effect: deny
 ---
 

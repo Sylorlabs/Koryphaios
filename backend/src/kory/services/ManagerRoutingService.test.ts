@@ -168,7 +168,10 @@ describe('independent routing policy', () => {
       provider: 'openai',
     });
     setAccess({ general: ['openai:producer'] });
-    expect(service.resolveIndependentRouting('producer', 'openai', 'general')).toEqual({ model: 'producer', provider: 'openai' });
+    expect(service.resolveIndependentRouting('producer', 'openai', 'general')).toEqual({
+      model: 'producer',
+      provider: 'openai',
+    });
   });
 
   test('uses category aliases, but an explicit empty category falls back to available adapters', () => {
@@ -217,12 +220,13 @@ describe('independent routing policy', () => {
   });
 });
 
-
 test('prefers a different model over the same model on another provider for critics', () => {
   setAccess({ critic: ['anthropic:producer', 'openai:sibling'] });
   const { service } = fixture();
-  expect(service.resolveIndependentRouting('producer', 'openai', 'critic'))
-    .toEqual({ model: 'sibling', provider: 'openai' });
+  expect(service.resolveIndependentRouting('producer', 'openai', 'critic')).toEqual({
+    model: 'sibling',
+    provider: 'openai',
+  });
 });
 
 test('hardExclude removes a route even when it is the only reachable one', () => {

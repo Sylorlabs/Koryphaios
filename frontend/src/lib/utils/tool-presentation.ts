@@ -1,13 +1,44 @@
 import type { FeedEntryLocal } from '$lib/types';
-import { noteToolPresentation, type ToolIntent, type WorkspaceIcon, type WorkspaceSurface } from './note-tool-presentation';
+import {
+  noteToolPresentation,
+  type ToolIntent,
+  type WorkspaceIcon,
+  type WorkspaceSurface,
+} from './note-tool-presentation';
 import { getSessionMcpToolRegistry } from '$lib/stores/mcp-tool-registry.svelte';
 import { resolveRegisteredMcpTool } from './mcp-tool-identity';
 import type { ComputerUseReceipt } from '@koryphaios/shared';
 
-export type ToolIcon = WorkspaceIcon | 'file-read' | 'file-create' | 'file-edit' | 'file-delete' | 'file-move' | 'command' | 'search' | 'folder' | 'web' | 'fetch' | 'checklist' | 'critic' | 'agent' | 'session' | 'git' | 'context' | 'skill' | 'tool';
+export type ToolIcon =
+  | WorkspaceIcon
+  | 'file-read'
+  | 'file-create'
+  | 'file-edit'
+  | 'file-delete'
+  | 'file-move'
+  | 'command'
+  | 'search'
+  | 'folder'
+  | 'web'
+  | 'fetch'
+  | 'checklist'
+  | 'critic'
+  | 'agent'
+  | 'session'
+  | 'git'
+  | 'context'
+  | 'skill'
+  | 'tool';
 
 function withoutToolNamespace(name: string): string {
-  return name.replace(/^freebuff_sandbox__/, '').replace(/^mcp__.+?__/, '').replace(/^.*kory__/, '').split(/[./]/).pop() ?? '';
+  return (
+    name
+      .replace(/^freebuff_sandbox__/, '')
+      .replace(/^mcp__.+?__/, '')
+      .replace(/^.*kory__/, '')
+      .split(/[./]/)
+      .pop() ?? ''
+  );
 }
 
 export function normalizeToolName(name: string): string {
@@ -19,7 +50,9 @@ function text(value: unknown): string {
 }
 
 function displayToolName(value: unknown): string {
-  const name = text(value).trim().replace(/^freebuff_sandbox__/, '');
+  const name = text(value)
+    .trim()
+    .replace(/^freebuff_sandbox__/, '');
   return /^(?:tool|generic|unknown|unknown_tool|freebuff_tool)$/i.test(name) ? '' : name;
 }
 
@@ -38,11 +71,14 @@ function objectInput(value: unknown): Record<string, unknown> | undefined {
 
 function computerReceipt(value: unknown): ComputerUseReceipt | undefined {
   const parsed = objectInput(value);
-  const receipt = parsed?.computerUse && typeof parsed.computerUse === 'object' && !Array.isArray(parsed.computerUse)
-    ? parsed.computerUse as Record<string, unknown>
-    : undefined;
+  const receipt =
+    parsed?.computerUse &&
+    typeof parsed.computerUse === 'object' &&
+    !Array.isArray(parsed.computerUse)
+      ? (parsed.computerUse as Record<string, unknown>)
+      : undefined;
   return receipt && receipt.version === 1 && typeof receipt.action === 'string'
-    ? receipt as unknown as ComputerUseReceipt
+    ? (receipt as unknown as ComputerUseReceipt)
     : undefined;
 }
 
@@ -50,7 +86,8 @@ export function toolPresentation(entry: FeedEntryLocal) {
   const call = entry.metadata?.toolCall as
     { name?: string; input?: Record<string, unknown> } | undefined;
   const result = entry.metadata?.toolResult as
-    { name?: string; output?: string; isError?: boolean; computerUse?: ComputerUseReceipt } | undefined;
+    | { name?: string; output?: string; isError?: boolean; computerUse?: ComputerUseReceipt }
+    | undefined;
   let toolName = displayToolName(result?.name) || displayToolName(call?.name);
   let input = call?.input ?? objectInput(entry.metadata?.toolInputPreview) ?? {};
   const computerUse = result?.computerUse ?? computerReceipt(result?.output);
@@ -68,18 +105,26 @@ export function toolPresentation(entry: FeedEntryLocal) {
       text(input.ToolName) ||
       (call?.name && normalizeToolName(call.name) !== 'call_mcp_tool' ? call.name : '');
     const diagnosticName = result?.isError
-      ? text(result.output || entry.text).match(/\bInvalid arguments for tool\s+['"`]?([\w./-]+)/i)?.[1]
+      ? text(result.output || entry.text).match(
+          /\bInvalid arguments for tool\s+['"`]?([\w./-]+)/i,
+        )?.[1]
       : undefined;
     toolName = destination || diagnosticName || toolName;
-    mcpServer = text(input.server_name) || text(input.serverName) || text(input.ServerName) || mcpServer;
-    input = objectInput(input.arguments) ?? objectInput(input.Arguments) ?? objectInput(input.args) ?? input;
+    mcpServer =
+      text(input.server_name) || text(input.serverName) || text(input.ServerName) || mcpServer;
+    input =
+      objectInput(input.arguments) ??
+      objectInput(input.Arguments) ??
+      objectInput(input.args) ??
+      input;
   }
   let name = normalizeToolName(toolName);
   const servers = getSessionMcpToolRegistry(entry.metadata?.sessionId);
   // A registered MCP can itself be called through Kory's CLI bridge. Resolve
   // the destination registration rather than showing the outer bridge as the
   // server which performed the work.
-  const registered = resolveRegisteredMcpTool(toolName, servers) ||
+  const registered =
+    resolveRegisteredMcpTool(toolName, servers) ||
     resolveRegisteredMcpTool(withoutToolNamespace(toolName), servers);
   if (registered) {
     mcpServer = registered.server;
@@ -95,13 +140,17 @@ export function toolPresentation(entry: FeedEntryLocal) {
   // first so a nested bridge call keeps the actual server's attribution.
   const internalBridge = !registered && !registryAlias && mcpServer.toLowerCase() === 'kory';
   const unresolvedInternal = internalBridge && ['call_mcp_tool', 'invoke_mcp_tool'].includes(name);
-  const nativeActivity = internalBridge || (!isMcp && (name === 'rename_session' || name === 'manage_mcp_server'));
+  const nativeActivity =
+    internalBridge || (!isMcp && (name === 'rename_session' || name === 'manage_mcp_server'));
   const displayName = internalBridge
-    ? unresolvedInternal ? 'Tool' : name.replace(/_/g, ' ') || 'Tool'
+    ? unresolvedInternal
+      ? 'Tool'
+      : name.replace(/_/g, ' ') || 'Tool'
     : name;
-  const mcpIdentity = isMcp && !nativeActivity
-    ? `${mcpServer ? `${mcpServer} MCP` : 'MCP tool'} · ${name === 'call_mcp_tool' ? 'identity unavailable' : name}`
-    : '';
+  const mcpIdentity =
+    isMcp && !nativeActivity
+      ? `${mcpServer ? `${mcpServer} MCP` : 'MCP tool'} · ${name === 'call_mcp_tool' ? 'identity unavailable' : name}`
+      : '';
   const path = text(
     input.path ??
       input.file_path ??
@@ -126,7 +175,11 @@ export function toolPresentation(entry: FeedEntryLocal) {
   const patchPaths = [...patch.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map(
     (match) => match[1],
   );
-  const files = Array.isArray(input.files) ? input.files : Array.isArray(input.changes) ? input.changes : [];
+  const files = Array.isArray(input.files)
+    ? input.files
+    : Array.isArray(input.changes)
+      ? input.changes
+      : [];
   const paths = path
     ? [path]
     : patchPaths.length
@@ -141,7 +194,7 @@ export function toolPresentation(entry: FeedEntryLocal) {
   const complete = entry.type === 'tool_result';
   const failed = result?.isError === true;
   const commandIsLong = command.length > 88;
-  let action = toolName ? complete ? 'Used' : 'Using' : complete ? 'Completed' : 'Running';
+  let action = toolName ? (complete ? 'Used' : 'Using') : complete ? 'Completed' : 'Running';
   let target = internalBridge ? displayName : toolName || 'Tool name unavailable';
   let kind: 'file' | 'command' | 'search' | 'other' | WorkspaceSurface = 'other';
   let icon: ToolIcon = 'tool';
@@ -168,7 +221,7 @@ export function toolPresentation(entry: FeedEntryLocal) {
       computer_wait: ['Waiting', 'Waited'],
     };
     const [running, completed] = labels[name] ?? ['Used', 'computer'];
-    action = complete ? failed ? `${completed} failed` : completed : running;
+    action = complete ? (failed ? `${completed} failed` : completed) : running;
     target = computerUse.target
       ? `${computerUse.target.title || computerUse.target.appId} · ${computerUse.target.appId}`
       : computerUse.action.replace(/^computer_/, '').replace(/_/g, ' ');
@@ -176,7 +229,10 @@ export function toolPresentation(entry: FeedEntryLocal) {
     intent = 'use';
   } else if (name === 'rename_session') {
     action = complete ? 'Renamed session' : 'Renaming session';
-    target = text(input.title) || text(result?.output).match(/^Session renamed to:\s*(.+)$/)?.[1] || 'this chat';
+    target =
+      text(input.title) ||
+      text(result?.output).match(/^Session renamed to:\s*(.+)$/)?.[1] ||
+      'this chat';
     icon = 'session';
     intent = 'edit';
   } else if (name === 'manage_mcp_server') {
@@ -205,9 +261,9 @@ export function toolPresentation(entry: FeedEntryLocal) {
     icon = 'critic';
     intent = 'review';
     action = 'Critic';
-    target = complete ? failed ? 'failed' : 'completed' : 'running';
+    target = complete ? (failed ? 'failed' : 'completed') : 'running';
   } else if (name === 'delegate_to_worker') {
-    action = complete ? failed ? 'Delegation failed' : 'Delegated' : 'Delegating';
+    action = complete ? (failed ? 'Delegation failed' : 'Delegated') : 'Delegating';
     icon = 'agent';
     target = text(input.agentName) || text(input.domain) || 'agent';
   } else if (workspace) {
@@ -217,10 +273,21 @@ export function toolPresentation(entry: FeedEntryLocal) {
     const creating = name.startsWith('create_');
     const reading = /^(read|list)_/.test(name);
     const deleting = name.startsWith('delete_');
-    action = creating ? complete ? 'Created' : 'Creating'
-      : reading ? complete ? 'Read' : 'Reading'
-      : deleting ? complete ? 'Deleted' : 'Deleting'
-      : complete ? 'Updated' : 'Updating';
+    action = creating
+      ? complete
+        ? 'Created'
+        : 'Creating'
+      : reading
+        ? complete
+          ? 'Read'
+          : 'Reading'
+        : deleting
+          ? complete
+            ? 'Deleted'
+            : 'Deleting'
+          : complete
+            ? 'Updated'
+            : 'Updating';
     icon = 'checklist';
     intent = creating ? 'create' : reading ? 'read' : deleting ? 'delete' : 'edit';
     target = text(input.title) || 'checklist';
@@ -244,11 +311,19 @@ export function toolPresentation(entry: FeedEntryLocal) {
     kind = 'file';
     icon = 'file-edit';
     intent = 'edit';
-    if (patch && /^\*\*\* Add File:/m.test(patch) && !/^\*\*\* (Update|Delete) File:/m.test(patch)) {
+    if (
+      patch &&
+      /^\*\*\* Add File:/m.test(patch) &&
+      !/^\*\*\* (Update|Delete) File:/m.test(patch)
+    ) {
       action = complete ? 'Created' : 'Creating';
       icon = 'file-create';
       intent = 'create';
-    } else if (patch && /^\*\*\* Delete File:/m.test(patch) && !/^\*\*\* (Update|Add) File:/m.test(patch)) {
+    } else if (
+      patch &&
+      /^\*\*\* Delete File:/m.test(patch) &&
+      !/^\*\*\* (Update|Add) File:/m.test(patch)
+    ) {
       action = complete ? 'Deleted' : 'Deleting';
       icon = 'file-delete';
       intent = 'delete';
@@ -272,7 +347,9 @@ export function toolPresentation(entry: FeedEntryLocal) {
         .join(' → ') || 'file';
   } else if (
     command ||
-    /^(bash|shell|shell_manage|run_terminal_command|run_command|command_execution|exec|terminal)$/.test(name)
+    /^(bash|shell|shell_manage|run_terminal_command|run_command|command_execution|exec|terminal)$/.test(
+      name,
+    )
   ) {
     action = complete ? 'Ran' : 'Running';
     kind = 'command';
@@ -338,7 +415,14 @@ export function toolPresentation(entry: FeedEntryLocal) {
     'AbsolutePath',
   ]);
   if (internalBridge && input === dispatcherInput) {
-    for (const key of ['server_name', 'serverName', 'ServerName', 'tool_name', 'toolName', 'ToolName']) {
+    for (const key of [
+      'server_name',
+      'serverName',
+      'ServerName',
+      'tool_name',
+      'toolName',
+      'ToolName',
+    ]) {
       hiddenKeys.add(key);
     }
   }
@@ -376,9 +460,7 @@ export function toolPresentation(entry: FeedEntryLocal) {
     'input',
   ]);
   const additionalFields =
-    failed && kind !== 'command'
-      ? fields
-      : fields.filter(([key]) => !primaryKeys.has(key));
+    failed && kind !== 'command' ? fields : fields.filter(([key]) => !primaryKeys.has(key));
   const workingDirectory = text(input.workdir ?? input.workingDirectory ?? input.cwd);
   if (isMcp && kind === 'other' && !workspace && name !== 'critic_review' && !nativeActivity) {
     target = mcpIdentity;
@@ -392,7 +474,8 @@ export function toolPresentation(entry: FeedEntryLocal) {
     internalBridge,
     nativeActivity,
     action,
-    failureLabel: name === 'rename_session' ? 'Rename session failed' : `${displayName || 'Tool'} failed`,
+    failureLabel:
+      name === 'rename_session' ? 'Rename session failed' : `${displayName || 'Tool'} failed`,
     target: target.replace(/\s+/g, ' ').trim(),
     kind,
     icon,

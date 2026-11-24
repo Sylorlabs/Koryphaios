@@ -555,7 +555,11 @@ const DEVIN_EFFORT_NAME_TOKENS: Record<DevinEffort, RegExp> = {
 /** "Claude Opus 5.5 Low Fast" → "Claude Opus 5.5 Fast"; "GPT-6 Sol No
  *  Thinking" → "GPT-6 Sol"; "GLM-5.2 Max 1M" → "GLM-5.2 1M". Falls back to the
  *  family heading text when stripping would eat the whole name. */
-function devinFamilyDisplayName(name: string, effort: DevinEffort, sidekick: string | null): string {
+function devinFamilyDisplayName(
+  name: string,
+  effort: DevinEffort,
+  sidekick: string | null,
+): string {
   if (sidekick) {
     // "Fusion (<lead> <Effort> [<speed>] + <sidekick>)" — strip the lead's own
     // effort word and keep speed + the whole sidekick half.
@@ -582,7 +586,6 @@ interface DevinCatalogMember {
   effort: DevinEffort | null;
 }
 
-
 // ─── Fusion: one model, two editable slots ─────────────────────────────────
 // `devin models` emits one slug per pairing cell
 // (`fusion-<lead>-<effort>[-fast]-sidekick-<sidekick>[-<effort>][-priority]`),
@@ -590,18 +593,23 @@ interface DevinCatalogMember {
 // Fusion as a single model whose composer edits each slot (model, effort,
 // fast), so the rows collapse into a FusionCatalog and one `fusion` ModelDef.
 
-const FUSION_NAME_WORD = /\s+(No Thinking|Minimal|Low|Medium|High|XHigh|Ultra|Max|Slow|Fast|Priority)(?=\s|$)/gi;
+const FUSION_NAME_WORD =
+  /\s+(No Thinking|Minimal|Low|Medium|High|XHigh|Ultra|Max|Slow|Fast|Priority)(?=\s|$)/gi;
 
 /** "Claude Opus 5.5 Medium Fast" → "Claude Opus 5.5"; "GPT-6 Luna High
  *  Priority" → "GPT-6 Luna"; "SWE-2 Medium" → "SWE-2". */
 function fusionDisplayName(part: string): string {
-  const stripped = part.replace(FUSION_NAME_WORD, '').replace(/\s{2,}/g, ' ').trim();
+  const stripped = part
+    .replace(FUSION_NAME_WORD, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
   return stripped || part.trim();
 }
 
 function effortOrdered(efforts: Set<string>): string[] {
   return [...efforts].sort(
-    (a, b) => DEVIN_EFFORT_ORDER.indexOf(a as DevinEffort) - DEVIN_EFFORT_ORDER.indexOf(b as DevinEffort),
+    (a, b) =>
+      DEVIN_EFFORT_ORDER.indexOf(a as DevinEffort) - DEVIN_EFFORT_ORDER.indexOf(b as DevinEffort),
   );
 }
 

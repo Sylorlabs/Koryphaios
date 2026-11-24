@@ -60,7 +60,9 @@ function explicitForkTitle(raw: string): string {
   const cleaned = raw.replace(/\s+/g, ' ').trim();
   if (!cleaned) return '';
   if (cleaned.length > SESSION.MAX_TITLE_LENGTH) {
-    throw new ValidationError(`A fork title can be at most ${SESSION.MAX_TITLE_LENGTH} characters.`);
+    throw new ValidationError(
+      `A fork title can be at most ${SESSION.MAX_TITLE_LENGTH} characters.`,
+    );
   }
   if (cleaned.toLowerCase() === SESSION.DEFAULT_TITLE.toLowerCase()) {
     throw new ValidationError('Choose a descriptive title for the fork.');
@@ -218,9 +220,7 @@ export function forkSessionAtMessage(input: ForkSessionInput): ForkSessionResult
     // between. Only those whose parent is part of the copied lineage are kept.
     const lineageSet = new Set(ordered.map((row) => row.id));
     const variantGroupIds = [
-      ...new Set(
-        ordered.flatMap((row) => (row.variantGroupId ? [row.variantGroupId] : [])),
-      ),
+      ...new Set(ordered.flatMap((row) => (row.variantGroupId ? [row.variantGroupId] : []))),
     ];
     const siblings =
       variantGroupIds.length > 0
@@ -307,7 +307,8 @@ export function forkSessionAtMessage(input: ForkSessionInput): ForkSessionResult
       );
     }
     const variantGroupMap = new Map<string, string>();
-    for (const groupId of variantGroupIds) variantGroupMap.set(groupId, nanoid(ID.SESSION_ID_LENGTH));
+    for (const groupId of variantGroupIds)
+      variantGroupMap.set(groupId, nanoid(ID.SESSION_ID_LENGTH));
 
     const newPivotId = messageIdMap.get(pivotId!)!;
     const totalMessages = ordered.length + siblings.length;
@@ -485,7 +486,8 @@ function describeNewMessages(
   let omitted = 0;
   for (let index = fresh.length - 1; index >= 0; index -= 1) {
     const message = fresh[index]!;
-    const label = message.role === 'user' ? 'User' : message.role === 'assistant' ? 'Assistant' : 'Note';
+    const label =
+      message.role === 'user' ? 'User' : message.role === 'assistant' ? 'Assistant' : 'Note';
     const body = clip(message.content, MERGE_MESSAGE_CHARS) || '(no text)';
     const line = `${label}: ${body}`;
     if (used + line.length + 2 > MERGE_TOTAL_CHARS) {
@@ -517,7 +519,9 @@ export async function buildForkMergeDigest(input: {
     const [fork] = tx.select().from(sessions).where(eq(sessions.id, forkSessionId)).limit(1).all();
     if (!fork) throw new NotFoundError('Session', forkSessionId);
     if (!fork.forkedFromSessionId) {
-      throw new ValidationError('This chat was not forked from another chat, so there is nothing to merge back.');
+      throw new ValidationError(
+        'This chat was not forked from another chat, so there is nothing to merge back.',
+      );
     }
     if (fork.forkedMergedAt) {
       throw new ConflictError('This fork was already merged into its source chat.');

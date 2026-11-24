@@ -35,7 +35,9 @@ describe('agent resource budget snapshot', () => {
         ],
       },
     );
-    expect(snapshot.entries.find((entry) => entry.provider === 'openrouter')?.state).toBe('exhausted');
+    expect(snapshot.entries.find((entry) => entry.provider === 'openrouter')?.state).toBe(
+      'exhausted',
+    );
     expect(snapshot.rateLimits[0]).toMatchObject({
       provider: 'logfare',
       status: 'rate_limited',
@@ -50,13 +52,18 @@ describe('agent resource budget snapshot', () => {
 
   test('times out to explicit unknown limitations instead of fabricated zeroes', async () => {
     const never = new Promise<never>(() => {});
-    const snapshot = await collectResourceBudgetSnapshot({}, {
-      getBalances: () => never,
-      getCliUsage: () => never,
-      getSubscriptions: () => [],
-      timeoutMs: 5,
-    });
+    const snapshot = await collectResourceBudgetSnapshot(
+      {},
+      {
+        getBalances: () => never,
+        getCliUsage: () => never,
+        getSubscriptions: () => [],
+        timeoutMs: 5,
+      },
+    );
     expect(snapshot.entries).toEqual([]);
-    expect(snapshot.limitations.some((value) => value.includes('bounded collection window'))).toBe(true);
+    expect(snapshot.limitations.some((value) => value.includes('bounded collection window'))).toBe(
+      true,
+    );
   });
 });

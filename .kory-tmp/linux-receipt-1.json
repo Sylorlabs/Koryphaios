@@ -1,66 +1,64 @@
 {
- "nonce": "linux1",
- "scenarioId": "desktop-electron-tauri-full-task-2-individual",
- "runtime": "tauri",
- "environment": {
-  "kind": "linux-xvfb-container",
-  "display": ":99"
- },
- "checks": [
-  {
-   "id": "tauri-packaged-runtime",
-   "passed": false,
-   "detail": "the fixture did not build"
+  "nonce": "linux1",
+  "scenarioId": "desktop-electron-tauri-full-task-2-individual",
+  "runtime": "tauri",
+  "environment": {
+    "kind": "linux-xvfb-container",
+    "display": ":99"
   },
-  {
-   "id": "native-renderer-and-capture",
-   "passed": false,
-   "detail": "the fixture did not build"
-  },
-  {
-   "id": "native-folder-dialog-opened",
-   "passed": false,
-   "detail": "the fixture did not build"
-  },
-  {
-   "id": "native-dialog-cancel-is-none",
-   "passed": false,
-   "detail": "the fixture did not build"
-  },
-  {
-   "id": "native-folder-selection",
-   "passed": false,
-   "detail": "the fixture did not build"
-  },
-  {
-   "id": "allowed-command-inside-root",
-   "passed": false,
-   "detail": "the fixture did not build"
-  },
-  {
-   "id": "symlink-swap-at-use-denied",
-   "passed": false,
-   "detail": "the fixture did not build"
-  },
-  {
-   "id": "unexposed-command-denied",
-   "passed": false,
-   "detail": "the fixture did not build"
-  },
-  {
-   "id": "native-window-lifecycle",
-   "passed": false,
-   "detail": "the fixture did not build"
-  },
-  {
-   "id": "restart-restores-canonical-state",
-   "passed": false,
-   "detail": "the fixture did not build"
-  }
- ],
- "nativeEvents": [],
- "errors": [
-  "Real Tauri package build failed"
- ],
- "buildLogTail": "Compiling tauri-plugin-dialog v2.8.4\n   Compiling tokio v1.54.1\n   Compiling cargo_toml v1.0.1\n   Compiling serde_repr v0.1.21\n   Compiling static_vcruntime v3.0.0\n   Compiling rfd v0.17.2\n   Compiling mime v0.3.18\n   Compiling tauri-build v2.7.5\n   Compiling kory-desktop-native-fixture v0.1.0 (/work/.kory-tmp/linux-fixture-e0cad365/src-tauri)\nerror: failed to run custom build command for `kory-desktop-native-fixture v0.1.0 (/work/.kory-tmp/linux-fixture-e0cad365/src-tauri)`\n\nCaused by:\n  process didn't exit successfully: `/work/.kory-tmp/linux-fixture-e0cad365/src-tauri/target/release/build/kory-desktop-native-fixture/9118a217dbed0583/out/build_script_build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-env-changed=TAURI_CONFIG\n  cargo:rustc-check-cfg=cfg(desktop)\n  cargo:rustc-cfg=desktop\n  cargo:rustc-check-cfg=cfg(mobile)\n\n  --- stderr\n\n  thread 'main' (5053) panicked at build.rs:18:6:\n  failed to run tauri-build: unable to read Tauri config file at /work/.kory-tmp/linux-fixture-e0cad365/src-tauri/tauri.conf.json because entity not found\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nwarning: build failed, waiting for other jobs to finish...\n"
+  "checks": [
+    {
+      "id": "tauri-packaged-runtime",
+      "passed": false,
+      "detail": "the fixture did not build"
+    },
+    {
+      "id": "native-renderer-and-capture",
+      "passed": false,
+      "detail": "the fixture did not build"
+    },
+    {
+      "id": "native-folder-dialog-opened",
+      "passed": false,
+      "detail": "the fixture did not build"
+    },
+    {
+      "id": "native-dialog-cancel-is-none",
+      "passed": false,
+      "detail": "the fixture did not build"
+    },
+    {
+      "id": "native-folder-selection",
+      "passed": false,
+      "detail": "the fixture did not build"
+    },
+    {
+      "id": "allowed-command-inside-root",
+      "passed": false,
+      "detail": "the fixture did not build"
+    },
+    {
+      "id": "symlink-swap-at-use-denied",
+      "passed": false,
+      "detail": "the fixture did not build"
+    },
+    {
+      "id": "unexposed-command-denied",
+      "passed": false,
+      "detail": "the fixture did not build"
+    },
+    {
+      "id": "native-window-lifecycle",
+      "passed": false,
+      "detail": "the fixture did not build"
+    },
+    {
+      "id": "restart-restores-canonical-state",
+      "passed": false,
+      "detail": "the fixture did not build"
+    }
+  ],
+  "nativeEvents": [],
+  "errors": ["Real Tauri package build failed"],
+  "buildLogTail": "Compiling tauri-plugin-dialog v2.8.4\n   Compiling tokio v1.54.1\n   Compiling cargo_toml v1.0.1\n   Compiling serde_repr v0.1.21\n   Compiling static_vcruntime v3.0.0\n   Compiling rfd v0.17.2\n   Compiling mime v0.3.18\n   Compiling tauri-build v2.7.5\n   Compiling kory-desktop-native-fixture v0.1.0 (/work/.kory-tmp/linux-fixture-e0cad365/src-tauri)\nerror: failed to run custom build command for `kory-desktop-native-fixture v0.1.0 (/work/.kory-tmp/linux-fixture-e0cad365/src-tauri)`\n\nCaused by:\n  process didn't exit successfully: `/work/.kory-tmp/linux-fixture-e0cad365/src-tauri/target/release/build/kory-desktop-native-fixture/9118a217dbed0583/out/build_script_build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-env-changed=TAURI_CONFIG\n  cargo:rustc-check-cfg=cfg(desktop)\n  cargo:rustc-cfg=desktop\n  cargo:rustc-check-cfg=cfg(mobile)\n\n  --- stderr\n\n  thread 'main' (5053) panicked at build.rs:18:6:\n  failed to run tauri-build: unable to read Tauri config file at /work/.kory-tmp/linux-fixture-e0cad365/src-tauri/tauri.conf.json because entity not found\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nwarning: build failed, waiting for other jobs to finish...\n"
 }

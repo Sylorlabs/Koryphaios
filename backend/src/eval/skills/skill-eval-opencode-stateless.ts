@@ -66,9 +66,11 @@ function resolveBinary(): string {
 
 function disposableCwd(workingDirectory?: string): string {
   const parent = canonicalizePath(tmpdir());
-  for (const root of [resolve(import.meta.dir, '../../../..'), process.cwd(), workingDirectory].filter(
-    (value): value is string => !!value,
-  )) {
+  for (const root of [
+    resolve(import.meta.dir, '../../../..'),
+    process.cwd(),
+    workingDirectory,
+  ].filter((value): value is string => !!value)) {
     if (isContainedBy(canonicalizePath(root), parent)) throw unavailable();
   }
   // No configuration, authentication, prompt, or workspace files are staged here.

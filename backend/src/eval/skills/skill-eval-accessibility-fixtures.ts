@@ -153,8 +153,9 @@ function fieldWithDetail(row: EvidenceObject, pattern: RegExp, minLength = 18): 
 
 function rowName(row: EvidenceObject): string {
   const named = Object.entries(row).find(
-    ([key, value]) => /^(?:task(?:id|name)?|channel(?:id|name)?|id|name|scope)$/iu.test(key)
-      && typeof value === 'string',
+    ([key, value]) =>
+      /^(?:task(?:id|name)?|channel(?:id|name)?|id|name|scope)$/iu.test(key) &&
+      typeof value === 'string',
   );
   return typeof named?.[1] === 'string' ? named[1].toLowerCase().trim() : '';
 }
@@ -180,16 +181,20 @@ function completeTaskContract(row: EvidenceObject): boolean {
 
 function plannedMatrixRow(row: EvidenceObject): boolean {
   const status = evidenceText(row.status ?? row.executionStatus).toLowerCase();
-  const result = 'observedResult' in row
-    ? row.observedResult
-    : 'actualResult' in row
-      ? row.actualResult
-      : row.result;
+  const result =
+    'observedResult' in row
+      ? row.observedResult
+      : 'actualResult' in row
+        ? row.actualResult
+        : row.result;
   const declaredResult = ['observedResult', 'actualResult', 'result'].some((key) => key in row);
   return (
     /^(planned|untested|unverified|blocked|not[ -]?run)$/u.test(status) &&
     declaredResult &&
-    (result === null || /^(none|pending|not[ -]?(?:run|observed|executed)|unverified|untested|n\/a)$/iu.test(evidenceText(result))) &&
+    (result === null ||
+      /^(none|pending|not[ -]?(?:run|observed|executed)|unverified|untested|n\/a)$/iu.test(
+        evidenceText(result),
+      )) &&
     fieldWithDetail(row, /platform|operating.?system|device|game.?build/iu, 3) &&
     fieldWithDetail(row, /input|assistive|screen.?reader|controller|configuration/iu, 3) &&
     fieldWithDetail(row, /expected|observable|assertion/iu) &&
@@ -200,30 +205,46 @@ function plannedMatrixRow(row: EvidenceObject): boolean {
 }
 
 function fullTaskMatrix(value: unknown, requiredTasks: readonly string[]): EvidenceObject[] | null {
-  const rows = rowsUnder(value, /matrix|verification|validation.?plan|test.?plan/iu)
-    .filter(plannedMatrixRow);
+  const rows = rowsUnder(value, /matrix|verification|validation.?plan|test.?plan/iu).filter(
+    plannedMatrixRow,
+  );
   return coversNamedRows(rows, requiredTasks, () => true) ? rows : null;
 }
 
 function regressionOracles(value: unknown, signatures: readonly RegExp[]): boolean {
-  const rows = rowsUnder(value, /oracle|regression|failure.?probe/iu)
-    .filter((row) =>
+  const rows = rowsUnder(value, /oracle|regression|failure.?probe/iu).filter(
+    (row) =>
       fieldWithDetail(row, /trigger|setup|reproduc|scenario/iu) &&
       fieldWithDetail(row, /fail|regression|broken|negative/iu) &&
       fieldWithDetail(row, /recover|invariant|restore|rollback|correct/iu),
-    );
+  );
   return signatures.every((signature) => rows.some((row) => signature.test(evidenceText(row))));
 }
 
 const EDITOR_TASKS = [
-  'open-project', 'navigate-project', 'edit', 'search', 'diagnostics',
-  'command-discovery', 'conflict-resolution', 'interruption-recovery',
+  'open-project',
+  'navigate-project',
+  'edit',
+  'search',
+  'diagnostics',
+  'command-discovery',
+  'conflict-resolution',
+  'interruption-recovery',
 ] as const;
 const GAME_TASKS = [
-  'menu', 'tutorial', 'combat', 'coop-communication', 'pause-settings', 'recovery',
+  'menu',
+  'tutorial',
+  'combat',
+  'coop-communication',
+  'pause-settings',
+  'recovery',
 ] as const;
 const GAME_CHANNELS = [
-  'dialogue', 'non-speech-audio', 'visual-events', 'combat-status', 'communication',
+  'dialogue',
+  'non-speech-audio',
+  'visual-events',
+  'combat-status',
+  'communication',
 ] as const;
 
 function editorContractGood(value: unknown): boolean {
@@ -234,15 +255,29 @@ function editorContractGood(value: unknown): boolean {
   const text = evidenceText(value).toLowerCase();
   const matrixText = evidenceText(matrix).toLowerCase();
   return (
-    /macos|mac os/u.test(matrixText) && /voiceover/u.test(matrixText) &&
-    /windows/u.test(matrixText) && /nvda|narrator/u.test(matrixText) &&
-    /keyboard/u.test(matrixText) && /switch|voice.?control|speech.?input|alternate.?input/u.test(matrixText) &&
-    /focus/u.test(text) && /select/u.test(text) && /recycl|virtualiz/u.test(text) &&
-    /diagnos/u.test(text) && /async|live.?update/u.test(text) &&
-    /conflict/u.test(text) && /unsaved|dirty/u.test(text) && /sync|restart/u.test(text) &&
-    /tree/u.test(text) && /grid/u.test(text) && /role/u.test(text) && /name/u.test(text) &&
-    /state/u.test(text) && /relationship/u.test(text) &&
-    /contrast/u.test(text) && /motion/u.test(text) && /scal|zoom/u.test(text) &&
+    /macos|mac os/u.test(matrixText) &&
+    /voiceover/u.test(matrixText) &&
+    /windows/u.test(matrixText) &&
+    /nvda|narrator/u.test(matrixText) &&
+    /keyboard/u.test(matrixText) &&
+    /switch|voice.?control|speech.?input|alternate.?input/u.test(matrixText) &&
+    /focus/u.test(text) &&
+    /select/u.test(text) &&
+    /recycl|virtualiz/u.test(text) &&
+    /diagnos/u.test(text) &&
+    /async|live.?update/u.test(text) &&
+    /conflict/u.test(text) &&
+    /unsaved|dirty/u.test(text) &&
+    /sync|restart/u.test(text) &&
+    /tree/u.test(text) &&
+    /grid/u.test(text) &&
+    /role/u.test(text) &&
+    /name/u.test(text) &&
+    /state/u.test(text) &&
+    /relationship/u.test(text) &&
+    /contrast/u.test(text) &&
+    /motion/u.test(text) &&
+    /scal|zoom/u.test(text) &&
     /untested|unverified/u.test(text) &&
     regressionOracles(value, [/recycl|filter/u, /diagnos/u, /conflict/u, /sav|sync|interrupt/u])
   );
@@ -254,9 +289,13 @@ function gameImplementationText(value: unknown): string {
   const scope = value.scope;
   const artifact = value.artifact;
   const implementation = { ...value };
-  if (isEvidenceObject(artifact) && typeof artifact.guidancePosition === 'string' &&
-    /\b(?:out of scope|not applicable|excluded|do not use|not used|never used|avoid)\b/iu
-      .test(artifact.guidancePosition)) {
+  if (
+    isEvidenceObject(artifact) &&
+    typeof artifact.guidancePosition === 'string' &&
+    /\b(?:out of scope|not applicable|excluded|do not use|not used|never used|avoid)\b/iu.test(
+      artifact.guidancePosition,
+    )
+  ) {
     const { guidancePosition, ...metadata } = artifact;
     implementation.artifact = metadata;
   }
@@ -264,8 +303,10 @@ function gameImplementationText(value: unknown): string {
     const { excludedClaims, ...remainingScope } = scope;
     const entries = Array.isArray(excludedClaims) ? excludedClaims : [excludedClaims];
     const assertedImplementations = entries.filter(
-      (entry) => !/\b(?:out of scope|not applicable|excluded|do not use|not used|never used|avoid)\b/iu
-        .test(evidenceText(entry)),
+      (entry) =>
+        !/\b(?:out of scope|not applicable|excluded|do not use|not used|never used|avoid)\b/iu.test(
+          evidenceText(entry),
+        ),
     );
     implementation.scope = {
       ...remainingScope,
@@ -278,34 +319,60 @@ function gameImplementationText(value: unknown): string {
 function gameContractGood(value: unknown): boolean {
   if (!isEvidenceObject(value)) return false;
   const tasks = rowsUnder(value, /task.?contract|task.?access|^tasks$/iu);
-  const channels = rowsUnder(value, /channel.?cover|channel.?alternative|information.?channel|^channels$/iu);
+  const channels = rowsUnder(
+    value,
+    /channel.?cover|channel.?alternative|information.?channel|^channels$/iu,
+  );
   const matrix = fullTaskMatrix(value, GAME_TASKS);
   if (
-    !coversNamedRows(tasks, GAME_TASKS, completeTaskContract) || !matrix ||
-    !coversNamedRows(channels, GAME_CHANNELS, (row) =>
-      fieldWithDetail(row, /information|barrier|source|meaning|content/iu) &&
-      fieldWithDetail(row, /alternate|alternative|equivalent|fallback|redundan/iu) &&
-      fieldWithDetail(row, /behavior|delivery|implementation|expected/iu),
+    !coversNamedRows(tasks, GAME_TASKS, completeTaskContract) ||
+    !matrix ||
+    !coversNamedRows(
+      channels,
+      GAME_CHANNELS,
+      (row) =>
+        fieldWithDetail(row, /information|barrier|source|meaning|content/iu) &&
+        fieldWithDetail(row, /alternate|alternative|equivalent|fallback|redundan/iu) &&
+        fieldWithDetail(row, /behavior|delivery|implementation|expected/iu),
     )
-  ) return false;
+  )
+    return false;
   const text = evidenceText(value).toLowerCase();
   const matrixText = evidenceText(matrix).toLowerCase();
   return (
-    /controller/u.test(matrixText) && /keyboard|adaptive|switch|alternate.?input/u.test(matrixText) &&
-    /remap/u.test(text) && /confirm/u.test(text) && /back/u.test(text) && /pause/u.test(text) &&
-    /disconnect/u.test(text) && /reconnect/u.test(text) &&
-    /direction/u.test(text) && /urgen/u.test(text) && /alarm/u.test(text) &&
-    /telegraph/u.test(text) && /colou?r/u.test(text) &&
-    /health/u.test(text) && /stamina/u.test(text) && /ammo|ammunition/u.test(text) &&
-    /camera/u.test(text) && /motion/u.test(text) &&
-    /upgrade/u.test(text) && /focus|selection/u.test(text) &&
-    /co.?op/u.test(text) && /ping|text.?chat/u.test(text) &&
-    /online/u.test(text) && /offline|solo/u.test(text) &&
+    /controller/u.test(matrixText) &&
+    /keyboard|adaptive|switch|alternate.?input/u.test(matrixText) &&
+    /remap/u.test(text) &&
+    /confirm/u.test(text) &&
+    /back/u.test(text) &&
+    /pause/u.test(text) &&
+    /disconnect/u.test(text) &&
+    /reconnect/u.test(text) &&
+    /direction/u.test(text) &&
+    /urgen/u.test(text) &&
+    /alarm/u.test(text) &&
+    /telegraph/u.test(text) &&
+    /colou?r/u.test(text) &&
+    /health/u.test(text) &&
+    /stamina/u.test(text) &&
+    /ammo|ammunition/u.test(text) &&
+    /camera/u.test(text) &&
+    /motion/u.test(text) &&
+    /upgrade/u.test(text) &&
+    /focus|selection/u.test(text) &&
+    /co.?op/u.test(text) &&
+    /ping|text.?chat/u.test(text) &&
+    /online/u.test(text) &&
+    /offline|solo/u.test(text) &&
     /untested|unverified/u.test(text) &&
     !/\bdom\b|\bcss\b/u.test(gameImplementationText(value)) &&
     regressionOracles(value, [
-      /remap|collision/u, /disconnect|reconnect/u, /alarm|direction/u,
-      /telegraph|colo(u)?r/u, /upgrade/u, /online|co.?op|shared/u,
+      /remap|collision/u,
+      /disconnect|reconnect/u,
+      /alarm|direction/u,
+      /telegraph|colo(u)?r/u,
+      /upgrade/u,
+      /online|co.?op|shared/u,
     ])
   );
 }

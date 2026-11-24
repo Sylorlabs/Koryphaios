@@ -58,11 +58,7 @@ const TRAILING_FILLER = /(?:[\s,]+(?:please|thanks|thank you|now|for me))+$/i;
  * sentence punctuation at the ends removed, filler words trimmed.
  */
 export function cleanUtterance(text: string): string {
-  let out = text
-    .replace(/[‘’]/g, "'")
-    .replace(/[“”]/g, '"')
-    .replace(/\s+/g, ' ')
-    .trim();
+  let out = text.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim();
   out = out.replace(/^[\s.,!?;:"'-]+/, '').replace(/[\s.,!?;:"'-]+$/, '');
   out = out.replace(LEADING_FILLER, '');
   out = out.replace(TRAILING_FILLER, '');
@@ -450,9 +446,10 @@ const RULES: Rule[] = [
       const target = parseAgentTarget(m[1]);
       if (target) return { type: 'status', target };
     }
-    const how = /^(?:how is|hows|how are|is|are)\s+(.+?)\s+(?:doing|going|getting on|done|finished)$/.exec(
-      form,
-    );
+    const how =
+      /^(?:how is|hows|how are|is|are)\s+(.+?)\s+(?:doing|going|getting on|done|finished)$/.exec(
+        form,
+      );
     if (how) {
       const target = parseAgentTarget(how[1]);
       if (target) return { type: 'status', target };
@@ -527,8 +524,9 @@ const RULES: Rule[] = [
     ).exec(clean);
     if (m) {
       const who = m[1].trim();
-      const target =
-        /^(?:it|him|her|them|you)$/i.test(who) ? ({ kind: 'manager' } as const) : parseAgentTarget(who);
+      const target = /^(?:it|him|her|them|you)$/i.test(who)
+        ? ({ kind: 'manager' } as const)
+        : parseAgentTarget(who);
       if (target && target.kind !== 'all') {
         const message = capitalize(m[2]);
         if (message) return { type: 'steer', target, message };
@@ -594,7 +592,12 @@ export function matchWakePhrase(text: string, phrase: string): WakeMatch {
   if (!name) return none;
   const spellings = name === 'kory' ? KORY_SPELLINGS : [name];
   const namePattern = spellings
-    .map((spelling) => spelling.split(' ').map(escapeRegExp).join(String.raw`[\s,]+`))
+    .map((spelling) =>
+      spelling
+        .split(' ')
+        .map(escapeRegExp)
+        .join(String.raw`[\s,]+`),
+    )
     .join('|');
   const re = new RegExp(
     String.raw`^[\s"'(]*(?:(hey|hi|ok|okay|yo)[\s,]+)?(?:${namePattern})(?![\p{L}\p{N}])([\s]*[,.:;!?—-]+)?[\s]*(.*)$`,

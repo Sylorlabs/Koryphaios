@@ -69,7 +69,7 @@ export function recordUsage(
   attribution?: { accountId?: string; sessionId?: string; runRef?: RunRevisionRef },
   cacheUsage?: {
     reportedCostUsd?: number;
-  cacheReadTokens?: number;
+    cacheReadTokens?: number;
     cacheWriteTokens?: number;
     ttftMs?: number;
     latencyMs?: number;

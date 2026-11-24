@@ -275,9 +275,9 @@ describe('WorkerPipelineService project ownership and checkpoint acknowledgement
 
     expect(result).toContain('PASS');
     expect(readFileSync(join(repo, 'worker-output.txt'), 'utf8')).toContain('session worker');
-    expect(gitOutput(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm) ?? []).toHaveLength(
-      1,
-    );
+    expect(
+      gitOutput(repo, 'worktree', 'list', '--porcelain').match(/^worktree /gm) ?? [],
+    ).toHaveLength(1);
     expect(existsSync(join(repo, '.trees'))).toBe(false);
     expect(workflowStates.at(-1)).toBe('idle');
   });
@@ -315,7 +315,7 @@ describe('WorkerPipelineService project ownership and checkpoint acknowledgement
     expect(readFileSync(join(repo, 'worker-output.txt'), 'utf8')).toContain('session worker');
   });
 
-  test("auto mode follows the per-task worktree argument and defaults to isolation", async () => {
+  test('auto mode follows the per-task worktree argument and defaults to isolation', async () => {
     const repo = makeRepo('kory-worker-auto');
     const state = new SessionStateService();
     const workflowStates: string[] = [];
@@ -355,9 +355,7 @@ describe('WorkerPipelineService project ownership and checkpoint acknowledgement
       'Implement the isolated file',
     );
     expect(isolated).toContain('PASS');
-    expect(gitOutput(repo, 'log', '-1', '--format=%s')).toContain(
-      'Implement the isolated file',
-    );
+    expect(gitOutput(repo, 'log', '-1', '--format=%s')).toContain('Implement the isolated file');
   });
 
   test("always mode ignores the tool's worktree argument", async () => {

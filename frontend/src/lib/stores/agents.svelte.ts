@@ -315,7 +315,9 @@ export function getSessionAgents(sessionId: string): AgentState[] {
 
 /** In-flight tool calls keyed (sessionId, agentId) → callId → call. The agent
  *  rail reads the latest entry to render what the agent is doing right now. */
-let agentCurrentTools = $state(new Map<string, Map<string, { name: string; input?: Record<string, unknown> }>>());
+let agentCurrentTools = $state(
+  new Map<string, Map<string, { name: string; input?: Record<string, unknown> }>>(),
+);
 
 export function noteAgentToolCall(
   sessionId: string | undefined,
@@ -413,7 +415,11 @@ function patchAgentThreadEntry(
   patch: Partial<FeedEntry>,
 ): FeedEntry {
   const updated = { ...target, ...patch };
-  setAgentThreadFeed(sessionId, agentId, current.map((row) => row.id === target.id ? updated : row));
+  setAgentThreadFeed(
+    sessionId,
+    agentId,
+    current.map((row) => (row.id === target.id ? updated : row)),
+  );
   return updated;
 }
 
@@ -733,10 +739,13 @@ export function updateUsage(sessionId: string, agentId: string, payload: StreamU
   if (agentId === MANAGER_ID) {
     if (
       (!managerContextSelection || managerContextSelection.sessionId !== sessionId) &&
-      payload.usageKnown === true && payload.provider && payload.model
+      payload.usageKnown === true &&
+      payload.provider &&
+      payload.model
     ) {
       pendingManagerLiveUsage.set(sessionId, {
-        ...payload, breakdown: payload.breakdown ? { ...payload.breakdown } : undefined,
+        ...payload,
+        breakdown: payload.breakdown ? { ...payload.breakdown } : undefined,
       });
       if (pendingManagerLiveUsage.size > 100) {
         pendingManagerLiveUsage.delete(pendingManagerLiveUsage.keys().next().value!);
@@ -806,10 +815,7 @@ export function updateUsage(sessionId: string, agentId: string, payload: StreamU
 
 /** Seed the manager's usage from a persisted snapshot (session reload) so the
  *  context bar shows real data before any new turn runs. */
-export function seedManagerUsage(
-  sessionId: string,
-  usage: ManagerUsageSnapshot,
-): boolean {
+export function seedManagerUsage(sessionId: string, usage: ManagerUsageSnapshot): boolean {
   const agent = ensureAgent(sessionId, MANAGER_ID);
   if (!agent) return false;
   // Legacy snapshots have no provider/model provenance: fail closed.
@@ -1564,24 +1570,29 @@ async function loadAgentThreads(sessionId: string): Promise<void> {
     if (
       sessionRemovalGeneration !== removalGeneration ||
       sessionStore.activeSessionId !== sessionId
-    ) return;
+    )
+      return;
 
     for (const thread of data.data) {
       const key = agentKey(sessionId, thread.agent.id);
       const existing = agents.get(key);
-      const selectedManager = thread.agent.id === 'kory-manager' &&
-        managerContextSelection?.sessionId === sessionId ? managerContextSelection : null;
+      const selectedManager =
+        thread.agent.id === 'kory-manager' && managerContextSelection?.sessionId === sessionId
+          ? managerContextSelection
+          : null;
       agents.set(
         key,
         reactiveAgent({
           ...existing,
           // Thread identity describes the last persisted run. The composer
           // owns the current manager route, including before the next run.
-          identity: selectedManager ? {
-            ...thread.agent,
-            provider: selectedManager.provider as AgentIdentity['provider'],
-            model: selectedManager.model,
-          } : thread.agent,
+          identity: selectedManager
+            ? {
+                ...thread.agent,
+                provider: selectedManager.provider as AgentIdentity['provider'],
+                model: selectedManager.model,
+              }
+            : thread.agent,
           status: thread.status,
           content: existing?.content ?? '',
           thinking: existing?.thinking ?? '',
@@ -1628,7 +1639,8 @@ async function loadAgentThreadMessages(sessionId: string, agentId: string): Prom
       data?.ok === false ||
       !Array.isArray(data?.data) ||
       sessionRemovalGeneration !== removalGeneration
-    ) return;
+    )
+      return;
     const identity = getAgent(sessionId, agentId)?.identity;
     const entries = data.data.map((entry) => ({
       id: `ath-${entry.id}`,
@@ -1677,7 +1689,11 @@ function steeringKey(sessionId: string, agentId: string): string {
   return `${sessionId}:${agentId}`;
 }
 
-function setAgentSteeringQueue(sessionId: string, agentId: string, commands: AgentSteeringCommand[]): void {
+function setAgentSteeringQueue(
+  sessionId: string,
+  agentId: string,
+  commands: AgentSteeringCommand[],
+): void {
   agentSteeringQueues = new Map(agentSteeringQueues).set(steeringKey(sessionId, agentId), commands);
 }
 
@@ -1687,9 +1703,18 @@ function getAgentSteeringQueue(sessionId: string, agentId: string): AgentSteerin
 
 async function loadAgentSteeringQueue(sessionId: string, agentId: string): Promise<void> {
   const removalGeneration = sessionRemovalGeneration;
-  const response = await apiFetch(apiUrl(`/api/agent/${encodeURIComponent(agentId)}/steering?sessionId=${encodeURIComponent(sessionId)}`));
-  const data = await parseJsonResponse<{ ok?: boolean; data?: AgentSteeringCommand[]; error?: string }>(response);
-  if (!response.ok || data.ok === false) throw new Error(data.error ?? 'Steering queue could not be loaded.');
+  const response = await apiFetch(
+    apiUrl(
+      `/api/agent/${encodeURIComponent(agentId)}/steering?sessionId=${encodeURIComponent(sessionId)}`,
+    ),
+  );
+  const data = await parseJsonResponse<{
+    ok?: boolean;
+    data?: AgentSteeringCommand[];
+    error?: string;
+  }>(response);
+  if (!response.ok || data.ok === false)
+    throw new Error(data.error ?? 'Steering queue could not be loaded.');
   if (sessionRemovalGeneration !== removalGeneration) return;
   setAgentSteeringQueue(sessionId, agentId, data.data ?? []);
 }

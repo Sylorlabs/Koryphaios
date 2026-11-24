@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createConceptFixtures, scoreConceptFixture } from '../../eval/skills/skill-eval-concept-fixtures';
+import {
+  createConceptFixtures,
+  scoreConceptFixture,
+} from '../../eval/skills/skill-eval-concept-fixtures';
 import { SYSTEMS_PROTOCOL_CONCEPTS } from '../../eval/skills/skill-eval-systems-protocol-concept-fixtures';
 
 const definition = SYSTEMS_PROTOCOL_CONCEPTS.find(
@@ -89,7 +92,10 @@ describe('LLM application refund fixture contract', () => {
       integrityFailure: false,
     });
 
-    writeFileSync(candidate, validDecision.replace('if (priorReceipts.includes(key))', 'if (false)'));
+    writeFileSync(
+      candidate,
+      validDecision.replace('if (priorReceipts.includes(key))', 'if (false)'),
+    );
     expect(scoreConceptFixture(definition, root)).toMatchObject({
       passed: false,
       quality: 0.75,

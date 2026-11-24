@@ -4,23 +4,11 @@
   "version": "5.1.0",
   "skillKind": "workflow",
   "selectionMode": "conditional",
-  "domains": [
-    "ui",
-    "native"
-  ],
-  "targetMedia": [
-    "native",
-    "mobile"
-  ],
+  "domains": ["ui", "native"],
+  "targetMedia": ["native", "mobile"],
   "contextBudget": 3600,
-  "broader": [
-    "visual-interface-design",
-    "frontend-engineering"
-  ],
-  "facets": [
-    "interaction-design",
-    "accessibility-practice"
-  ],
+  "broader": ["visual-interface-design", "frontend-engineering"],
+  "facets": ["interaction-design", "accessibility-practice"],
   "requires": [],
   "conflicts": [],
   "activation": [
@@ -68,14 +56,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "desktop-electron-tauri",
-          "visual-verification"
-        ],
-        "tags": [
-          "desktop",
-          "windowed"
-        ]
+        "adjacentSkills": ["desktop-electron-tauri", "visual-verification"],
+        "tags": ["desktop", "windowed"]
       },
       {
         "id": "native-interface-ambiguous-mobile",
@@ -83,15 +65,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "ios-swiftui",
-          "android-compose",
-          "react-native-expo"
-        ],
-        "tags": [
-          "mobile",
-          "lifecycle"
-        ]
+        "adjacentSkills": ["ios-swiftui", "android-compose", "react-native-expo"],
+        "tags": ["mobile", "lifecycle"]
       },
       {
         "id": "native-interface-ambiguous-cross-platform",
@@ -99,15 +74,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "desktop-electron-tauri",
-          "react-native-expo",
-          "frontend-engineering"
-        ],
-        "tags": [
-          "cross-platform",
-          "platform-divergence"
-        ]
+        "adjacentSkills": ["desktop-electron-tauri", "react-native-expo", "frontend-engineering"],
+        "tags": ["cross-platform", "platform-divergence"]
       }
     ],
     "adversarial": [
@@ -117,13 +85,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "debugging",
-          "concurrency-debugging"
-        ],
-        "tags": [
-          "quoted-decoy"
-        ]
+        "adjacentSkills": ["debugging", "concurrency-debugging"],
+        "tags": ["quoted-decoy"]
       },
       {
         "id": "native-interface-adversarial-negated",
@@ -131,13 +94,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "migration-planning",
-          "relational-data-modeling"
-        ],
-        "tags": [
-          "negation"
-        ]
+        "adjacentSkills": ["migration-planning", "relational-data-modeling"],
+        "tags": ["negation"]
       },
       {
         "id": "native-interface-adversarial-pasted",
@@ -145,13 +103,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "backup-recovery",
-          "cost-finops"
-        ],
-        "tags": [
-          "pasted-decoy"
-        ]
+        "adjacentSkills": ["backup-recovery", "cost-finops"],
+        "tags": ["pasted-decoy"]
       }
     ]
   },

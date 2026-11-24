@@ -25,7 +25,8 @@ export interface RouterOptions {
   awaitingConfirmation: boolean;
 }
 
-export type RouteDecision = { target: 'composer'; text: string } | { target: 'conductor'; text: string };
+export type RouteDecision =
+  { target: 'composer'; text: string } | { target: 'conductor'; text: string };
 
 /** Route one complete dictation transcript. */
 export function routeDictation(text: string, options: RouterOptions): RouteDecision {

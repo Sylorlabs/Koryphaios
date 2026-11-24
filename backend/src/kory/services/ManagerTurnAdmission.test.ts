@@ -1336,11 +1336,16 @@ describe('KoryManager turn admission', () => {
             get(id: string): { delivery: string; status: string; result?: string } | undefined;
           };
         };
-        peek(id: string): { runClaimed: boolean; pendingSteerInputs: Map<string, unknown> } | undefined;
+        peek(
+          id: string,
+        ): { runClaimed: boolean; pendingSteerInputs: Map<string, unknown> } | undefined;
       };
       runWorkerPipeline: (...args: unknown[]) => Promise<string>;
       startSessionTurn: (input: { source: string; userMessage: string }) => Promise<unknown>;
-      delegateWorkerForCaller: (sessionId: string, request: Record<string, unknown>) => Promise<string>;
+      delegateWorkerForCaller: (
+        sessionId: string,
+        request: Record<string, unknown>,
+      ) => Promise<string>;
       waitForAsyncChildren: (sessionId: string, input: Record<string, unknown>) => Promise<string>;
     };
 
@@ -1375,7 +1380,9 @@ describe('KoryManager turn admission', () => {
         expect(admitted[0]!.userMessage).toContain('[Host: background worker results]');
         expect(admitted[0]!.userMessage).toContain(`Worker ${agentId} (completed).`);
         expect(admitted[0]!.userMessage).toContain('Worker found the answer.');
-        expect(internal.runtimes.get(sessionId).asyncChildren.get(agentId!)?.delivery).toBe('delivered');
+        expect(internal.runtimes.get(sessionId).asyncChildren.get(agentId!)?.delivery).toBe(
+          'delivered',
+        );
       } finally {
         await manager.shutdown();
         sqlite.close();
@@ -1415,7 +1422,9 @@ describe('KoryManager turn admission', () => {
         expect(joined).toContain('Slow result.');
         // The claimed result must not stop the turn or be delivered again.
         expect(internal.runtimes.get(sessionId).pendingSteerInputs.size).toBe(0);
-        expect(internal.runtimes.get(sessionId).asyncChildren.get(agentId)?.delivery).toBe('delivered');
+        expect(internal.runtimes.get(sessionId).asyncChildren.get(agentId)?.delivery).toBe(
+          'delivered',
+        );
         expect(admitted).toHaveLength(0);
       } finally {
         internal.runtimes.get(sessionId).runClaimed = false;

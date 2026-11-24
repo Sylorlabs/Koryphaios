@@ -1,10 +1,6 @@
 {
   "identifier": "main",
   "description": "The fixture main window only gets core window/event support; native picker belongs to Rust.",
-  "windows": [
-    "main"
-  ],
-  "permissions": [
-    "core:default"
-  ]
+  "windows": ["main"],
+  "permissions": ["core:default"]
 }

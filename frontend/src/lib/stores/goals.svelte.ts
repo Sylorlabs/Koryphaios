@@ -185,9 +185,7 @@ onSessionsRemoved((sessionIds) => {
       ...goal,
       linkedSessionIds: goal.linkedSessionIds.filter((id) => !sessionIds.has(id)),
       execution:
-        goal.execution && sessionIds.has(goal.execution.sessionId)
-          ? undefined
-          : goal.execution,
+        goal.execution && sessionIds.has(goal.execution.sessionId) ? undefined : goal.execution,
     }));
   if (!goals.some((goal) => goal.id === selectedGoalId)) selectedGoalId = '';
   scheduleResync();

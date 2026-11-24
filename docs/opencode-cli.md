@@ -40,7 +40,7 @@ Models appear with real `limit.context` (marked context-verified), real `limit.o
 ## Tool boundary and permissions
 
 - **Host actions** (files, shell, orchestration) flow through the kory MCP bridge and are permission-gated by Kory (including plan mode, autonomy presets, and worker/critic role scoping).
-- **OpenCode's native tools** remain governed by *your* OpenCode permission configuration (`permissions` in `opencode.json`), exactly as when you run opencode yourself. Whatever that configuration *asks* about is vetoed at the ACP layer: read-like kinds (read/search/fetch/think/other) are allowed, native mutating kinds (edit/delete/move/execute) are rejected with instructions to use the kory tools. Rejection is by design — native writes would bypass Kory's approval UX.
+- **OpenCode's native tools** remain governed by _your_ OpenCode permission configuration (`permissions` in `opencode.json`), exactly as when you run opencode yourself. Whatever that configuration _asks_ about is vetoed at the ACP layer: read-like kinds (read/search/fetch/think/other) are allowed, native mutating kinds (edit/delete/move/execute) are rejected with instructions to use the kory tools. Rejection is by design — native writes would bypass Kory's approval UX.
 - Research-only turns run `mode: "plan"` with no Kory bridge and no writes.
 - Sandboxed turns (remote delegation) run under the OS jail with only opencode's own config/state/cache roots writable.
 

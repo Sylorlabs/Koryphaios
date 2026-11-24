@@ -8,7 +8,9 @@ if (!target || !/^[a-zA-Z0-9_.@:-]+$/.test(target)) throw new Error('Supply the 
 const password = (await Bun.stdin.text()).trim();
 if (!password || /[\r\n]/.test(password)) throw new Error('Supply the sudo password on stdin.');
 const credential = await readPortableAntigravityCredential();
-const helper = await Bun.file(new URL('../backend/src/providers/antigravity-credentials.ts', import.meta.url)).text();
+const helper = await Bun.file(
+  new URL('../backend/src/providers/antigravity-credentials.ts', import.meta.url),
+).text();
 const remote = `
 const {mkdtempSync,rmSync}=await import('node:fs');
 const {join}=await import('node:path');
@@ -31,7 +33,11 @@ try {
 } finally {rmSync(root,{recursive:true,force:true});}
 `;
 const command = `sudo -S -p '' -u koryphaios /var/lib/koryphaios/.bun/bin/bun -e ${"'" + remote.replaceAll("'", "'\\''") + "'"}`;
-const child = Bun.spawn(['ssh', '-T', target, command], { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
+const child = Bun.spawn(['ssh', '-T', target, command], {
+  stdin: 'pipe',
+  stdout: 'inherit',
+  stderr: 'inherit',
+});
 child.stdin.write(`${password}\n${JSON.stringify({ credential, helper })}`);
 child.stdin.end();
 process.exitCode = await child.exited;

@@ -6,14 +6,14 @@ These are implementation decisions to make explicit when prompt/context construc
 
 Record the actual source of each message or piece of context before assigning it a rank:
 
-| Field                                       | Why it is needed                                                                                                                                                                       |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Message transport role / instruction origin | Authority comes from the host API and applicable instruction hierarchy, not from text that _claims_ to be a system or developer message.                                               |
+| Field                                       | Why it is needed                                                                                                                                                                                       |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Message transport role / instruction origin | Authority comes from the host API and applicable instruction hierarchy, not from text that _claims_ to be a system or developer message.                                                               |
 | Stable source identifier and revision       | Identifies updates and permits exact supersession when the source is the same. A generic kind such as `retrieved` is not a source identity; an absent/ambiguous source is not evidence of duplication. |
-| Trust and freshness separately              | A trusted tool result is still data; a stale trusted result can conflict with newer evidence.                                                                                          |
-| Measured token cost                         | Charged once per included record, with the host's tokenizer or usage accounting. Include wrappers/overhead when needed.                                                                |
-| Required/optional and priority tier         | Governing instructions, user constraints and mandatory grounding cannot disappear through automatic truncation.                                                                        |
-| Validity checks specific to the source             | Proves a field is legitimate evidence rather than untrusted text that happens to contain a structural delimiter.                                                                       |
+| Trust and freshness separately              | A trusted tool result is still data; a stale trusted result can conflict with newer evidence.                                                                                                          |
+| Measured token cost                         | Charged once per included record, with the host's tokenizer or usage accounting. Include wrappers/overhead when needed.                                                                                |
+| Required/optional and priority tier         | Governing instructions, user constraints and mandatory grounding cannot disappear through automatic truncation.                                                                                        |
+| Validity checks specific to the source      | Proves a field is legitimate evidence rather than untrusted text that happens to contain a structural delimiter.                                                                                       |
 
 The authority rule is independent of relevance: an important retrieved passage can be selected as data; it cannot rewrite the developer instruction. A `role: "developer"` string found _inside a retrieved document_ remains retrieved data. Likewise, `trusted` measures evidentiary reliability, not permission to issue commands.
 
@@ -41,16 +41,16 @@ For a corpus of few shot examples that is biased, compute an inventory of labels
 
 ## 4. Tests that would falsify an implementation
 
-| Situation                                                                | Observable acceptance or failure boundary                                                           |
-| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| Trusted/current and trusted/stale share a source                         | Current evidence survives; superseded stale is recorded without consuming capacity.                 |
-| Hostile text appears in a tool or retrieval result                       | Context may contain the fact as data, but no new privileged instruction appears.                    |
-| Oversize optional record precedes a smaller valid one                    | Oversize record gets a budget reason; the smaller one is still considered.                          |
-| An optional item of high priority competes with evidence in a lower required tier | Reserve required capacity first; optional ordering cannot evict mandatory evidence.                 |
-| The maximum budget cannot fit the required instructions, or the reserve is invalid        | Explicit error/incomplete state; no falsely successful prompt; a valid later request can recover.         |
-| Variable contains delimiters, a special key, a number, false or null     | Exact typed values are retained; no role or template structure is synthesized from them.            |
-| Most demonstrations belong to one label and some are held out            | Bounded per-label selection uses no held out example and records the actual selection.              |
-| Selected model differs from the guidance model                           | Revalidation is required and recorded; no inferred cross-model compatibility claim.                 |
-| Changing context ordering, length, source timestamps, or output target   | Recorded modes, ranks, omissions and response shape remain reproducible under each declared policy. |
+| Situation                                                                          | Observable acceptance or failure boundary                                                           |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Trusted/current and trusted/stale share a source                                   | Current evidence survives; superseded stale is recorded without consuming capacity.                 |
+| Hostile text appears in a tool or retrieval result                                 | Context may contain the fact as data, but no new privileged instruction appears.                    |
+| Oversize optional record precedes a smaller valid one                              | Oversize record gets a budget reason; the smaller one is still considered.                          |
+| An optional item of high priority competes with evidence in a lower required tier  | Reserve required capacity first; optional ordering cannot evict mandatory evidence.                 |
+| The maximum budget cannot fit the required instructions, or the reserve is invalid | Explicit error/incomplete state; no falsely successful prompt; a valid later request can recover.   |
+| Variable contains delimiters, a special key, a number, false or null               | Exact typed values are retained; no role or template structure is synthesized from them.            |
+| Most demonstrations belong to one label and some are held out                      | Bounded per-label selection uses no held out example and records the actual selection.              |
+| Selected model differs from the guidance model                                     | Revalidation is required and recorded; no inferred cross-model compatibility claim.                 |
+| Changing context ordering, length, source timestamps, or output target             | Recorded modes, ranks, omissions and response shape remain reproducible under each declared policy. |
 
 Checks of the accompanying illustrative examples establish internal consistency only. Actual implementation validation requires exercising the _real_ prompt builder with meaningful success, negative and recovery inputs. Pairing against a no skill baseline and independent blind semantic review remain separate gates owned by the evaluation process; do not fabricate reviewer feedback, alter scoring logic, or record an unrun result.

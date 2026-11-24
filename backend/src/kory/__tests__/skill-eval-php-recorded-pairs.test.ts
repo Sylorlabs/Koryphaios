@@ -78,46 +78,53 @@ for (const entry of CASES) {
   const archived = join(EVIDENCE_ROOT, entry.artifact, entry.variant);
   const evidenceExists = existsSync(join(archived, 'run-manifest.json'));
   const runTest = phpAvailable && evidenceExists ? test : test.skip;
-  runTest(`PHP recorded ${entry.scenarioId} ${entry.variant}: scorer respects actual candidate evidence`, async () => {
-    const manifest = JSON.parse(readFileSync(join(archived, 'run-manifest.json'), 'utf8')) as {
-      pairId: string;
-      variant: string;
-      scenario: SkillEvalScenarioV3;
-      changes: Array<{ path: string; afterSha256: string }>;
-    };
-    expect(manifest.pairId).toStartWith(`${entry.scenarioId}:`);
-    expect(manifest.variant).toBe(entry.variant);
-    expect(manifest.scenario.id).toBe(entry.scenarioId);
+  runTest(
+    `PHP recorded ${entry.scenarioId} ${entry.variant}: scorer respects actual candidate evidence`,
+    async () => {
+      const manifest = JSON.parse(readFileSync(join(archived, 'run-manifest.json'), 'utf8')) as {
+        pairId: string;
+        variant: string;
+        scenario: SkillEvalScenarioV3;
+        changes: Array<{ path: string; afterSha256: string }>;
+      };
+      expect(manifest.pairId).toStartWith(`${entry.scenarioId}:`);
+      expect(manifest.variant).toBe(entry.variant);
+      expect(manifest.scenario.id).toBe(entry.scenarioId);
 
-    const root = mkdtempSync(join(tmpdir(), 'kory-php-recorded-'));
-    try {
-      const materializer = V5_LANGUAGE_HOST_SKILL_EVAL_MATERIALIZERS.find((item) =>
-        item.matches(manifest.scenario),
-      );
-      const scorer = V5_LANGUAGE_HOST_SKILL_EVAL_SCORERS.find((item) =>
-        item.scenarioIds.includes(entry.scenarioId),
-      );
-      expect(materializer).toBeDefined();
-      expect(scorer).toBeDefined();
-      await materializer!.materialize(root, manifest.scenario);
+      const root = mkdtempSync(join(tmpdir(), 'kory-php-recorded-'));
+      try {
+        const materializer = V5_LANGUAGE_HOST_SKILL_EVAL_MATERIALIZERS.find((item) =>
+          item.matches(manifest.scenario),
+        );
+        const scorer = V5_LANGUAGE_HOST_SKILL_EVAL_SCORERS.find((item) =>
+          item.scenarioIds.includes(entry.scenarioId),
+        );
+        expect(materializer).toBeDefined();
+        expect(scorer).toBeDefined();
+        await materializer!.materialize(root, manifest.scenario);
 
-      for (const change of manifest.changes) {
-        const source = join(archived, 'files', change.path);
-        const recordedBytes = readFileSync(source);
-        expect(createHash('sha256').update('file\0').update(recordedBytes).digest('hex')).toBe(change.afterSha256);
-        copyFileSync(source, join(root, change.path));
+        for (const change of manifest.changes) {
+          const source = join(archived, 'files', change.path);
+          const recordedBytes = readFileSync(source);
+          expect(createHash('sha256').update('file\0').update(recordedBytes).digest('hex')).toBe(
+            change.afterSha256,
+          );
+          copyFileSync(source, join(root, change.path));
+        }
+
+        const scored = await scorer!.score({ workingDirectory: root } as Parameters<
+          typeof scorer.score
+        >[0]);
+        expect(scored.integrityFailure).toBe(false);
+        expect(scored.passed).toBe(entry.expectedPass);
+        const evidence = scored.evidence.join('\n');
+        expect(evidence).toContain('Composer validation: pass');
+        expect(evidence).toContain('candidate regression coverage: present; execution: pass');
+        if (entry.failureEvidence) expect(evidence).toContain(entry.failureEvidence);
+        else expect(evidence).toContain('PHP 8.5.11 runtime checks: pass');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
       }
-
-      const scored = await scorer!.score({ workingDirectory: root } as Parameters<typeof scorer.score>[0]);
-      expect(scored.integrityFailure).toBe(false);
-      expect(scored.passed).toBe(entry.expectedPass);
-      const evidence = scored.evidence.join('\n');
-      expect(evidence).toContain('Composer validation: pass');
-      expect(evidence).toContain('candidate regression coverage: present; execution: pass');
-      if (entry.failureEvidence) expect(evidence).toContain(entry.failureEvidence);
-      else expect(evidence).toContain('PHP 8.5.11 runtime checks: pass');
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 }

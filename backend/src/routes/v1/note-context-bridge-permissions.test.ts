@@ -55,8 +55,8 @@ beforeEach(() => {
       resolveSessionWorkingDirectoryPublic: async () => root,
       hasActiveSessionExecution: () => true,
       tryAcquireSessionMutationBarrier: () => null,
-        isWorkspaceRebindPending: () => false,
-        markWorkspaceMutatedThisTurn: () => undefined,
+      isWorkspaceRebindPending: () => false,
+      markWorkspaceMutatedThisTurn: () => undefined,
       requestToolApproval: async () => {
         approvals++;
         return decision;

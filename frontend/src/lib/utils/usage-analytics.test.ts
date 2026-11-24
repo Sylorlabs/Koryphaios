@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildUsageChartGeometry,
-  deriveUsageWindowView,
-} from './usage-analytics';
+import { buildUsageChartGeometry, deriveUsageWindowView } from './usage-analytics';
 
 describe('usage-analytics', () => {
   it('synthesizes T3-style usage analytics from legacy billingCredits and cliUsage', () => {

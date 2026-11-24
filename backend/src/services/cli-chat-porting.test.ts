@@ -15,9 +15,8 @@ if (isolatedDbDir) {
 
 const { db, initDb, messages, sessions } = await import('../db');
 const { MessageStore } = await import('../stores/message-store');
-const { ALL_CLI_CHAT_PROVIDERS, discoverCliChats, importCliChats } = await import(
-  './cli-chat-porting'
-);
+const { ALL_CLI_CHAT_PROVIDERS, discoverCliChats, importCliChats } =
+  await import('./cli-chat-porting');
 
 const createdSessionIds: string[] = [];
 const tempDirs: string[] = [];
@@ -199,7 +198,14 @@ describe('CLI Chat Porting Service', () => {
         `INSERT INTO sessions (id, working_directory, model, created_at, last_activity_at, title, hidden)
          VALUES (?, ?, ?, ?, ?, ?, 0)`,
       )
-      .run('devin-sess-1', projectBeta, 'devin-default', 1760200000, 1760200120, 'Optimize beta build');
+      .run(
+        'devin-sess-1',
+        projectBeta,
+        'devin-default',
+        1760200000,
+        1760200120,
+        'Optimize beta build',
+      );
     devinDb
       .query(
         `INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
@@ -227,7 +233,11 @@ describe('CLI Chat Porting Service', () => {
         updatedAt: 1760250060000,
         messages: [
           { role: 'user', content: 'Align the header buttons in beta', createdAt: 1760250000000 },
-          { role: 'assistant', content: 'Aligned header buttons with flex gap.', createdAt: 1760250060000 },
+          {
+            role: 'assistant',
+            content: 'Aligned header buttons with flex gap.',
+            createdAt: 1760250060000,
+          },
         ],
       }),
     );
@@ -292,13 +302,7 @@ describe('CLI Chat Porting Service', () => {
 
     // Antigravity chat in projectBeta
     const agyDir = join(homeDir, '.gemini', 'antigravity-cli');
-    const agyLogDir = join(
-      agyDir,
-      'brain',
-      'agy-conv-99',
-      '.system_generated',
-      'logs',
-    );
+    const agyLogDir = join(agyDir, 'brain', 'agy-conv-99', '.system_generated', 'logs');
     mkdirSync(agyLogDir, { recursive: true });
     const agyDb = new Database(join(agyDir, 'conversation_summaries.db'));
     agyDb.run(`
@@ -335,7 +339,8 @@ describe('CLI Chat Porting Service', () => {
         JSON.stringify({
           type: 'USER_INPUT',
           created_at: '2026-10-15T11:59:00Z',
-          content: '<USER_REQUEST><user_request>Review the beta architecture</user_request></USER_REQUEST>',
+          content:
+            '<USER_REQUEST><user_request>Review the beta architecture</user_request></USER_REQUEST>',
         }),
         JSON.stringify({
           type: 'PLANNER_RESPONSE',
@@ -443,7 +448,11 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
     writeFileSync(
       join(dir, 'claude-long.jsonl'),
       [
-        line({ type: 'user', timestamp: at(0), message: { role: 'user', content: 'First prompt' } }),
+        line({
+          type: 'user',
+          timestamp: at(0),
+          message: { role: 'user', content: 'First prompt' },
+        }),
         // Claude Code writes one line per content block of a single API message.
         line({
           type: 'assistant',
@@ -492,7 +501,9 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
           timestamp: at(6),
           message: {
             role: 'user',
-            content: [{ type: 'tool_result', tool_use_id: 'call_1', content: 'edited', is_error: false }],
+            content: [
+              { type: 'tool_result', tool_use_id: 'call_1', content: 'edited', is_error: false },
+            ],
           },
         }),
         line({
@@ -500,7 +511,11 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
           timestamp: at(7),
           message: { role: 'assistant', content: [{ type: 'text', text: 'Done with step one.' }] },
         }),
-        line({ type: 'user', timestamp: at(8), message: { role: 'user', content: 'Middle prompt' } }),
+        line({
+          type: 'user',
+          timestamp: at(8),
+          message: { role: 'user', content: 'Middle prompt' },
+        }),
         line({
           type: 'user',
           timestamp: at(9),
@@ -522,8 +537,8 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
       ].join('\n'),
     );
 
-    const discovered = discoverCliChats({ homeDir, env: {} }).projects
-      .flatMap((g) => g.chats)
+    const discovered = discoverCliChats({ homeDir, env: {} })
+      .projects.flatMap((g) => g.chats)
       .find((c) => c.id === 'claude:claude-long');
     expect(discovered).toBeDefined();
     // Discovery samples never carry structured turn data.
@@ -596,11 +611,24 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
       [4, 3, { message_id: 'a2', role: 'assistant', content: 'Fixed it.' }],
       // Sidekick subagent tree: not the user's conversation.
       [5, null, { message_id: 'sk-sys', role: 'system', content: 'You are the Sidekick' }],
-      [6, 5, { message_id: 'sk-u', role: 'user', content: 'Handoff from the lead', metadata: input }],
+      [
+        6,
+        5,
+        { message_id: 'sk-u', role: 'user', content: 'Handoff from the lead', metadata: input },
+      ],
       [7, 6, { message_id: 'sk-a', role: 'assistant', content: 'Sidekick reply' }],
       // Summarizer run: a separate tree with prompts that are user-role rows.
       [8, null, { message_id: 'sum-sys', role: 'system', content: 'You are a Summarizer' }],
-      [9, 8, { message_id: 'sum-u', role: 'user', content: 'Conversation to summarize: …', metadata: notInput }],
+      [
+        9,
+        8,
+        {
+          message_id: 'sum-u',
+          role: 'user',
+          content: 'Conversation to summarize: …',
+          metadata: notInput,
+        },
+      ],
       // Compaction re-roots the main conversation and repeats earlier rows.
       [10, 0, { message_id: 'cont', role: 'system', content: 'You are continuing work…' }],
       [11, 10, { message_id: 'u1', role: 'user', content: 'Fix the build', metadata: input }],
@@ -633,7 +661,9 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
     // synthetic sub-agent rows where they ran, never as top-level messages.
     expect(parts.map((p) => p.kind)).toEqual(['reasoning', 'text', 'tool', 'text', 'tool', 'tool']);
     expect(toolParts(parts)[0]).toMatchObject({ name: 'exec', output: 'package.json' });
-    const nested = toolParts(parts).slice(1) as Array<Part & { subagent?: { name: string; turns: unknown[] } }>;
+    const nested = toolParts(parts).slice(1) as Array<
+      Part & { subagent?: { name: string; turns: unknown[] } }
+    >;
     expect(nested.map((t) => [t.name, t.subagent?.name])).toEqual([
       ['subagent', 'subagent'],
       ['subagent', 'Context compaction'],
@@ -646,7 +676,15 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
     const homeDir = makeTempHome();
     const project = join(homeDir, 'workspace', 'fb');
     mkdirSync(project, { recursive: true });
-    const chatDir = join(homeDir, '.config', 'manicode', 'projects', 'fb', 'chats', '2026-10-01T10-00-00.000Z');
+    const chatDir = join(
+      homeDir,
+      '.config',
+      'manicode',
+      'projects',
+      'fb',
+      'chats',
+      '2026-10-01T10-00-00.000Z',
+    );
     mkdirSync(chatDir, { recursive: true });
     writeFileSync(
       join(chatDir, 'chat-meta.json'),
@@ -669,7 +707,11 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
     writeFileSync(
       join(chatDir, 'chat-messages.json'),
       JSON.stringify([
-        { id: 'divider-1790000000000', variant: 'ai', blocks: [{ type: 'mode-divider', mode: 'LITE' }] },
+        {
+          id: 'divider-1790000000000',
+          variant: 'ai',
+          blocks: [{ type: 'mode-divider', mode: 'LITE' }],
+        },
         { id: 'user-1790000000000', variant: 'user', content: 'Add providers' },
         {
           id: 'ai-1790000001000-abc',
@@ -678,13 +720,31 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
           blocks: [
             { type: 'text', textType: 'reasoning', content: 'Search first.' },
             { type: 'text', textType: 'text', content: 'Searching.' },
-            { type: 'tool', toolCallId: 'tc1', toolName: 'web_search', input: { query: 'x' }, output: 'results' },
-            { type: 'agent', agentId: 'ag1', agentName: 'code-searcher', agentType: 'code-searcher', content: 'found 3', status: 'complete', blocks: [] },
+            {
+              type: 'tool',
+              toolCallId: 'tc1',
+              toolName: 'web_search',
+              input: { query: 'x' },
+              output: 'results',
+            },
+            {
+              type: 'agent',
+              agentId: 'ag1',
+              agentName: 'code-searcher',
+              agentType: 'code-searcher',
+              content: 'found 3',
+              status: 'complete',
+              blocks: [],
+            },
             { type: 'text', textType: 'text', content: 'Added them.' },
           ],
         },
         { id: 'user-1790000100000', variant: 'user', content: 'Ship it' },
-        { id: 'ai-1790000101000-def', variant: 'ai', blocks: [{ type: 'text', content: 'Shipped.' }] },
+        {
+          id: 'ai-1790000101000-def',
+          variant: 'ai',
+          blocks: [{ type: 'text', content: 'Shipped.' }],
+        },
       ]),
     );
 
@@ -743,12 +803,20 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
       {
         timestamp: ts(1),
         type: 'response_item',
-        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<environment_context>cwd</environment_context>' }] },
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '<environment_context>cwd</environment_context>' }],
+        },
       },
       {
         timestamp: ts(2),
         type: 'response_item',
-        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Port the parser' }] },
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: 'Port the parser' }],
+        },
       },
       {
         timestamp: ts(3),
@@ -758,7 +826,12 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
       {
         timestamp: ts(4),
         type: 'response_item',
-        payload: { type: 'function_call', call_id: 'c1', name: 'exec_command', arguments: '{"cmd":"ls"}' },
+        payload: {
+          type: 'function_call',
+          call_id: 'c1',
+          name: 'exec_command',
+          arguments: '{"cmd":"ls"}',
+        },
       },
       {
         timestamp: ts(5),
@@ -768,12 +841,20 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
       {
         timestamp: ts(6),
         type: 'response_item',
-        payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Ported.' }] },
+        payload: {
+          type: 'message',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'Ported.' }],
+        },
       },
       {
         timestamp: ts(7),
         type: 'response_item',
-        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<turn_aborted>\ninterrupted' }] },
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: '<turn_aborted>\ninterrupted' }],
+        },
       },
     ]
       .map((entry) => JSON.stringify(entry))
@@ -815,7 +896,12 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
     let t = 1760000000000;
     let partId = 0;
     msg.run('m_user', t, JSON.stringify({ role: 'user' }));
-    part.run(`p${partId++}`, 'm_user', t, JSON.stringify({ type: 'text', text: 'Run the experiment' }));
+    part.run(
+      `p${partId++}`,
+      'm_user',
+      t,
+      JSON.stringify({ type: 'text', text: 'Run the experiment' }),
+    );
     // 600 assistant steps, each with step parts and a tool whose id restarts at call_0.
     const steps = 600;
     for (let i = 0; i < steps; i++) {
@@ -838,11 +924,16 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
     }
     t += 10;
     msg.run('m_final', t, JSON.stringify({ role: 'assistant', modelID: 'zen-1' }));
-    part.run(`p${partId++}`, 'm_final', t, JSON.stringify({ type: 'text', text: 'All steps done.' }));
+    part.run(
+      `p${partId++}`,
+      'm_final',
+      t,
+      JSON.stringify({ type: 'text', text: 'All steps done.' }),
+    );
     db.close();
 
-    const discovered = discoverCliChats({ homeDir, env: {} }).projects
-      .flatMap((g) => g.chats)
+    const discovered = discoverCliChats({ homeDir, env: {} })
+      .projects.flatMap((g) => g.chats)
       .find((c) => c.id === 'opencodezen:ses_1');
     expect(discovered?.messageCount).toBe(2);
 
@@ -858,7 +949,12 @@ describe('CLI chat import fidelity (regressions found porting real transcripts)'
 });
 
 describe('CLI chat import: honest time, whole data and nested sub-agents', () => {
-  type Sub = { agentId?: string; name: string; task?: string; turns: Array<Record<string, unknown>> };
+  type Sub = {
+    agentId?: string;
+    name: string;
+    task?: string;
+    turns: Array<Record<string, unknown>>;
+  };
   type Part = {
     kind: string;
     text?: string;
@@ -887,7 +983,9 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
     (sub?.turns ?? []).flatMap((turn) =>
       turn.role === 'user'
         ? [String(turn.text)]
-        : ((turn.parts as Part[]) ?? []).filter((p) => p.kind === 'text').map((p) => String(p.text)),
+        : ((turn.parts as Part[]) ?? [])
+            .filter((p) => p.kind === 'text')
+            .map((p) => String(p.text)),
     );
 
   function deepValue(depth: number): Record<string, unknown> {
@@ -902,7 +1000,8 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
     mkdirSync(dir, { recursive: true });
     const base = Date.parse('2026-10-11T10:00:00.000Z');
     const at = (s: number) => new Date(base + s * 1000).toISOString();
-    const line = (o: Record<string, unknown>) => JSON.stringify({ sessionId: 'claude-time', cwd: project, ...o });
+    const line = (o: Record<string, unknown>) =>
+      JSON.stringify({ sessionId: 'claude-time', cwd: project, ...o });
     const bigOutput = 'o'.repeat(50_000);
     const bigInput = {
       command: 'c'.repeat(10_000),
@@ -922,26 +1021,53 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
         line({
           type: 'assistant',
           timestamp: at(6),
-          message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: bigInput }] },
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tu1', name: 'Bash', input: bigInput }],
+          },
         }),
         line({
           type: 'user',
           timestamp: at(8.5),
-          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu1', content: bigOutput }] },
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tu1', content: bigOutput }],
+          },
         }),
-        line({ type: 'assistant', timestamp: at(9), message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] } }),
+        line({
+          type: 'assistant',
+          timestamp: at(9),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+        }),
         // The source recorded no time for this prompt.
         line({ type: 'user', message: { role: 'user', content: 'Untimed follow-up' } }),
         // Thinking without a recorded duration.
-        line({ type: 'assistant', timestamp: at(20), message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Hmm.' }] } }),
+        line({
+          type: 'assistant',
+          timestamp: at(20),
+          message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Hmm.' }] },
+        }),
         // A call line without a time: its duration cannot be known.
-        line({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'tu2', name: 'Read', input: { path: 'x' } }] } }),
+        line({
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [{ type: 'tool_use', id: 'tu2', name: 'Read', input: { path: 'x' } }],
+          },
+        }),
         line({
           type: 'user',
           timestamp: at(22),
-          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tu2', content: 'contents' }] },
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'tu2', content: 'contents' }],
+          },
         }),
-        line({ type: 'assistant', timestamp: at(23), message: { role: 'assistant', content: [{ type: 'text', text: 'Final.' }] } }),
+        line({
+          type: 'assistant',
+          timestamp: at(23),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Final.' }] },
+        }),
       ].join('\n'),
     );
 
@@ -970,7 +1096,12 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
 
     const [reasoning2, tool2] = partsOf(stored[3]);
     expect(reasoning2).toMatchObject({ kind: 'reasoning', text: 'Hmm.', timeUnknown: true });
-    expect(tool2).toMatchObject({ kind: 'tool', name: 'Read', output: 'contents', timeUnknown: true });
+    expect(tool2).toMatchObject({
+      kind: 'tool',
+      name: 'Read',
+      output: 'contents',
+      timeUnknown: true,
+    });
     expect(tool2.durationMs).toBeUndefined();
   });
 
@@ -983,7 +1114,8 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
     mkdirSync(subDir, { recursive: true });
     const base = Date.parse('2026-10-12T10:00:00.000Z');
     const at = (s: number) => new Date(base + s * 1000).toISOString();
-    const line = (o: Record<string, unknown>) => JSON.stringify({ sessionId: 'claude-subs', cwd: project, ...o });
+    const line = (o: Record<string, unknown>) =>
+      JSON.stringify({ sessionId: 'claude-subs', cwd: project, ...o });
     writeFileSync(
       join(dir, 'claude-subs.jsonl'),
       [
@@ -993,14 +1125,24 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
           timestamp: at(1),
           message: {
             role: 'assistant',
-            content: [{ type: 'tool_use', id: 'toolu_A', name: 'Agent', input: { description: 'Find files', prompt: 'Find the files' } }],
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_A',
+                name: 'Agent',
+                input: { description: 'Find files', prompt: 'Find the files' },
+              },
+            ],
           },
         }),
         line({
           type: 'user',
           timestamp: at(30),
           toolUseResult: { agentId: 'a1', status: 'completed' },
-          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_A', content: 'Found 3 files' }] },
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'toolu_A', content: 'Found 3 files' }],
+          },
         }),
         // Old format: the sub-agent's rows live in the main file as a sidechain.
         line({
@@ -1008,10 +1150,24 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
           timestamp: at(31),
           message: {
             role: 'assistant',
-            content: [{ type: 'tool_use', id: 'toolu_C', name: 'Task', input: { description: 'Side', prompt: 'Side prompt' } }],
+            content: [
+              {
+                type: 'tool_use',
+                id: 'toolu_C',
+                name: 'Task',
+                input: { description: 'Side', prompt: 'Side prompt' },
+              },
+            ],
           },
         }),
-        line({ type: 'user', isSidechain: true, uuid: 's1', parentUuid: null, timestamp: at(32), message: { role: 'user', content: 'Side prompt' } }),
+        line({
+          type: 'user',
+          isSidechain: true,
+          uuid: 's1',
+          parentUuid: null,
+          timestamp: at(32),
+          message: { role: 'user', content: 'Side prompt' },
+        }),
         line({
           type: 'assistant',
           isSidechain: true,
@@ -1023,7 +1179,10 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
         line({
           type: 'user',
           timestamp: at(34),
-          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_C', content: 'Side answer' }] },
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'toolu_C', content: 'Side answer' }],
+          },
         }),
         line({
           type: 'system',
@@ -1034,22 +1193,38 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
           maxRetries: 10,
           error: { formatted: "Can't reach the API server" },
         }),
-        line({ type: 'assistant', timestamp: at(36), message: { role: 'assistant', content: [{ type: 'text', text: 'Summary for you.' }] } }),
+        line({
+          type: 'assistant',
+          timestamp: at(36),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Summary for you.' }] },
+        }),
         line({
           type: 'system',
           subtype: 'compact_boundary',
           uuid: 'cb1',
           timestamp: at(40),
-          compactMetadata: { trigger: 'auto', preTokens: 900000, postTokens: 16000, durationMs: 86415 },
+          compactMetadata: {
+            trigger: 'auto',
+            preTokens: 900000,
+            postTokens: 16000,
+            durationMs: 86415,
+          },
         }),
         line({
           type: 'user',
           isCompactSummary: true,
           timestamp: at(41),
-          message: { role: 'user', content: 'This session is being continued. Summary: investigated files.' },
+          message: {
+            role: 'user',
+            content: 'This session is being continued. Summary: investigated files.',
+          },
         }),
         line({ type: 'user', timestamp: at(50), message: { role: 'user', content: 'Next step' } }),
-        line({ type: 'assistant', timestamp: at(51), message: { role: 'assistant', content: [{ type: 'text', text: 'On it.' }] } }),
+        line({
+          type: 'assistant',
+          timestamp: at(51),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'On it.' }] },
+        }),
       ].join('\n'),
     );
     const subLine = (agentId: string, o: Record<string, unknown>) =>
@@ -1057,36 +1232,75 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
     writeFileSync(
       join(subDir, 'agent-a1.jsonl'),
       [
-        subLine('a1', { type: 'user', timestamp: at(2), message: { role: 'user', content: 'Find the files' } }),
+        subLine('a1', {
+          type: 'user',
+          timestamp: at(2),
+          message: { role: 'user', content: 'Find the files' },
+        }),
         subLine('a1', {
           type: 'assistant',
           timestamp: at(3),
-          message: { role: 'assistant', model: 'claude-haiku', content: [{ type: 'tool_use', id: 'toolu_B', name: 'Agent', input: { prompt: 'Look deeper' } }] },
+          message: {
+            role: 'assistant',
+            model: 'claude-haiku',
+            content: [
+              { type: 'tool_use', id: 'toolu_B', name: 'Agent', input: { prompt: 'Look deeper' } },
+            ],
+          },
         }),
         subLine('a1', {
           type: 'user',
           timestamp: at(20),
           toolUseResult: { agentId: 'a2' },
-          message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_B', content: 'Deep result' }] },
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 'toolu_B', content: 'Deep result' }],
+          },
         }),
-        subLine('a1', { type: 'assistant', timestamp: at(29), message: { role: 'assistant', content: [{ type: 'text', text: 'Found 3 files' }] } }),
+        subLine('a1', {
+          type: 'assistant',
+          timestamp: at(29),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Found 3 files' }] },
+        }),
       ].join('\n'),
     );
-    writeFileSync(join(subDir, 'agent-a1.meta.json'), JSON.stringify({ agentType: 'Explore', toolUseId: 'toolu_A', description: 'Find files' }));
+    writeFileSync(
+      join(subDir, 'agent-a1.meta.json'),
+      JSON.stringify({ agentType: 'Explore', toolUseId: 'toolu_A', description: 'Find files' }),
+    );
     writeFileSync(
       join(subDir, 'agent-a2.jsonl'),
       [
-        subLine('a2', { type: 'user', timestamp: at(4), message: { role: 'user', content: 'Look deeper' } }),
-        subLine('a2', { type: 'assistant', timestamp: at(19), message: { role: 'assistant', content: [{ type: 'text', text: 'Deep result' }] } }),
+        subLine('a2', {
+          type: 'user',
+          timestamp: at(4),
+          message: { role: 'user', content: 'Look deeper' },
+        }),
+        subLine('a2', {
+          type: 'assistant',
+          timestamp: at(19),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Deep result' }] },
+        }),
       ].join('\n'),
     );
-    writeFileSync(join(subDir, 'agent-a2.meta.json'), JSON.stringify({ agentType: 'general-purpose', toolUseId: 'toolu_B' }));
+    writeFileSync(
+      join(subDir, 'agent-a2.meta.json'),
+      JSON.stringify({ agentType: 'general-purpose', toolUseId: 'toolu_B' }),
+    );
     // A sub-agent no call claims still comes along, as a synthetic row.
     writeFileSync(
       join(subDir, 'agent-a3.jsonl'),
       [
-        subLine('a3', { type: 'user', timestamp: at(52), message: { role: 'user', content: 'Orphan task' } }),
-        subLine('a3', { type: 'assistant', timestamp: at(53), message: { role: 'assistant', content: [{ type: 'text', text: 'Orphan answer' }] } }),
+        subLine('a3', {
+          type: 'user',
+          timestamp: at(52),
+          message: { role: 'user', content: 'Orphan task' },
+        }),
+        subLine('a3', {
+          type: 'assistant',
+          timestamp: at(53),
+          message: { role: 'assistant', content: [{ type: 'text', text: 'Orphan answer' }] },
+        }),
       ].join('\n'),
     );
 
@@ -1102,7 +1316,12 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
     expect(tools.map((t) => t.name)).toEqual(['Agent', 'Task', 'notice', 'subagent']);
 
     const explore = tools[0].subagent;
-    expect(explore).toMatchObject({ agentId: 'a1', name: 'Explore', task: 'Find files', model: 'claude-haiku' });
+    expect(explore).toMatchObject({
+      agentId: 'a1',
+      name: 'Explore',
+      task: 'Find files',
+      model: 'claude-haiku',
+    });
     expect(subTexts(explore)).toEqual(['Find the files', 'Found 3 files']);
     const nestedTool = (explore?.turns[1].parts as Part[]).find((p) => p.kind === 'tool');
     expect(nestedTool?.subagent).toMatchObject({ agentId: 'a2', name: 'general-purpose' });
@@ -1137,12 +1356,25 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
       CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT,
         node_id INTEGER, parent_node_id INTEGER, chat_message TEXT, created_at INTEGER);
     `);
-    const iso = (s: number) => new Date(Date.parse('2026-10-13T10:00:00.000Z') + s * 1000).toISOString();
-    const meta = (s: number, extra: Record<string, unknown> = {}) => ({ created_at: iso(s), ...extra });
+    const iso = (s: number) =>
+      new Date(Date.parse('2026-10-13T10:00:00.000Z') + s * 1000).toISOString();
+    const meta = (s: number, extra: Record<string, unknown> = {}) => ({
+      created_at: iso(s),
+      ...extra,
+    });
     const task = 'Audit the parser and report gaps.';
     const nodes: Array<[number, number | null, Record<string, unknown>]> = [
       [0, null, { message_id: 'sys', role: 'system', content: 'You are Devin' }],
-      [1, 0, { message_id: 'u1', role: 'user', content: 'Audit it', metadata: meta(0, { is_user_input: true }) }],
+      [
+        1,
+        0,
+        {
+          message_id: 'u1',
+          role: 'user',
+          content: 'Audit it',
+          metadata: meta(0, { is_user_input: true }),
+        },
+      ],
       [
         2,
         1,
@@ -1169,14 +1401,31 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
           metadata: meta(2, {
             extensions: {
               'subagent/agent_id': 'ag1',
-              'chisel/tool_call_timing': { started_at: iso(1), finished_at: iso(2), duration_ms: 12 },
+              'chisel/tool_call_timing': {
+                started_at: iso(1),
+                finished_at: iso(2),
+                duration_ms: 12,
+              },
             },
           }),
         },
       ],
       // No timing recorded for this tool.
-      [4, 3, { message_id: 'r2', role: 'tool', tool_call_id: 't2', content: 'a.ts', metadata: meta(3) }],
-      [5, 4, { message_id: 'a2', role: 'assistant', content: 'The audit is running.', metadata: meta(4) }],
+      [
+        4,
+        3,
+        { message_id: 'r2', role: 'tool', tool_call_id: 't2', content: 'a.ts', metadata: meta(3) },
+      ],
+      [
+        5,
+        4,
+        {
+          message_id: 'a2',
+          role: 'assistant',
+          content: 'The audit is running.',
+          metadata: meta(4),
+        },
+      ],
       // The sub-agent's own tree.
       [10, null, { message_id: 'sa-sys', role: 'system', content: 'You are a subagent of Devin' }],
       [
@@ -1186,20 +1435,54 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
           message_id: 'sa-task',
           role: 'user',
           content: task,
-          metadata: meta(2, { is_user_input: true, telemetry: { source: 'subagent_task', operation: 'prompt' } }),
+          metadata: meta(2, {
+            is_user_input: true,
+            telemetry: { source: 'subagent_task', operation: 'prompt' },
+          }),
         },
       ],
-      [12, 11, { message_id: 'sa-a', role: 'assistant', content: 'Found two gaps.', metadata: meta(30) }],
+      [
+        12,
+        11,
+        { message_id: 'sa-a', role: 'assistant', content: 'Found two gaps.', metadata: meta(30) },
+      ],
       // A Summarizer run.
-      [20, null, { message_id: 'sum-sys', role: 'system', content: '  You are a Summarizer that summarizes' }],
-      [21, 20, { message_id: 'sum-u', role: 'user', content: 'Conversation to summarize: …', metadata: meta(3.5, { is_user_input: null }) }],
-      [22, 21, { message_id: 'sum-a', role: 'assistant', content: 'Summary of the work.', metadata: meta(3.6) }],
+      [
+        20,
+        null,
+        {
+          message_id: 'sum-sys',
+          role: 'system',
+          content: '  You are a Summarizer that summarizes',
+        },
+      ],
+      [
+        21,
+        20,
+        {
+          message_id: 'sum-u',
+          role: 'user',
+          content: 'Conversation to summarize: …',
+          metadata: meta(3.5, { is_user_input: null }),
+        },
+      ],
+      [
+        22,
+        21,
+        {
+          message_id: 'sum-a',
+          role: 'assistant',
+          content: 'Summary of the work.',
+          metadata: meta(3.6),
+        },
+      ],
     ];
     const insert = db.query(
       `INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
        VALUES ('dv-subs', ?, ?, ?, ?)`,
     );
-    for (const [nodeId, parent, msg] of nodes) insert.run(nodeId, parent, JSON.stringify(msg), 1792000000 + nodeId);
+    for (const [nodeId, parent, msg] of nodes)
+      insert.run(nodeId, parent, JSON.stringify(msg), 1792000000 + nodeId);
     db.query(
       `INSERT INTO sessions (id, working_directory, model, created_at, last_activity_at, title, main_chain_id)
        VALUES ('dv-subs', ?, 'swe', 1792000000, 1792000100, 'Audit it', 5)`,
@@ -1223,7 +1506,10 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
     expect(tools[1]).toMatchObject({ output: 'a.ts', timeUnknown: true });
     expect(tools[1].durationMs).toBeUndefined();
     expect(tools[2].subagent?.name).toBe('Context compaction');
-    expect(subTexts(tools[2].subagent)).toEqual(['Conversation to summarize: …', 'Summary of the work.']);
+    expect(subTexts(tools[2].subagent)).toEqual([
+      'Conversation to summarize: …',
+      'Summary of the work.',
+    ]);
   });
 
   it('OpenCode: nests a task tool child session and keeps recorded reasoning and tool timing', async () => {
@@ -1240,14 +1526,30 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
       CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
     `);
     const t = 1760500000000;
-    db.query(`INSERT INTO session VALUES ('ses_p', ?, 'Parent', NULL, ?, ?, NULL)`).run(project, t, t + 60000);
-    db.query(`INSERT INTO session VALUES ('ses_c', ?, 'Explore code (@explore subagent)', 'ses_p', ?, ?, NULL)`).run(project, t + 2000, t + 9000);
+    db.query(`INSERT INTO session VALUES ('ses_p', ?, 'Parent', NULL, ?, ?, NULL)`).run(
+      project,
+      t,
+      t + 60000,
+    );
+    db.query(
+      `INSERT INTO session VALUES ('ses_c', ?, 'Explore code (@explore subagent)', 'ses_p', ?, ?, NULL)`,
+    ).run(project, t + 2000, t + 9000);
     const msg = db.query(`INSERT INTO message VALUES (?, ?, ?, ?)`);
     const part = db.query(`INSERT INTO part VALUES (?, ?, ?, ?, ?)`);
     msg.run('m_u', 'ses_p', t, JSON.stringify({ role: 'user' }));
     part.run('p1', 'm_u', 'ses_p', t, JSON.stringify({ type: 'text', text: 'Explore the code' }));
     msg.run('m_a', 'ses_p', t + 1000, JSON.stringify({ role: 'assistant', modelID: 'zen-1' }));
-    part.run('p2', 'm_a', 'ses_p', t + 1000, JSON.stringify({ type: 'reasoning', text: 'Delegate.', time: { start: t + 1000, end: t + 1400 } }));
+    part.run(
+      'p2',
+      'm_a',
+      'ses_p',
+      t + 1000,
+      JSON.stringify({
+        type: 'reasoning',
+        text: 'Delegate.',
+        time: { start: t + 1000, end: t + 1400 },
+      }),
+    );
     part.run(
       'p3',
       'm_a',
@@ -1259,7 +1561,11 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
         callID: 'call_0',
         state: {
           status: 'completed',
-          input: { description: 'Explore code', prompt: 'Map the modules', subagent_type: 'explore' },
+          input: {
+            description: 'Explore code',
+            prompt: 'Map the modules',
+            subagent_type: 'explore',
+          },
           output: 'Modules mapped',
           metadata: { sessionId: 'ses_c' },
           time: { start: t + 1500, end: t + 9500 },
@@ -1268,9 +1574,21 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
     );
     part.run('p4', 'm_a', 'ses_p', t + 9600, JSON.stringify({ type: 'text', text: 'Mapped.' }));
     msg.run('c_u', 'ses_c', t + 2000, JSON.stringify({ role: 'user' }));
-    part.run('c1', 'c_u', 'ses_c', t + 2000, JSON.stringify({ type: 'text', text: 'Map the modules' }));
+    part.run(
+      'c1',
+      'c_u',
+      'ses_c',
+      t + 2000,
+      JSON.stringify({ type: 'text', text: 'Map the modules' }),
+    );
     msg.run('c_a', 'ses_c', t + 3000, JSON.stringify({ role: 'assistant', modelID: 'zen-mini' }));
-    part.run('c2', 'c_a', 'ses_c', t + 3000, JSON.stringify({ type: 'text', text: 'Modules mapped' }));
+    part.run(
+      'c2',
+      'c_a',
+      'ses_c',
+      t + 3000,
+      JSON.stringify({ type: 'text', text: 'Modules mapped' }),
+    );
     db.close();
 
     const chats = discoverCliChats({ homeDir, env: {} }).projects.flatMap((g) => g.chats);
@@ -1286,7 +1604,12 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
     expect(reasoning.timeUnknown).toBeUndefined();
     expect((reasoning.endedAt ?? 0) - (reasoning.startedAt ?? 0)).toBe(400);
     expect(tool).toMatchObject({ name: 'task', durationMs: 8000, output: 'Modules mapped' });
-    expect(tool.subagent).toMatchObject({ agentId: 'ses_c', name: 'explore', task: 'Map the modules', model: 'zen-mini' });
+    expect(tool.subagent).toMatchObject({
+      agentId: 'ses_c',
+      name: 'explore',
+      task: 'Map the modules',
+      model: 'zen-mini',
+    });
     expect(subTexts(tool.subagent)).toEqual(['Map the modules', 'Modules mapped']);
     expect(tool.subagent?.turns[0].createdAt).toBe(t + 2000);
   });
@@ -1310,8 +1633,28 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
       `INSERT INTO threads (id, rollout_path, cwd, title, first_user_message, model, created_at_ms, updated_at_ms,
          agent_nickname, agent_path) VALUES (?, ?, ?, ?, ?, 'gpt-6', ?, ?, ?, ?)`,
     );
-    insertThread.run('px', parentPath, project, 'Plan the port', 'Plan the port', 1760200000000, 1760200090000, null, null);
-    insertThread.run('cx', childPath, project, 'Audit', '', 1760200010000, 1760200050000, 'Ohm', '/root/audit');
+    insertThread.run(
+      'px',
+      parentPath,
+      project,
+      'Plan the port',
+      'Plan the port',
+      1760200000000,
+      1760200090000,
+      null,
+      null,
+    );
+    insertThread.run(
+      'cx',
+      childPath,
+      project,
+      'Audit',
+      '',
+      1760200010000,
+      1760200050000,
+      'Ohm',
+      '/root/audit',
+    );
     state.run(`INSERT INTO thread_spawn_edges VALUES ('px', 'cx', 'open')`);
     state.close();
 
@@ -1330,33 +1673,65 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
       {
         timestamp: ts(9),
         type: 'response_item',
-        payload: { type: 'function_call', id: 'fc_1', call_id: 'call_s', name: 'spawn_agent', arguments: '{"task_name":"audit"}' },
+        payload: {
+          type: 'function_call',
+          id: 'fc_1',
+          call_id: 'call_s',
+          name: 'spawn_agent',
+          arguments: '{"task_name":"audit"}',
+        },
       },
       {
         timestamp: ts(10),
         type: 'event_msg',
-        payload: { type: 'item_completed', item: { type: 'SubAgentActivity', id: 'call_s', kind: 'started', agent_thread_id: 'cx' } },
+        payload: {
+          type: 'item_completed',
+          item: { type: 'SubAgentActivity', id: 'call_s', kind: 'started', agent_thread_id: 'cx' },
+        },
       },
       {
         timestamp: ts(10),
         type: 'response_item',
-        payload: { type: 'function_call_output', id: 'fco_1', call_id: 'call_s', output: '{"task_name":"/root/audit"}' },
+        payload: {
+          type: 'function_call_output',
+          id: 'fco_1',
+          call_id: 'call_s',
+          output: '{"task_name":"/root/audit"}',
+        },
       },
       {
         timestamp: ts(60),
         type: 'response_item',
-        payload: { type: 'message', id: 'msg_a_1', role: 'assistant', content: [{ type: 'output_text', text: 'Planned.' }] },
+        payload: {
+          type: 'message',
+          id: 'msg_a_1',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'Planned.' }],
+        },
       },
     ]);
     write(childPath, [
       { timestamp: ts(10), type: 'session_meta', payload: { cwd: project, forked_from_id: 'px' } },
       // Forked copy of the parent's history.
       { timestamp: ts(10), type: 'response_item', payload: userMsg },
-      { timestamp: ts(12), type: 'response_item', payload: { type: 'reasoning', id: 'rs_c', summary: [{ type: 'summary_text', text: 'Check the build' }] } },
+      {
+        timestamp: ts(12),
+        type: 'response_item',
+        payload: {
+          type: 'reasoning',
+          id: 'rs_c',
+          summary: [{ type: 'summary_text', text: 'Check the build' }],
+        },
+      },
       {
         timestamp: ts(40),
         type: 'response_item',
-        payload: { type: 'message', id: 'msg_c_1', role: 'assistant', content: [{ type: 'output_text', text: 'Audit report' }] },
+        payload: {
+          type: 'message',
+          id: 'msg_c_1',
+          role: 'assistant',
+          content: [{ type: 'output_text', text: 'Audit report' }],
+        },
       },
     ]);
 
@@ -1372,25 +1747,50 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
     ]);
     const spawn = toolsOf(stored[1]).find((t) => t.name === 'spawn_agent');
     expect(spawn?.durationMs).toBe(1000);
-    expect(spawn?.subagent).toMatchObject({ agentId: 'cx', name: 'Ohm', task: '/root/audit', provider: 'codex' });
+    expect(spawn?.subagent).toMatchObject({
+      agentId: 'cx',
+      name: 'Ohm',
+      task: '/root/audit',
+      provider: 'codex',
+    });
     expect(subTexts(spawn?.subagent)).toEqual(['Audit report']);
     const childParts = spawn?.subagent?.turns[0].parts as Part[];
     // Codex reasoning items record when they were written, not how long they took.
-    expect(childParts[0]).toMatchObject({ kind: 'reasoning', text: 'Check the build', timeUnknown: true });
+    expect(childParts[0]).toMatchObject({
+      kind: 'reasoning',
+      text: 'Check the build',
+      timeUnknown: true,
+    });
   });
 
   it('Freebuff: nests agent blocks recursively and marks untimed rows and tools unknown', async () => {
     const homeDir = makeTempHome();
     const project = join(homeDir, 'workspace', 'fb-subs');
     mkdirSync(project, { recursive: true });
-    const chatDir = join(homeDir, '.config', 'manicode', 'projects', 'fb-subs', 'chats', '2026-10-02T10-00-00.000Z');
+    const chatDir = join(
+      homeDir,
+      '.config',
+      'manicode',
+      'projects',
+      'fb-subs',
+      'chats',
+      '2026-10-02T10-00-00.000Z',
+    );
     mkdirSync(chatDir, { recursive: true });
-    writeFileSync(join(chatDir, 'chat-meta.json'), JSON.stringify({ messageCount: 3, firstPrompt: 'Search' }));
+    writeFileSync(
+      join(chatDir, 'chat-meta.json'),
+      JSON.stringify({ messageCount: 3, firstPrompt: 'Search' }),
+    );
     writeFileSync(join(chatDir, 'run-state.json'), JSON.stringify({ projectRoot: project }));
     writeFileSync(
       join(chatDir, 'chat-messages.json'),
       JSON.stringify([
-        { id: 'user-1790100000000', variant: 'user', content: 'Search', textAttachments: [{ content: 'pasted spec' }] },
+        {
+          id: 'user-1790100000000',
+          variant: 'user',
+          content: 'Search',
+          textAttachments: [{ content: 'pasted spec' }],
+        },
         {
           id: 'ai-1790100001000-a',
           variant: 'ai',
@@ -1403,7 +1803,13 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
               content: 'Outer done',
               status: 'complete',
               blocks: [
-                { type: 'tool', toolCallId: 'n1', toolName: 'code_search', input: { pattern: 'x' }, output: 'hit' },
+                {
+                  type: 'tool',
+                  toolCallId: 'n1',
+                  toolName: 'code_search',
+                  input: { pattern: 'x' },
+                  output: 'hit',
+                },
                 {
                   type: 'agent',
                   agentId: 'inner',
@@ -1443,6 +1849,9 @@ describe('CLI chat import: honest time, whole data and nested sub-agents', () =>
       ['file-picker', true],
     ]);
     expect(subTexts(outerTools[1].subagent)).toEqual(['Pick files', 'Inner done']);
-    expect(tools[1]).toMatchObject({ input: { kind: 'error' }, output: 'Your free session ended, so the agent stopped here.' });
+    expect(tools[1]).toMatchObject({
+      input: { kind: 'error' },
+      output: 'Your free session ended, so the agent stopped here.',
+    });
   });
 });

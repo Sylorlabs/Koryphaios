@@ -251,14 +251,27 @@ export interface ReplaySpawn {
 /** Build the spawn seam the adapters accept. Each call is routed to a transcript. */
 export function createReplaySpawn(route: ReplayRoute, options?: ReplayOptions): ReplaySpawn {
   const calls: ReplaySpawnCall[] = [];
-  const spawnFn = (command: string, args: readonly string[] = [], spawnOptions: SpawnOptions = {}) => {
+  const spawnFn = (
+    command: string,
+    args: readonly string[] = [],
+    spawnOptions: SpawnOptions = {},
+  ) => {
     const transcript = route(command, args);
     const child = transcript
       ? startReplay(transcript, options)
       : startReplay({
-          header: { provider: 'unrouted', cliVersion: 'none', recordedAt: '', argv: [command, ...args] },
+          header: {
+            provider: 'unrouted',
+            cliVersion: 'none',
+            recordedAt: '',
+            argv: [command, ...args],
+          },
           frames: [
-            { t: 0, stream: 'stderr', data: `replay: no transcript routed for ${command} ${args.join(' ')}\n` },
+            {
+              t: 0,
+              stream: 'stderr',
+              data: `replay: no transcript routed for ${command} ${args.join(' ')}\n`,
+            },
             { t: 0, stream: 'exit', code: 127 },
           ],
         });

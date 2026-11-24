@@ -262,7 +262,9 @@ test('registered real-browser evaluators supersede both external React environme
       id === SEARCH ? 'search-real-react-chromium@3' : 'keyed-window-real-react-chromium@3',
     );
     expect(row?.deterministicScorerId).toContain(
-      id === SEARCH ? 'search-real-react-chromium-scorer@2' : 'keyed-window-real-react-chromium-scorer@2',
+      id === SEARCH
+        ? 'search-real-react-chromium-scorer@2'
+        : 'keyed-window-real-react-chromium-scorer@2',
     );
   }
 }, 90_000);
@@ -272,7 +274,9 @@ test('missing assets block React materialization without launching a browser', (
   roots.push(cache);
   const previousCache = process.env.BUN_INSTALL_CACHE_DIR;
   const path = spyOn(chromium, 'executablePath').mockReturnValue(join(cache, 'missing-chromium'));
-  const launch = spyOn(chromium, 'launch').mockRejectedValue(new Error('Unexpected browser launch'));
+  const launch = spyOn(chromium, 'launch').mockRejectedValue(
+    new Error('Unexpected browser launch'),
+  );
   try {
     process.env.BUN_INSTALL_CACHE_DIR = cache;
     const blockers = reactBrowserReadiness();
@@ -317,43 +321,51 @@ test('both React fixtures disclose the required evidence schema and exact browse
   }
 });
 
-browserTest('search stale-race starter fails while corrected React passes actual Chromium assertions', async () => {
-  const { root, score } = fixture(SEARCH, true);
-  evidence(root, 1);
-  const red = await score();
-  expect(red.passed).toBe(false);
-  expect(
-    red.evidence.some((text) => text.includes('out-of-order response') && text.includes('fail')),
-  ).toBe(true);
+browserTest(
+  'search stale-race starter fails while corrected React passes actual Chromium assertions',
+  async () => {
+    const { root, score } = fixture(SEARCH, true);
+    evidence(root, 1);
+    const red = await score();
+    expect(red.passed).toBe(false);
+    expect(
+      red.evidence.some((text) => text.includes('out-of-order response') && text.includes('fail')),
+    ).toBe(true);
 
-  writeFixtureFile(root, 'src/App.jsx', GREEN_SEARCH);
-  const green = await score();
-  if (!green.passed) console.error(green.evidence.join('\n'));
-  expect(green.passed).toBe(true);
-  expect(green.verification).toBe(1);
-  expect(green.evidence.some((text) => text.includes('Chromium') && text.includes('pass'))).toBe(
-    true,
-  );
-}, 120_000);
+    writeFixtureFile(root, 'src/App.jsx', GREEN_SEARCH);
+    const green = await score();
+    if (!green.passed) console.error(green.evidence.join('\n'));
+    expect(green.passed).toBe(true);
+    expect(green.verification).toBe(1);
+    expect(green.evidence.some((text) => text.includes('Chromium') && text.includes('pass'))).toBe(
+      true,
+    );
+  },
+  120_000,
+);
 
-browserTest('index-key starter fails but ID-keyed React list passes real focus, refresh and cleanup', async () => {
-  const { root, score } = fixture(LIST, true);
-  evidence(root, 2);
-  const red = await score();
-  expect(red.passed).toBe(false);
-  expect(
-    red.evidence.some((text) => text.includes('stable keyed identity') && text.includes('fail')),
-  ).toBe(true);
+browserTest(
+  'index-key starter fails but ID-keyed React list passes real focus, refresh and cleanup',
+  async () => {
+    const { root, score } = fixture(LIST, true);
+    evidence(root, 2);
+    const red = await score();
+    expect(red.passed).toBe(false);
+    expect(
+      red.evidence.some((text) => text.includes('stable keyed identity') && text.includes('fail')),
+    ).toBe(true);
 
-  writeFixtureFile(root, 'src/App.jsx', GREEN_LIST);
-  const green = await score();
-  if (!green.passed) console.error(green.evidence.join('\n'));
-  expect(green.passed).toBe(true);
-  expect(green.verification).toBe(1);
-  expect(
-    green.evidence.some((text) => text.includes('420 real records') && text.includes('pass')),
-  ).toBe(true);
-}, 120_000);
+    writeFixtureFile(root, 'src/App.jsx', GREEN_LIST);
+    const green = await score();
+    if (!green.passed) console.error(green.evidence.join('\n'));
+    expect(green.passed).toBe(true);
+    expect(green.verification).toBe(1);
+    expect(
+      green.evidence.some((text) => text.includes('420 real records') && text.includes('pass')),
+    ).toBe(true);
+  },
+  120_000,
+);
 
 test('unverified narrative cannot enable browser certification', async () => {
   const { score } = fixture(SEARCH);
@@ -377,17 +389,20 @@ test('tampered control source fails integrity without executing Chromium', async
   expect(result.verification).toBe(0);
 });
 
-test.skipIf(isWindows())('hard-linked candidate source fails integrity without executing Chromium', async () => {
-  const { root, score } = fixture(SEARCH);
-  const external = mkdtempSync(join(tmpdir(), 'kory-react-browser-hardlink-'));
-  roots.push(external);
-  writeFileSync(join(external, 'App.jsx'), readFileSync(join(root, 'src', 'App.jsx')));
-  rmSync(join(root, 'src', 'App.jsx'));
-  linkSync(join(external, 'App.jsx'), join(root, 'src', 'App.jsx'));
-  evidence(root, 1);
+test.skipIf(isWindows())(
+  'hard-linked candidate source fails integrity without executing Chromium',
+  async () => {
+    const { root, score } = fixture(SEARCH);
+    const external = mkdtempSync(join(tmpdir(), 'kory-react-browser-hardlink-'));
+    roots.push(external);
+    writeFileSync(join(external, 'App.jsx'), readFileSync(join(root, 'src', 'App.jsx')));
+    rmSync(join(root, 'src', 'App.jsx'));
+    linkSync(join(external, 'App.jsx'), join(root, 'src', 'App.jsx'));
+    evidence(root, 1);
 
-  const result = await score();
-  expect(result.integrityFailure).toBe(true);
-  expect(result.passed).toBe(false);
-  expect(result.verification).toBe(0);
-});
+    const result = await score();
+    expect(result.integrityFailure).toBe(true);
+    expect(result.passed).toBe(false);
+    expect(result.verification).toBe(0);
+  },
+);

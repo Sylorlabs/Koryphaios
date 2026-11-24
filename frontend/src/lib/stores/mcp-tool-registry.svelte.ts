@@ -18,15 +18,21 @@ onSessionsRemoved((sessionIds) => {
   if (changed) revision++;
 });
 
-export function setSessionMcpToolRegistry(sessionId: string, servers: McpToolServerIdentity[]): void {
-  registries.set(sessionId, servers.map((server) => ({
-    name: server.name,
-    tools: server.tools ? [...server.tools] : undefined,
-  })));
+export function setSessionMcpToolRegistry(
+  sessionId: string,
+  servers: McpToolServerIdentity[],
+): void {
+  registries.set(
+    sessionId,
+    servers.map((server) => ({
+      name: server.name,
+      tools: server.tools ? [...server.tools] : undefined,
+    })),
+  );
   revision++;
 }
 
 export function getSessionMcpToolRegistry(sessionId: unknown): readonly McpToolServerIdentity[] {
   void revision;
-  return typeof sessionId === 'string' ? registries.get(sessionId) ?? [] : [];
+  return typeof sessionId === 'string' ? (registries.get(sessionId) ?? []) : [];
 }

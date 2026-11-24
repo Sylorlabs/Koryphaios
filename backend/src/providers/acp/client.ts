@@ -109,7 +109,9 @@ export class AcpClient {
       this.stderr = appendDiagnostic(this.stderr, chunk);
     });
     this.child.on('exit', () => {
-      this.rejectAllPending(new Error(this.diagnostic('acp process exited before the turn completed')));
+      this.rejectAllPending(
+        new Error(this.diagnostic('acp process exited before the turn completed')),
+      );
     });
     // A missing or non-executable binary emits 'error' (not 'exit'). Without a
     // listener that event would throw on the backend's event loop.
@@ -249,7 +251,9 @@ export class AcpClient {
         timeoutMs > 0
           ? setTimeout(() => {
               this.pending.delete(id);
-              reject(new Error(`${this.label} ACP request ${method} timed out after ${timeoutMs}ms`));
+              reject(
+                new Error(`${this.label} ACP request ${method} timed out after ${timeoutMs}ms`),
+              );
             }, timeoutMs)
           : undefined;
       this.pending.set(id, { resolve, reject, timeout });
@@ -325,7 +329,8 @@ export class AcpClient {
 
     // Streaming notification (session/update).
     if (method === 'session/update') {
-      const params = msg.params as { sessionId?: string; update?: Record<string, unknown> } | undefined;
+      const params = msg.params as
+        { sessionId?: string; update?: Record<string, unknown> } | undefined;
       const update = params?.update;
       const handler = this.promptHandler;
       if (!update || !handler) return;

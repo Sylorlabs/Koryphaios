@@ -71,7 +71,7 @@ function sanitize(raw: Record<string, unknown>): ComposerSessionState {
       : raw.speedTier === null
         ? { speedTier: null }
         : {}),
-    ...(sanitizeModelParameterRecord(raw.modelParameters)),
+    ...sanitizeModelParameterRecord(raw.modelParameters),
     ...(isFusionSelection(raw.fusion) ? { fusion: raw.fusion } : {}),
     ...(typeof raw.permissionMode === 'string' &&
     PERMISSION_MODES.includes(raw.permissionMode as ComposerPermissionMode)
@@ -81,9 +81,7 @@ function sanitize(raw: Record<string, unknown>): ComposerSessionState {
     AGENT_EXECUTION_MODES.includes(raw.agentExecutionMode as ComposerAgentExecutionMode)
       ? { agentExecutionMode: raw.agentExecutionMode as ComposerAgentExecutionMode }
       : {}),
-    ...(raw.worktreeMode === 'auto' ||
-    raw.worktreeMode === 'always' ||
-    raw.worktreeMode === 'never'
+    ...(raw.worktreeMode === 'auto' || raw.worktreeMode === 'always' || raw.worktreeMode === 'never'
       ? { worktreeMode: raw.worktreeMode }
       : typeof raw.worktreeIsolation === 'boolean'
         ? // Legacy saved state: the checkbox tracked auto (on) vs never (off).
@@ -122,10 +120,13 @@ function isFusionSelection(raw: unknown): raw is FusionSelection {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
   const v = raw as Record<string, unknown>;
   return (
-    typeof v.lead === 'string' && v.lead.length <= 256 &&
-    typeof v.leadEffort === 'string' && v.leadEffort.length <= 32 &&
+    typeof v.lead === 'string' &&
+    v.lead.length <= 256 &&
+    typeof v.leadEffort === 'string' &&
+    v.leadEffort.length <= 32 &&
     typeof v.leadFast === 'boolean' &&
-    typeof v.sidekick === 'string' && v.sidekick.length <= 256 &&
+    typeof v.sidekick === 'string' &&
+    v.sidekick.length <= 256 &&
     (v.sidekickEffort === null ||
       (typeof v.sidekickEffort === 'string' && v.sidekickEffort.length <= 32))
   );

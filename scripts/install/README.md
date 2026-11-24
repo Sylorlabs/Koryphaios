@@ -2,11 +2,11 @@
 
 These files are the **source of truth** for the public installers:
 
-| File | Served at | Used by |
-| --- | --- | --- |
-| `install.sh` | `https://koryphaios.com/install` | macOS and Linux: `curl -fsSL https://koryphaios.com/install \| sh` |
-| `install.ps1` | `https://koryphaios.com/install.ps1` | Windows x64 PowerShell |
-| `dmg-readme.txt` | Copied into every macOS DMG as "If macOS says the app can't be opened.txt" by `scripts/assemble-macos-bundle.sh` and the universal DMG step in `.github/workflows/release-desktop.yml` | Browser downloads |
+| File             | Served at                                                                                                                                                                              | Used by                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `install.sh`     | `https://koryphaios.com/install`                                                                                                                                                       | macOS and Linux: `curl -fsSL https://koryphaios.com/install \| sh` |
+| `install.ps1`    | `https://koryphaios.com/install.ps1`                                                                                                                                                   | Windows x64 PowerShell                                             |
+| `dmg-readme.txt` | Copied into every macOS DMG as "If macOS says the app can't be opened.txt" by `scripts/assemble-macos-bundle.sh` and the universal DMG step in `.github/workflows/release-desktop.yml` | Browser downloads                                                  |
 
 ## Deploying changes
 
@@ -37,12 +37,12 @@ special privileges:
 
 Used by the tests and for debugging; normal installs set none of them.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `KORYPHAIOS_DOWNLOAD_BASE` | `https://koryphaios.com/api/download` | Release download root |
-| `KORYPHAIOS_APPLICATIONS_DIR` | `/Applications` | Where the macOS app is installed first |
-| `KORYPHAIOS_INSTALL_TTY` | `/dev/tty` | Where consent questions are asked |
-| `KORYPHAIOS_INSTALL_ASSUME_YES` | unset | `1` accepts the "quit the running app" prompt |
+| Variable                        | Default                               | Purpose                                       |
+| ------------------------------- | ------------------------------------- | --------------------------------------------- |
+| `KORYPHAIOS_DOWNLOAD_BASE`      | `https://koryphaios.com/api/download` | Release download root                         |
+| `KORYPHAIOS_APPLICATIONS_DIR`   | `/Applications`                       | Where the macOS app is installed first        |
+| `KORYPHAIOS_INSTALL_TTY`        | `/dev/tty`                            | Where consent questions are asked             |
+| `KORYPHAIOS_INSTALL_ASSUME_YES` | unset                                 | `1` accepts the "quit the running app" prompt |
 
 ## Checksums
 

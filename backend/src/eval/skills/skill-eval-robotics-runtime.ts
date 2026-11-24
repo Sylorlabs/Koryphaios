@@ -235,7 +235,10 @@ export function roboticsMaterialize(destination: string, scenario: 1 | 2): void 
   writeFileSync(join(testsDir, 'test_control.py'), ROBOTICS_SMOKE_TEST);
   writeFileSync(join(destination, 'README.md'), roboticsReadme(scenario));
   writeFileSync(join(destination, 'requirements.txt'), 'mujoco==4.0.1\nnumpy\n');
-  writeFileSync(join(destination, 'verify.sh'), '#!/bin/sh\nset -e\npython3 tests/test_control.py\n');
+  writeFileSync(
+    join(destination, 'verify.sh'),
+    '#!/bin/sh\nset -e\npython3 tests/test_control.py\n',
+  );
 }
 
 const ROBOTICS_HIDDEN_CHECK = String.raw`"""Hidden control checks. Writes a JSON verdict to the path given in --out."""
@@ -483,14 +486,19 @@ export function runRoboticsScenario(root: string, scenario: 1 | 2): RoboticsRunt
   mkdirSync(join(root, '.kory-eval'), { recursive: true });
   writeFileSync(script, ROBOTICS_HIDDEN_CHECK);
   try {
-    const result = spawnSync(
-      'python3',
-      [script, '--scenario', String(scenario), '--out', out],
-      { cwd: root, encoding: 'utf8', timeout: 240_000, maxBuffer: 4_000_000 },
-    );
+    const result = spawnSync('python3', [script, '--scenario', String(scenario), '--out', out], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 240_000,
+      maxBuffer: 4_000_000,
+    });
     const evidence = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
     if (!existsSync(out)) {
-      return { passed: false, checks: [], evidence: `no verdict written\n${evidence}`.slice(-4000) };
+      return {
+        passed: false,
+        checks: [],
+        evidence: `no verdict written\n${evidence}`.slice(-4000),
+      };
     }
     const payload = JSON.parse(readFileSync(out, 'utf8')) as {
       checks: { id: string; passed: boolean; detail: string }[];
@@ -512,7 +520,9 @@ function roboticsScore(result: RoboticsRuntimeResult): {
   integrityFailure: boolean;
   evidence: string[];
 } {
-  const evidence = result.checks.map((check) => `${check.id}: ${check.passed ? 'pass' : 'fail'} (${check.detail})`);
+  const evidence = result.checks.map(
+    (check) => `${check.id}: ${check.passed ? 'pass' : 'fail'} (${check.detail})`,
+  );
   if (!result.checks.length) evidence.push(result.evidence);
   const passing = result.checks.filter((check) => check.passed).length;
   const total = result.checks.length || 1;

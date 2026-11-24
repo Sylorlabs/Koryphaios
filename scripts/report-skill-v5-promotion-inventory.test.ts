@@ -34,10 +34,13 @@ test('audit children cannot acquire implicit dotenv authority or hide failed gat
     expect(process.env[key]).toBeUndefined();
     mkdirSync(join(root, 'scripts'));
     writeFileSync(join(root, '.env'), `${key}=implicit-dotenv\n`);
-    writeFileSync(join(root, 'scripts', 'fixture.ts'), `
+    writeFileSync(
+      join(root, 'scripts', 'fixture.ts'),
+      `
       console.log(JSON.stringify({ dotenvLoaded: process.env[${JSON.stringify(key)}] !== undefined }));
       process.exitCode = Number(process.argv[2]);
-    `);
+    `,
+    );
     for (const exitCode of [0, 1]) {
       expect(runInventoryAudit(root, 'fixture.ts', [String(exitCode)])).toEqual({
         exitCode,

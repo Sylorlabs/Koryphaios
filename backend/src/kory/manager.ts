@@ -361,10 +361,7 @@ import {
   type SkillReviewContext,
 } from './skill-assignment';
 import { parseCriticReport, type CriticReport } from './critic-util';
-import {
-  decideCriticReview,
-  isConsequentialCriticTool,
-} from './critic-policy';
+import { decideCriticReview, isConsequentialCriticTool } from './critic-policy';
 import { criticOutputTokenBudget } from './critic-budget';
 import { resolveCriticMode } from '@koryphaios/shared';
 import {
@@ -795,7 +792,10 @@ function workerDomainOf(hint: string | undefined): WorkerDomain {
 
 /** Finished workers in the order they completed, for a stable wait_for_agents result. */
 function byFinishOrder(a: AsyncChildRecord, b: AsyncChildRecord): number {
-  return (a.finishedAt ?? a.startedAt) - (b.finishedAt ?? b.startedAt) || a.agentId.localeCompare(b.agentId);
+  return (
+    (a.finishedAt ?? a.startedAt) - (b.finishedAt ?? b.startedAt) ||
+    a.agentId.localeCompare(b.agentId)
+  );
 }
 
 /** Resolve when every promise settles or the timeout (or abort) fires, whichever is first. */
@@ -1619,7 +1619,11 @@ export class KoryManager implements WorkerPipelineHost {
     const status = this.providers.getStatus().find((item) => item.name === providerName);
     if (
       !status?.adapterAvailable ||
-      !isModelEnabledInCatalog(status.allAvailableModels ?? status.models.map(id => ({id})), status.models, model)
+      !isModelEnabledInCatalog(
+        status.allAvailableModels ?? status.models.map((id) => ({ id })),
+        status.models,
+        model,
+      )
     ) {
       throw new Error('The selected model is no longer available. Select another model.');
     }
@@ -3470,7 +3474,9 @@ export class KoryManager implements WorkerPipelineHost {
     // persists the user's own row.
     const commandRole: StoredMessage['role'] = input.hostContinuation ? 'system' : 'user';
     const commandContent = input.hostContinuation
-      ? continuationMarkerText(input.hostContinuation.kind === 'restart_resume' ? 'restart' : 'usage_limit')
+      ? continuationMarkerText(
+          input.hostContinuation.kind === 'restart_resume' ? 'restart' : 'usage_limit',
+        )
       : input.userMessage;
     const matchesCommandUser = (message: StoredMessage | undefined): boolean => {
       if (!message || message.role !== commandRole || message.content !== commandContent)
@@ -4695,16 +4701,18 @@ export class KoryManager implements WorkerPipelineHost {
             child.routedModel = label;
           },
         },
-      ).then(
-        (text) => ({ text, failed: text.startsWith('WORKER_FAILED') }),
-        (error: unknown) => ({
-          text: `WORKER_FAILED: ${error instanceof Error ? error.message : String(error)}`,
-          failed: true,
+      )
+        .then(
+          (text) => ({ text, failed: text.startsWith('WORKER_FAILED') }),
+          (error: unknown) => ({
+            text: `WORKER_FAILED: ${error instanceof Error ? error.message : String(error)}`,
+            failed: true,
+          }),
+        )
+        .then(({ text, failed }) => {
+          const status = child.abort.signal.aborted ? 'cancelled' : failed ? 'failed' : 'completed';
+          this.settleAsyncChild(sessionId, agentId, status, text);
         }),
-      ).then(({ text, failed }) => {
-        const status = child.abort.signal.aborted ? 'cancelled' : failed ? 'failed' : 'completed';
-        this.settleAsyncChild(sessionId, agentId, status, text);
-      }),
     ).catch((error: unknown) => {
       koryLog.warn({ sessionId, agentId, error }, 'Async worker settlement failed');
     });
@@ -4860,7 +4868,8 @@ export class KoryManager implements WorkerPipelineHost {
         await agentSteeringStore.updateStatus(rowId, 'cancelled', 'results_claimed_by_wait');
       }
     }
-    if (changed) await this.publishAgentSteeringQueue(sessionId, KORY_IDENTITY.id).catch(() => undefined);
+    if (changed)
+      await this.publishAgentSteeringQueue(sessionId, KORY_IDENTITY.id).catch(() => undefined);
   }
 
   /** wait_for_agents: join the named workers (or every outstanding one). Finished
@@ -4881,9 +4890,7 @@ export class KoryManager implements WorkerPipelineHost {
         input.signal,
       );
     }
-    const finished = records
-      .filter((record) => record.status !== 'running')
-      .sort(byFinishOrder);
+    const finished = records.filter((record) => record.status !== 'running').sort(byFinishOrder);
     ledger.claimForWait(finished);
     await this.dropEmptyHostSteers(sessionId);
     return renderWaitResult({
@@ -5168,7 +5175,8 @@ export class KoryManager implements WorkerPipelineHost {
     const runtime = this.runtimes.get(sessionId);
     const now = Date.now();
     for (const [key, entry] of runtime.failedCriticRoutes) {
-      if (now - entry.failedAt >= CRITIC_ROUTE_FAILURE_TTL_MS) runtime.failedCriticRoutes.delete(key);
+      if (now - entry.failedAt >= CRITIC_ROUTE_FAILURE_TTL_MS)
+        runtime.failedCriticRoutes.delete(key);
     }
     runtime.failedCriticRoutes.set(route, { failedAt: now, error });
   }
@@ -5625,9 +5633,9 @@ export class KoryManager implements WorkerPipelineHost {
           producerRouting,
           criticRouting,
           compareSection: reviewOptions?.compareGroupId
-            ? this.runtimes.peek(sessionId)?.compareGroups.renderRankingSection(
-                reviewOptions.compareGroupId,
-              )
+            ? this.runtimes
+                .peek(sessionId)
+                ?.compareGroups.renderRankingSection(reviewOptions.compareGroupId)
             : undefined,
         });
         if (!result.infraFailure) {
@@ -5642,8 +5650,7 @@ export class KoryManager implements WorkerPipelineHost {
       if (infraFailure) {
         gateFailures.push({ ...infraFailure, routing: criticRouting ?? undefined });
         this.recordCriticRouteFailure(sessionId, infraFailure.route, infraFailure.error);
-        const moreAttempts =
-          infraFailure.routeSpecific && attempt + 1 < CRITIC_MAX_ROUTE_ATTEMPTS;
+        const moreAttempts = infraFailure.routeSpecific && attempt + 1 < CRITIC_MAX_ROUTE_ATTEMPTS;
         this.emitWSMessage(sessionId, 'system.info', {
           message:
             `Critic ${infraFailure.route} failed: ${infraFailure.error}.` +
@@ -5674,7 +5681,10 @@ export class KoryManager implements WorkerPipelineHost {
             this.runtimes.peek(sessionId)?.abort?.signal,
             {
               excludedRoutes: [
-                ...new Set([...failedCritics.map((failure) => failure.route), ...sessionFailedKeys]),
+                ...new Set([
+                  ...failedCritics.map((failure) => failure.route),
+                  ...sessionFailedKeys,
+                ]),
               ],
               failedCritics,
             },
@@ -8004,8 +8014,7 @@ export class KoryManager implements WorkerPipelineHost {
           status: 'waiting',
           continuationNeeded: true,
           detail:
-            resumeInCopyNote ??
-            'Turn limit reached with work pending — continuing automatically',
+            resumeInCopyNote ?? 'Turn limit reached with work pending — continuing automatically',
         });
         this.setHeartbeatPhase(sessionId, 'waiting');
         const followupMessage =
@@ -8905,7 +8914,8 @@ export class KoryManager implements WorkerPipelineHost {
           imageInputMode,
         );
       }
-      if (outcome?.kind === 'exhausted') failure = new Error(`${failure.message}\n\n${outcome.summary}`);
+      if (outcome?.kind === 'exhausted')
+        failure = new Error(`${failure.message}\n\n${outcome.summary}`);
     }
     if (!failure && shrink > 0)
       this.runtimes.get(sessionId).contextShrinkHints.set(shrinkHintKey, shrink);
@@ -10524,8 +10534,7 @@ export class KoryManager implements WorkerPipelineHost {
     // Rescale it into the new route's window when the window shrank.
     if (last?.breakdown) {
       const window = context.contextWindow ?? 0;
-      const scale =
-        window > 0 && last.used > window ? window / Math.max(1, last.used) : 1;
+      const scale = window > 0 && last.used > window ? window / Math.max(1, last.used) : 1;
       const scaledBreakdown = Object.fromEntries(
         Object.entries(last.breakdown).map(([key, value]) => [
           key,
@@ -11071,7 +11080,9 @@ export class KoryManager implements WorkerPipelineHost {
         fallbacks = [];
         for (const step of normalizeFallbackStepsInput(options.fallbacks)) {
           if (!this.resolveFallbackStep(step)) {
-            throw new Error(`Fallback model ${fallbackStepKey(step)} is unavailable for the manager`);
+            throw new Error(
+              `Fallback model ${fallbackStepKey(step)} is unavailable for the manager`,
+            );
           }
           fallbacks.push(step);
         }
@@ -11295,9 +11306,9 @@ export class KoryManager implements WorkerPipelineHost {
     // their order instead of dropping them when this send kicks the blocker
     // loose. The queue-preserving cancellation releases the wait or stale
     // claim so the drain admits them in order.
-    const hasQueuedSteers = (
-      await agentSteeringStore.list(input.sessionId, KORY_IDENTITY.id)
-    ).some((command) => command.status === 'queued');
+    const hasQueuedSteers = (await agentSteeringStore.list(input.sessionId, KORY_IDENTITY.id)).some(
+      (command) => command.status === 'queued',
+    );
     if (hasQueuedSteers) {
       const queued = await this.queueUserSteer(input, identity, commandAttachments);
       if (queued) {
@@ -11808,17 +11819,18 @@ export class KoryManager implements WorkerPipelineHost {
           return null;
         }
         const parked = runtime?.pendingSteerInputs.get(command.id);
-        const input: SessionTurnCommandInput = hostInput ?? parked ?? {
-          sessionId,
-          source: 'user',
-          sourceCommandId: command.id.startsWith(`usrsteer_${sessionId}_`)
-            ? command.id.slice(`usrsteer_${sessionId}_`.length)
-            : crypto.randomUUID(),
-          userMessage: command.content,
-          preferredModel: command.model,
-          reasoningLevel: command.reasoningLevel,
-          inputAlreadyPersisted: true,
-        };
+        const input: SessionTurnCommandInput = hostInput ??
+          parked ?? {
+            sessionId,
+            source: 'user',
+            sourceCommandId: command.id.startsWith(`usrsteer_${sessionId}_`)
+              ? command.id.slice(`usrsteer_${sessionId}_`.length)
+              : crypto.randomUUID(),
+            userMessage: command.content,
+            preferredModel: command.model,
+            reasoningLevel: command.reasoningLevel,
+            inputAlreadyPersisted: true,
+          };
         const submission = await this.startSessionTurn(input);
         if (submission.accepted === true) {
           runtime?.pendingSteerInputs.delete(command.id);
@@ -12412,7 +12424,11 @@ export class KoryManager implements WorkerPipelineHost {
           reason,
           stepIndex: index,
         };
-        this.emitWSMessage(thread.sessionId, 'session.fallback.hop', payload as unknown as WSMessage['payload']);
+        this.emitWSMessage(
+          thread.sessionId,
+          'session.fallback.hop',
+          payload as unknown as WSMessage['payload'],
+        );
       }
       return { provider: resolved.provider, cursor: index + 1 };
     }
@@ -12793,7 +12809,13 @@ export class KoryManager implements WorkerPipelineHost {
       now: Date.now(),
       resolve: (step) => {
         const route = this.resolveFallbackStep(step);
-        return route && { model: route.model, provider: route.provider, providerName: route.provider.name };
+        return (
+          route && {
+            model: route.model,
+            provider: route.provider,
+            providerName: route.provider.name,
+          }
+        );
       },
     });
     runtime.fallbackTurn = decision.state;
@@ -12814,9 +12836,19 @@ export class KoryManager implements WorkerPipelineHost {
       reason: hop.reason,
       stepIndex: hop.stepIndex,
     };
-    this.emitWSMessage(sessionId, 'session.fallback.hop', payload as unknown as WSMessage['payload']);
+    this.emitWSMessage(
+      sessionId,
+      'session.fallback.hop',
+      payload as unknown as WSMessage['payload'],
+    );
     koryLog.warn(
-      { sessionId, from: `${hop.fromProvider}:${hop.fromModel}`, to: `${hop.toProvider}:${hop.toModel}`, reason: hop.reason, stepIndex: hop.stepIndex },
+      {
+        sessionId,
+        from: `${hop.fromProvider}:${hop.fromModel}`,
+        to: `${hop.toProvider}:${hop.toModel}`,
+        reason: hop.reason,
+        stepIndex: hop.stepIndex,
+      },
       'Fallback chain hop',
     );
     return {
@@ -13635,11 +13667,7 @@ export class KoryManager implements WorkerPipelineHost {
       const fresh = await this.sessions.get(sessionId);
       if (!fresh) throw new Error(`Session ${sessionId} is unavailable`);
       verify(fresh);
-      const updated = await this.sessions.update(
-        sessionId,
-        { gitWorkspace: next },
-        fresh.version,
-      );
+      const updated = await this.sessions.update(sessionId, { gitWorkspace: next }, fresh.version);
       if (updated) return updated;
     }
     throw new ConflictError(onStaleVersion);
@@ -13671,7 +13699,9 @@ export class KoryManager implements WorkerPipelineHost {
       throw new Error(`The project folder is unavailable: ${configuredDir}`);
     }
     if (this.workers.hasSessionWorkers(sessionId)) {
-      throw new Error('A worker of this chat is still running; wait for it to finish before isolating.');
+      throw new Error(
+        'A worker of this chat is still running; wait for it to finish before isolating.',
+      );
     }
     if (this.runtimes.peek(sessionId)?.mutatedInPlaceThisTurn) {
       throw new Error('This turn already edited files in place; ask the user before isolating.');
@@ -13756,7 +13786,9 @@ export class KoryManager implements WorkerPipelineHost {
       throw new Error('Only a chat that isolated itself with isolate_chat can merge back.');
     }
     if (this.workers.hasSessionWorkers(sessionId)) {
-      throw new Error('A worker of this chat is still running; wait for it to finish before merging back.');
+      throw new Error(
+        'A worker of this chat is still running; wait for it to finish before merging back.',
+      );
     }
     const owner = sessionWorkspaceOwnership(workspace.path);
     if (!owner) {
@@ -13853,8 +13885,7 @@ export class KoryManager implements WorkerPipelineHost {
             throw new Error(`Could not fetch the chat's copy: ${fetch.stderr}`);
           }
           const identity = await this.resolveMergeBackIdentity(sourceGit);
-          const mergeMessage =
-            message ?? `Merge Kory chat "${title}" (${sessionId})`;
+          const mergeMessage = message ?? `Merge Kory chat "${title}" (${sessionId})`;
           const merge = await sourceGit.exec(
             [...gitPrefix, 'merge', '--no-ff', '--no-edit', '-m', mergeMessage, tempRef],
             { env: identity },
@@ -13876,13 +13907,9 @@ export class KoryManager implements WorkerPipelineHost {
                 `Merging back conflicts in ${files.length} file${files.length === 1 ? '' : 's'}: ${files.join(', ')}. The chat stays isolated and the copy is preserved — resolve the conflict in the folder or coordinate with the other chat.`,
               );
             }
-            throw new Error(
-              `The merge was refused: ${(merge.stderr || merge.stdout).trim()}`,
-            );
+            throw new Error(`The merge was refused: ${(merge.stderr || merge.stdout).trim()}`);
           }
-          mergedCommit = (
-            await sourceGit.exec([...gitPrefix, 'rev-parse', 'HEAD'])
-          ).stdout.trim();
+          mergedCommit = (await sourceGit.exec([...gitPrefix, 'rev-parse', 'HEAD'])).stdout.trim();
           const names = await sourceGit.exec([
             ...gitPrefix,
             'diff',
@@ -14327,7 +14354,7 @@ export class KoryManager implements WorkerPipelineHost {
           (effectiveOccupancy?.tokensIn ?? tokensIn) -
             ((effectiveOccupancy?.tokensUsed ?? tokensIn + tokensOut) - boundedEmit.used),
         )
-      : effectiveOccupancy?.tokensIn ?? tokensIn;
+      : (effectiveOccupancy?.tokensIn ?? tokensIn);
     const pricedUsage = usageKnown
       ? computeCostUsd(provider, model, tokensIn, tokensOut, {
           cacheReadTokens: cachedInputTokens,

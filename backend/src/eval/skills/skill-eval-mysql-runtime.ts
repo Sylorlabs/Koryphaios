@@ -4,8 +4,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 export const MYSQL_RUNTIME_IMAGE = 'mysql:8.4.6';
-export const MYSQL_RUNTIME_BLOCKER =
-  `Full-task qualification requires an available local Docker runtime with the pinned ${MYSQL_RUNTIME_IMAGE} image so online DDL, metadata-lock, write-concurrency, InnoDB deadlock, retry, and idempotency checks execute on the real MySQL engine.`;
+export const MYSQL_RUNTIME_BLOCKER = `Full-task qualification requires an available local Docker runtime with the pinned ${MYSQL_RUNTIME_IMAGE} image so online DDL, metadata-lock, write-concurrency, InnoDB deadlock, retry, and idempotency checks execute on the real MySQL engine.`;
 
 export interface MySqlRuntimeResult {
   passed: boolean;
@@ -65,7 +64,11 @@ function runHarness(root: string, files: string[], shellSource: string): MySqlRu
     let initializationComplete = false;
     for (let attempt = 0; attempt < 300; attempt += 1) {
       const logs = command(['logs', container], { timeout: 2_000 });
-      if (/MySQL init process done\. Ready for start up\./u.test((logs.stdout ?? '') + (logs.stderr ?? ''))) {
+      if (
+        /MySQL init process done\. Ready for start up\./u.test(
+          (logs.stdout ?? '') + (logs.stderr ?? ''),
+        )
+      ) {
         initializationComplete = true;
         break;
       }
@@ -191,10 +194,10 @@ const indexHarness = [
   'WHERE seq <= 250000;',
   'ANALYZE TABLE events;',
   'SQL',
-  'server_meta="$(mysqlx -e "SELECT CONCAT(\'sql_mode=\',@@sql_mode,\'; isolation=\',@@transaction_isolation,\'; charset=\',@@character_set_database,\'; collation=\',@@collation_database);")"',
+  "server_meta=\"$(mysqlx -e \"SELECT CONCAT('sql_mode=',@@sql_mode,'; isolation=',@@transaction_isolation,'; charset=',@@character_set_database,'; collation=',@@collation_database);\")\"",
   'engine="$(mysqlx -e "SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=\'kory\' AND TABLE_NAME=\'events\';")"',
   '[ "$engine" = "InnoDB" ] || { echo "events did not use InnoDB: $engine"; exit 10; }',
-  'row_distribution="$(mysqlx -e "SELECT CONCAT(\'rows=\',SUM(c),\'; tenants=\',COUNT(*),\'; max-per-tenant=\',MAX(c)) FROM (SELECT tenant_id,COUNT(*) c FROM events GROUP BY tenant_id) d;")"',
+  "row_distribution=\"$(mysqlx -e \"SELECT CONCAT('rows=',SUM(c),'; tenants=',COUNT(*),'; max-per-tenant=',MAX(c)) FROM (SELECT tenant_id,COUNT(*) c FROM events GROUP BY tenant_id) d;\")\"",
   'pre_plan="$(mysqlx -e "EXPLAIN FORMAT=JSON SELECT id,payload FROM events WHERE tenant_id=42 ORDER BY created_at DESC LIMIT 20;")"',
   'echo "$pre_plan" >/tmp/kory-pre-plan.out',
   'if grep -q "idx_events_tenant_created" /tmp/kory-pre-plan.out; then echo "pre-DDL plan unexpectedly used future index"; exit 11; fi',
@@ -210,7 +213,7 @@ const indexHarness = [
   ') &',
   'blocked_ddl=$!',
   'sleep 0.25',
-  'metadata_locks="$(mysqlx -e "SELECT CONCAT(LOCK_TYPE,\':\',LOCK_DURATION,\':\',LOCK_STATUS) FROM performance_schema.metadata_locks WHERE OBJECT_SCHEMA=\'kory\' AND OBJECT_NAME=\'events\' ORDER BY LOCK_STATUS,LOCK_TYPE;" | paste -sd, -)"',
+  "metadata_locks=\"$(mysqlx -e \"SELECT CONCAT(LOCK_TYPE,':',LOCK_DURATION,':',LOCK_STATUS) FROM performance_schema.metadata_locks WHERE OBJECT_SCHEMA='kory' AND OBJECT_NAME='events' ORDER BY LOCK_STATUS,LOCK_TYPE;\" | paste -sd, -)\"",
   'echo "$metadata_locks" | grep -q "PENDING" || { echo "pending metadata lock was not observed: $metadata_locks"; cat /tmp/kory-blocked-ddl.out || true; exit 12; }',
   'wait "$blocked_ddl" || true',
   'abort_end="$(mysqlx -e "SELECT ROUND(UNIX_TIMESTAMP(NOW(6))*1000);")"',
@@ -220,14 +223,14 @@ const indexHarness = [
   'abort_ms=$((abort_end-abort_start))',
   '[ "$abort_ms" -ge 700 ] && [ "$abort_ms" -lt 4000 ] || { echo "metadata-lock abort timing out of bounds: ${abort_ms}ms"; exit 15; }',
   'wait "$holder"',
-  'index_count_before="$(mysqlx -e "SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=\'kory\' AND TABLE_NAME=\'events\' AND INDEX_NAME<>\'PRIMARY\';")"',
+  "index_count_before=\"$(mysqlx -e \"SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='kory' AND TABLE_NAME='events' AND INDEX_NAME<>'PRIMARY';\")\"",
   '[ "$index_count_before" = "0" ] || { echo "failed DDL left partial index state: $index_count_before"; exit 16; }',
   '(',
   '  writer_start="$(mysqlx -e "SELECT ROUND(UNIX_TIMESTAMP(NOW(6))*1000);")"',
   '  : >/tmp/kory-writer-completions',
   '  i=1',
   '  while [ "$i" -le 60 ]; do',
-  '    mysqlx -e "INSERT INTO events(tenant_id,created_at,payload) VALUES (999,NOW(6),RPAD(\'w\',192,\'w\')); SELECT ROUND(UNIX_TIMESTAMP(NOW(6))*1000);" >>/tmp/kory-writer-completions',
+  "    mysqlx -e \"INSERT INTO events(tenant_id,created_at,payload) VALUES (999,NOW(6),RPAD('w',192,'w')); SELECT ROUND(UNIX_TIMESTAMP(NOW(6))*1000);\" >>/tmp/kory-writer-completions",
   '    i=$((i+1))',
   '  done',
   '  writer_end="$(mysqlx -e "SELECT ROUND(UNIX_TIMESTAMP(NOW(6))*1000);")"',
@@ -249,13 +252,13 @@ const indexHarness = [
   'write_ms=$((writer_end-writer_start))',
   'write_avg_ms="$(awk -v total="$write_ms" \'BEGIN { printf "%.2f", total/60 }\')"',
   'ddl_ms=$((ddl_end-ddl_start))',
-  'index_count_after="$(mysqlx -e "SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=\'kory\' AND TABLE_NAME=\'events\' AND INDEX_NAME=\'idx_events_tenant_created\';")"',
+  "index_count_after=\"$(mysqlx -e \"SELECT COUNT(DISTINCT INDEX_NAME) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA='kory' AND TABLE_NAME='events' AND INDEX_NAME='idx_events_tenant_created';\")\"",
   '[ "$index_count_after" = "1" ] || { echo "expected online index missing after retry"; exit 19; }',
   'post_plan="$(mysqlx -e "EXPLAIN FORMAT=JSON SELECT id,payload FROM events WHERE tenant_id=42 ORDER BY created_at DESC LIMIT 20;")"',
   'echo "$post_plan" >/tmp/kory-post-plan.out',
   'grep -q "idx_events_tenant_created" /tmp/kory-post-plan.out || { echo "post-DDL plan did not use expected index"; cat /tmp/kory-post-plan.out; exit 20; }',
-  'storage="$(mysqlx -e "SELECT CONCAT(\'data_length=\',DATA_LENGTH,\'; index_length=\',INDEX_LENGTH,\'; table_rows_estimate=\',TABLE_ROWS) FROM information_schema.TABLES WHERE TABLE_SCHEMA=\'kory\' AND TABLE_NAME=\'events\';")"',
-  'pending_after="$(mysqlx -e "SELECT COUNT(*) FROM performance_schema.metadata_locks WHERE OBJECT_SCHEMA=\'kory\' AND OBJECT_NAME=\'events\' AND LOCK_STATUS=\'PENDING\';")"',
+  "storage=\"$(mysqlx -e \"SELECT CONCAT('data_length=',DATA_LENGTH,'; index_length=',INDEX_LENGTH,'; table_rows_estimate=',TABLE_ROWS) FROM information_schema.TABLES WHERE TABLE_SCHEMA='kory' AND TABLE_NAME='events';\")\"",
+  "pending_after=\"$(mysqlx -e \"SELECT COUNT(*) FROM performance_schema.metadata_locks WHERE OBJECT_SCHEMA='kory' AND OBJECT_NAME='events' AND LOCK_STATUS='PENDING';\")\"",
   '[ "$pending_after" = "0" ] || { echo "pending metadata locks remained after DDL: $pending_after"; exit 21; }',
   'echo "online DDL ALGORITHM=INPLACE LOCK=NONE execution: pass"',
   'echo "observed server settings: $server_meta"',
@@ -285,13 +288,13 @@ const deadlockHarness = [
   ') ENGINE=InnoDB;',
   "INSERT INTO accounts VALUES ('a',100),('b',100);",
   'SQL',
-  'server_meta="$(mysqlx -e "SELECT CONCAT(\'isolation=\',@@transaction_isolation,\'; deadlock_detect=\',@@innodb_deadlock_detect,\'; lock_wait_timeout=\',@@innodb_lock_wait_timeout);")"',
-  'engine_pair="$(mysqlx -e "SELECT GROUP_CONCAT(CONCAT(TABLE_NAME,\':\',ENGINE) ORDER BY TABLE_NAME SEPARATOR \',\') FROM information_schema.TABLES WHERE TABLE_SCHEMA=\'kory\' AND TABLE_NAME IN (\'accounts\',\'ledger\');")"',
+  "server_meta=\"$(mysqlx -e \"SELECT CONCAT('isolation=',@@transaction_isolation,'; deadlock_detect=',@@innodb_deadlock_detect,'; lock_wait_timeout=',@@innodb_lock_wait_timeout);\")\"",
+  "engine_pair=\"$(mysqlx -e \"SELECT GROUP_CONCAT(CONCAT(TABLE_NAME,':',ENGINE) ORDER BY TABLE_NAME SEPARATOR ',') FROM information_schema.TABLES WHERE TABLE_SCHEMA='kory' AND TABLE_NAME IN ('accounts','ledger');\")\"",
   '[ "$engine_pair" = "accounts:InnoDB,ledger:InnoDB" ] || { echo "transfer tables are not InnoDB: $engine_pair"; exit 30; }',
   'rm -f /tmp/kory-deadlock-*.status /tmp/kory-deadlock-*.out',
   '(',
   '  set +e',
-  '  mysqlx <<\'SQL\' >/tmp/kory-deadlock-1.out 2>&1',
+  "  mysqlx <<'SQL' >/tmp/kory-deadlock-1.out 2>&1",
   'SET SESSION innodb_lock_wait_timeout=5;',
   'START TRANSACTION;',
   "UPDATE accounts SET balance=balance-10 WHERE id='a';",
@@ -305,7 +308,7 @@ const deadlockHarness = [
   'p1=$!',
   '(',
   '  set +e',
-  '  mysqlx <<\'SQL\' >/tmp/kory-deadlock-2.out 2>&1',
+  "  mysqlx <<'SQL' >/tmp/kory-deadlock-2.out 2>&1",
   'SET SESSION innodb_lock_wait_timeout=5;',
   'START TRANSACTION;',
   "UPDATE accounts SET balance=balance-10 WHERE id='b';",
@@ -328,7 +331,7 @@ const deadlockHarness = [
   "grep -q 'LATEST DETECTED DEADLOCK' /tmp/kory-innodb-status.out || { echo 'InnoDB status lacked latest deadlock evidence'; exit 34; }",
   'if [ "$s1" -ne 0 ]; then',
   '  retry_id=deadlock-a-b',
-  '  mysqlx <<\'SQL\' >/tmp/kory-deadlock-retry.out 2>&1',
+  "  mysqlx <<'SQL' >/tmp/kory-deadlock-retry.out 2>&1",
   'START TRANSACTION;',
   "SELECT id FROM accounts WHERE id IN ('a','b') ORDER BY id FOR UPDATE;",
   "UPDATE accounts SET balance=balance-10 WHERE id='a';",
@@ -338,7 +341,7 @@ const deadlockHarness = [
   'SQL',
   'else',
   '  retry_id=deadlock-b-a',
-  '  mysqlx <<\'SQL\' >/tmp/kory-deadlock-retry.out 2>&1',
+  "  mysqlx <<'SQL' >/tmp/kory-deadlock-retry.out 2>&1",
   'START TRANSACTION;',
   "SELECT id FROM accounts WHERE id IN ('a','b') ORDER BY id FOR UPDATE;",
   "UPDATE accounts SET balance=balance-10 WHERE id='b';",
@@ -347,7 +350,7 @@ const deadlockHarness = [
   'COMMIT;',
   'SQL',
   'fi',
-  'after_retry="$(mysqlx -e "SELECT CONCAT((SELECT balance FROM accounts WHERE id=\'a\'),\'|\',(SELECT balance FROM accounts WHERE id=\'b\'),\'|\',(SELECT COUNT(*) FROM ledger),\'|\',(SELECT SUM(balance) FROM accounts));")"',
+  "after_retry=\"$(mysqlx -e \"SELECT CONCAT((SELECT balance FROM accounts WHERE id='a'),'|',(SELECT balance FROM accounts WHERE id='b'),'|',(SELECT COUNT(*) FROM ledger),'|',(SELECT SUM(balance) FROM accounts));\")\"",
   '[ "$after_retry" = "100|100|2|200" ] || { echo "deadlock retry invariants failed: $after_retry"; exit 35; }',
   'mysqlx -e "TRUNCATE ledger; UPDATE accounts SET balance=100;"',
   "mysqlx <<'SQL'",
@@ -370,13 +373,13 @@ const deadlockHarness = [
   'set -e',
   '[ "$duplicate_status" -ne 0 ] || { echo "duplicate transfer id was accepted"; exit 36; }',
   "grep -Eiq 'ERROR 1062|Duplicate entry' /tmp/kory-duplicate.out || { echo 'duplicate transfer failed for unexpected reason'; cat /tmp/kory-duplicate.out; exit 37; }",
-  'duplicate_state="$(mysqlx -e "SELECT CONCAT((SELECT balance FROM accounts WHERE id=\'a\'),\'|\',(SELECT balance FROM accounts WHERE id=\'b\'),\'|\',(SELECT COUNT(*) FROM ledger));")"',
+  "duplicate_state=\"$(mysqlx -e \"SELECT CONCAT((SELECT balance FROM accounts WHERE id='a'),'|',(SELECT balance FROM accounts WHERE id='b'),'|',(SELECT COUNT(*) FROM ledger));\")\"",
   '[ "$duplicate_state" = "90|110|1" ] || { echo "duplicate transfer changed logical state: $duplicate_state"; exit 38; }',
   'mysqlx -e "TRUNCATE ledger; UPDATE accounts SET balance=100;"',
   'rm -f /tmp/kory-canonical-*.status /tmp/kory-canonical-*.out',
   '(',
   '  set +e',
-  '  mysqlx <<\'SQL\' >/tmp/kory-canonical-1.out 2>&1',
+  "  mysqlx <<'SQL' >/tmp/kory-canonical-1.out 2>&1",
   'START TRANSACTION;',
   "SELECT id FROM accounts WHERE id IN ('a','b') ORDER BY id FOR UPDATE;",
   'DO SLEEP(0.35);',
@@ -390,7 +393,7 @@ const deadlockHarness = [
   'c1=$!',
   '(',
   '  set +e',
-  '  mysqlx <<\'SQL\' >/tmp/kory-canonical-2.out 2>&1',
+  "  mysqlx <<'SQL' >/tmp/kory-canonical-2.out 2>&1",
   'START TRANSACTION;',
   "SELECT id FROM accounts WHERE id IN ('a','b') ORDER BY id FOR UPDATE;",
   'DO SLEEP(0.35);',
@@ -407,7 +410,7 @@ const deadlockHarness = [
   'cs1="$(cat /tmp/kory-canonical-1.status)"',
   'cs2="$(cat /tmp/kory-canonical-2.status)"',
   '[ "$cs1" -eq 0 ] && [ "$cs2" -eq 0 ] || { cat /tmp/kory-canonical-1.out /tmp/kory-canonical-2.out; echo "canonical lock order did not allow both transfers"; exit 39; }',
-  'canonical_state="$(mysqlx -e "SELECT CONCAT((SELECT balance FROM accounts WHERE id=\'a\'),\'|\',(SELECT balance FROM accounts WHERE id=\'b\'),\'|\',(SELECT COUNT(*) FROM ledger),\'|\',(SELECT SUM(balance) FROM accounts));")"',
+  "canonical_state=\"$(mysqlx -e \"SELECT CONCAT((SELECT balance FROM accounts WHERE id='a'),'|',(SELECT balance FROM accounts WHERE id='b'),'|',(SELECT COUNT(*) FROM ledger),'|',(SELECT SUM(balance) FROM accounts));\")\"",
   '[ "$canonical_state" = "100|100|2|200" ] || { echo "canonical concurrency invariants failed: $canonical_state"; exit 40; }',
   'echo "real InnoDB opposite-order deadlock: pass; statuses=$s1,$s2"',
   'echo "SHOW ENGINE INNODB STATUS latest deadlock evidence: present"',

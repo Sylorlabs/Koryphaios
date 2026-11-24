@@ -148,9 +148,7 @@ describe('DevinLiveTail', () => {
     updateTool(db2, 'call_denied', {
       toolCallId: 'call_denied',
       status: 'failed',
-      content: [
-        { type: 'content', content: { type: 'text', text: 'denied by a deny rule' } },
-      ],
+      content: [{ type: 'content', content: { type: 'text', text: 'denied by a deny rule' } }],
       _meta: { 'cognition.ai/rejected': true },
     });
     db2.close();

@@ -9,7 +9,8 @@ import { serverLog } from '../logger';
 import { ensureSecureDir, hardenFilePermissions } from '../security/fs-permissions';
 import type { RunRevisionRef } from '@koryphaios/shared';
 
-export type CostSource = 'legacy' | 'provider-rate' | 'openrouter-equivalent' | 'models.dev' | (string & {});
+export type CostSource =
+  'legacy' | 'provider-rate' | 'openrouter-equivalent' | 'models.dev' | (string & {});
 
 let db: Database | null = null;
 let databasePath: string | null = null;
@@ -189,10 +190,7 @@ type UsageCostBreakdownDbRow = {
  * Provider/model/session billing truth without collapsing unknown price to zero.
  * `sinceMs` (exclusive of older rows) bounds the window; omitted or 0 means all time.
  */
-export function getUsageCostBreakdown(
-  sessionId?: string,
-  sinceMs = 0,
-): UsageCostBreakdownRow[] {
+export function getUsageCostBreakdown(sessionId?: string, sinceMs = 0): UsageCostBreakdownRow[] {
   const d = getCreditDb();
   const projection = `SELECT session_id, provider, model,
       SUM(tokens_in) AS tokens_in,
@@ -350,7 +348,12 @@ export function getUnknownCostUsage(limit = 1_000): UnknownCostUsageRow[] {
     }));
 }
 
-export function setUsageKnownCost(id: number, costUsd: number, cacheSavingsUsd = 0, costSource: CostSource = 'provider-rate'): void {
+export function setUsageKnownCost(
+  id: number,
+  costUsd: number,
+  cacheSavingsUsd = 0,
+  costSource: CostSource = 'provider-rate',
+): void {
   getCreditDb().run(
     `UPDATE credit_usage SET cost_usd = ?, cost_known = 1, cache_savings_usd = ?, cost_source = ? WHERE id = ?`,
     [costUsd, cacheSavingsUsd, costSource, id],

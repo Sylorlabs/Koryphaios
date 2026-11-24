@@ -12,23 +12,46 @@ function isIdentity(value: unknown): value is string {
 }
 
 function isIdentityList(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.length > 0 && value.every(isIdentity)
-    && new Set(value).size === value.length;
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(isIdentity) &&
+    new Set(value).size === value.length
+  );
 }
 
 function isEmbeddedContracts(value: unknown): value is EmbeddedCurrentV5SkillEvaluationContracts {
-  if (!isRecord(value) || value.schemaVersion !== 1 || !Number.isSafeInteger(value.contractVersion)
-    || (value.contractVersion as number) <= 0 || !Array.isArray(value.packages)) return false;
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    !Number.isSafeInteger(value.contractVersion) ||
+    (value.contractVersion as number) <= 0 ||
+    !Array.isArray(value.packages)
+  )
+    return false;
   const packageNames = new Set<string>();
   for (const pkg of value.packages) {
-    if (!isRecord(pkg) || !isIdentity(pkg.packageName) || !isIdentity(pkg.packageVersion)
-      || !Array.isArray(pkg.tasks) || packageNames.has(pkg.packageName)) return false;
+    if (
+      !isRecord(pkg) ||
+      !isIdentity(pkg.packageName) ||
+      !isIdentity(pkg.packageVersion) ||
+      !Array.isArray(pkg.tasks) ||
+      packageNames.has(pkg.packageName)
+    )
+      return false;
     packageNames.add(pkg.packageName);
     const taskIds = new Set<string>();
     for (const task of pkg.tasks) {
-      if (!isRecord(task) || !isIdentity(task.taskId) || taskIds.has(task.taskId)
-        || typeof task.evaluationContractHash !== 'string' || !/^[a-f0-9]{16}$/.test(task.evaluationContractHash)
-        || !isIdentityList(task.materializerIds) || !isIdentityList(task.scorerIds)) return false;
+      if (
+        !isRecord(task) ||
+        !isIdentity(task.taskId) ||
+        taskIds.has(task.taskId) ||
+        typeof task.evaluationContractHash !== 'string' ||
+        !/^[a-f0-9]{16}$/.test(task.evaluationContractHash) ||
+        !isIdentityList(task.materializerIds) ||
+        !isIdentityList(task.scorerIds)
+      )
+        return false;
       taskIds.add(task.taskId);
     }
   }
@@ -42,7 +65,8 @@ export function currentEmbeddedV5SkillEvaluationContracts(
   embedded: unknown,
 ): ReadonlyMap<string, CurrentV5SkillEvaluationContract> {
   const contracts = new Map<string, CurrentV5SkillEvaluationContract>();
-  if (!isEmbeddedContracts(embedded) || embedded.contractVersion !== contractVersion) return contracts;
+  if (!isEmbeddedContracts(embedded) || embedded.contractVersion !== contractVersion)
+    return contracts;
   const pkg = embedded.packages.find((item) => item.packageName === skillPackage.sidecar.name);
   if (!pkg || pkg.packageVersion !== skillPackage.sidecar.version) return contracts;
   const currentTasks = new Map(skillPackage.evaluation.tasks.map((task) => [task.id, task]));
@@ -50,16 +74,23 @@ export function currentEmbeddedV5SkillEvaluationContracts(
     const scenario = currentTasks.get(task.taskId);
     if (!scenario) return new Map();
     const evaluationContractHash = skillEvaluationV5ContractHash({
-      contractVersion, skill: skillPackage.sidecar.name, packageVersion: skillPackage.sidecar.version,
-      scenario, materializerIds: task.materializerIds, scorerIds: task.scorerIds,
+      contractVersion,
+      skill: skillPackage.sidecar.name,
+      packageVersion: skillPackage.sidecar.version,
+      scenario,
+      materializerIds: task.materializerIds,
+      scorerIds: task.scorerIds,
     });
     if (evaluationContractHash !== task.evaluationContractHash) return new Map();
-    contracts.set(task.taskId, Object.freeze({
-      evaluationContractVersion: contractVersion,
-      evaluationContractHash,
-      materializerIds: Object.freeze([...task.materializerIds]),
-      scorerIds: Object.freeze([...task.scorerIds]),
-    }));
+    contracts.set(
+      task.taskId,
+      Object.freeze({
+        evaluationContractVersion: contractVersion,
+        evaluationContractHash,
+        materializerIds: Object.freeze([...task.materializerIds]),
+        scorerIds: Object.freeze([...task.scorerIds]),
+      }),
+    );
   }
   return contracts;
 }

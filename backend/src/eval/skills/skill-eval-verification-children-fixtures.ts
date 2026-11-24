@@ -29,9 +29,7 @@ function containsDiagnosisClaim(value: unknown): boolean {
   return Object.entries(record).some(([key, nested]) => {
     const normalizedKey = key.toLowerCase().replace(/[^a-z]/gu, '');
     if (normalizedKey === 'diagnosisattempted') return nested === true;
-    if (
-      ['diagnosis', 'rootcause', 'fix', 'proposedfix', 'remediation'].includes(normalizedKey)
-    ) {
+    if (['diagnosis', 'rootcause', 'fix', 'proposedfix', 'remediation'].includes(normalizedKey)) {
       return nested !== null && nested !== false && nested !== '';
     }
     return containsDiagnosisClaim(nested);

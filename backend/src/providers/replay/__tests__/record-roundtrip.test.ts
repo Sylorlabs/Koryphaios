@@ -14,7 +14,10 @@ import { loadTranscript, type Transcript, type TranscriptFrame } from '../transc
 const FIXTURE = join(import.meta.dir, '..', 'fixtures', 'opencode-synthetic-turn.jsonl');
 
 /** Write each expected request in order, waiting for its response before the next. */
-async function driveAcpSession(child: ReplayChildProcess, expects: Array<{ method: string; params?: unknown }>) {
+async function driveAcpSession(
+  child: ReplayChildProcess,
+  expects: Array<{ method: string; params?: unknown }>,
+) {
   let output = '';
   child.stdout.setEncoding('utf8');
   child.stdout.on('data', (chunk: string) => (output += chunk));
@@ -31,7 +34,9 @@ async function driveAcpSession(child: ReplayChildProcess, expects: Array<{ metho
     });
   for (const [index, request] of expects.entries()) {
     const id = `req-${index + 1}`;
-    child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method: request.method, params: request.params ?? {} })}\n`);
+    child.stdin.write(
+      `${JSON.stringify({ jsonrpc: '2.0', id, method: request.method, params: request.params ?? {} })}\n`,
+    );
     await waitFor(`"${id}"`);
   }
   await child.exited;
@@ -42,8 +47,14 @@ describe('record then replay', () => {
   test('a recorded ACP session replays to the same stdout and the same request sequence', async () => {
     const fixture = loadTranscript(FIXTURE);
     const expects = fixture.frames
-      .filter((frame): frame is Extract<TranscriptFrame, { stream: 'stdin-expect' }> => frame.stream === 'stdin-expect')
-      .map((frame) => ({ method: (frame.match as { method: string }).method, params: (frame.match as { params?: unknown }).params }));
+      .filter(
+        (frame): frame is Extract<TranscriptFrame, { stream: 'stdin-expect' }> =>
+          frame.stream === 'stdin-expect',
+      )
+      .map((frame) => ({
+        method: (frame.match as { method: string }).method,
+        params: (frame.match as { params?: unknown }).params,
+      }));
 
     // The "real" CLI in this test is the fixture itself. The recorder sits between the
     // adapter and that CLI, exactly as record-cli-transcript.ts does against a live CLI.
@@ -61,11 +72,15 @@ describe('record then replay', () => {
     expect(recorded).toHaveLength(1);
     const transcript = recorded[0];
     expect(transcript.header.synthetic).toBe(false);
-    expect(transcript.frames.filter((f) => f.stream === 'stdin-expect').map((f) => (f.match as { method: string }).method)).toEqual(
-      expects.map((e) => e.method),
-    );
+    expect(
+      transcript.frames
+        .filter((f) => f.stream === 'stdin-expect')
+        .map((f) => (f.match as { method: string }).method),
+    ).toEqual(expects.map((e) => e.method));
     // Recorded stdout stores the request id as {{id}}, never the literal random id.
-    const recordedStdout = transcript.frames.map((f) => (f.stream === 'stdout' ? f.data : '')).join('');
+    const recordedStdout = transcript.frames
+      .map((f) => (f.stream === 'stdout' ? f.data : ''))
+      .join('');
     expect(recordedStdout).toContain('{{id}}');
     expect(recordedStdout).not.toContain('"req-');
     expect(recordedOutput).toContain('"req-1"');

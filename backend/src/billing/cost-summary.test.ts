@@ -24,7 +24,10 @@ function row(partial: Partial<UsageCostBreakdownRow>): UsageCostBreakdownRow {
   };
 }
 
-function eventRow(partial: Partial<CreditUsageEventRow>, now = 1_760_000_000_000): CreditUsageEventRow {
+function eventRow(
+  partial: Partial<CreditUsageEventRow>,
+  now = 1_760_000_000_000,
+): CreditUsageEventRow {
   return {
     ts: now - 30 * 60 * 1_000,
     sessionId: 'session-1',
@@ -191,13 +194,14 @@ describe('memoized pricing resolution', () => {
 
   test('summarizeUsageAnalytics resolves each provider/model pair once across all windows', () => {
     const now = 1_760_000_000_000;
-    const pairs: Array<Pick<CreditUsageEventRow, 'provider' | 'model' | 'costUsd' | 'costKnown'>> = [
-      // Subscription usage exercises the API-equivalent pricing path.
-      { provider: 'claude', model: 'claude-sonnet-4.5', costUsd: 0, costKnown: true },
-      // Metered usage with a known cost exercises cost-by-type apportionment.
-      { provider: 'openai', model: 'gpt-5.6', costUsd: 2.13, costKnown: true },
-      { provider: 'google', model: 'gemini-2.5-pro', costUsd: 1.05, costKnown: true },
-    ];
+    const pairs: Array<Pick<CreditUsageEventRow, 'provider' | 'model' | 'costUsd' | 'costKnown'>> =
+      [
+        // Subscription usage exercises the API-equivalent pricing path.
+        { provider: 'claude', model: 'claude-sonnet-4.5', costUsd: 0, costKnown: true },
+        // Metered usage with a known cost exercises cost-by-type apportionment.
+        { provider: 'openai', model: 'gpt-5.6', costUsd: 2.13, costKnown: true },
+        { provider: 'google', model: 'gemini-2.5-pro', costUsd: 1.05, costKnown: true },
+      ];
     const events: CreditUsageEventRow[] = Array.from({ length: 500 }, (_, index) =>
       eventRow(
         {
@@ -211,11 +215,7 @@ describe('memoized pricing resolution', () => {
     );
 
     const memoRun = countingResolver();
-    const memoized = summarizeUsageAnalytics(
-      events,
-      now,
-      createMemoizedPricing(memoRun.resolver),
-    );
+    const memoized = summarizeUsageAnalytics(events, now, createMemoizedPricing(memoRun.resolver));
     const rawRun = countingResolver();
     const unmemoized = summarizeUsageAnalytics(events, now, rawRun.resolver);
 

@@ -39,7 +39,11 @@ export function classifyFallbackFailure(
   status?: number,
 ): FallbackHopReason | undefined {
   const message =
-    typeof error === 'string' ? error : error instanceof Error ? error.message : String(error ?? '');
+    typeof error === 'string'
+      ? error
+      : error instanceof Error
+        ? error.message
+        : String(error ?? '');
   const name = error instanceof Error ? error.name : '';
   if (status === 401 || status === 403) return undefined;
   if (AUTH_TEXT.test(message)) return undefined;
@@ -50,7 +54,10 @@ export function classifyFallbackFailure(
 }
 
 /** Whether a classified reason is switched on in the chain's triggers. */
-export function fallbackReasonEnabled(reason: FallbackHopReason, triggers: FallbackTriggers): boolean {
+export function fallbackReasonEnabled(
+  reason: FallbackHopReason,
+  triggers: FallbackTriggers,
+): boolean {
   switch (reason) {
     case 'usage_limit':
       return triggers.usageLimit;
@@ -152,7 +159,9 @@ export function beginFallbackTurnState(input: {
   };
 }
 
-export function formatFallbackStepLabel(step: Pick<FallbackStep, 'provider' | 'model' | 'label'>): string {
+export function formatFallbackStepLabel(
+  step: Pick<FallbackStep, 'provider' | 'model' | 'label'>,
+): string {
   return step.label?.trim() || fallbackStepKey(step);
 }
 
@@ -166,7 +175,10 @@ export function formatFallbackExhaustedSummary(
   stepCount: number,
 ): string {
   if (hops.length === 0) return '';
-  const route = [`${primaryModel} (primary)`, ...hops.map((hop) => `${hop.toModel} (${hop.reason.replace('_', ' ')})`)];
+  const route = [
+    `${primaryModel} (primary)`,
+    ...hops.map((hop) => `${hop.toModel} (${hop.reason.replace('_', ' ')})`),
+  ];
   return `Fallback chain exhausted after ${hops.length} hop${hops.length === 1 ? '' : 's'} of ${stepCount} step${stepCount === 1 ? '' : 's'}: ${route.join(' -> ')}.`;
 }
 
@@ -180,12 +192,17 @@ export interface FallbackChainExhaustedInfo {
   summary: string;
 }
 
-export type FallbackChainExhaustedHandler = (sessionId: string, info: FallbackChainExhaustedInfo) => void;
+export type FallbackChainExhaustedHandler = (
+  sessionId: string,
+  info: FallbackChainExhaustedInfo,
+) => void;
 
 const exhaustedHandlers = new Set<FallbackChainExhaustedHandler>();
 
 /** Subscribe to chain exhaustion. Returns the unsubscribe function. */
-export function registerFallbackChainExhaustedHandler(handler: FallbackChainExhaustedHandler): () => void {
+export function registerFallbackChainExhaustedHandler(
+  handler: FallbackChainExhaustedHandler,
+): () => void {
   exhaustedHandlers.add(handler);
   return () => {
     exhaustedHandlers.delete(handler);
@@ -198,7 +215,10 @@ export function registerFallbackChainExhaustedHandler(handler: FallbackChainExha
  * after the chain is exhausted, never in place of a hop. A failing subscriber is
  * isolated so it cannot break the turn that reported the failure.
  */
-export function onFallbackChainExhausted(sessionId: string, info: FallbackChainExhaustedInfo): void {
+export function onFallbackChainExhausted(
+  sessionId: string,
+  info: FallbackChainExhaustedInfo,
+): void {
   for (const handler of exhaustedHandlers) {
     try {
       handler(sessionId, info);
@@ -254,7 +274,11 @@ export function decideFallbackHop<P>(input: {
     return { kind: 'none', state: input_state };
   }
 
-  const state: FallbackTurnState = { ...input_state, hops: [...input_state.hops], skipped: [...input_state.skipped] };
+  const state: FallbackTurnState = {
+    ...input_state,
+    hops: [...input_state.hops],
+    skipped: [...input_state.skipped],
+  };
   let next: { index: number; step: FallbackStep; route: FallbackResolvedRoute<P> } | undefined;
   for (let index = state.activeIndex + 1; index < state.chain.steps.length; index++) {
     const step = state.chain.steps[index]!;
@@ -315,5 +339,13 @@ export function decideFallbackHop<P>(input: {
             ? { resetAfter: input.now + FALLBACK_RESET_COOLDOWN_MS }
             : {}),
         };
-  return { kind: 'hop', state, sticky, hop, stepIndex: next.index, step: next.step, route: next.route };
+  return {
+    kind: 'hop',
+    state,
+    sticky,
+    hop,
+    stepIndex: next.index,
+    step: next.step,
+    route: next.route,
+  };
 }

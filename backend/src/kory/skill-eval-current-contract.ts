@@ -32,9 +32,16 @@ export function currentV5SkillEvaluationContracts(
   try {
     registryPath = requireRegistry.resolve(registrySpecifier);
   } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'MODULE_NOT_FOUND') {
+    if (
+      error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      error.code === 'MODULE_NOT_FOUND'
+    ) {
       return currentEmbeddedV5SkillEvaluationContracts(
-        skillPackage, contractVersion, EMBEDDED_CURRENT_V5_SKILL_EVALUATION_CONTRACTS,
+        skillPackage,
+        contractVersion,
+        EMBEDDED_CURRENT_V5_SKILL_EVALUATION_CONTRACTS,
       );
     }
     return contracts;
@@ -63,21 +70,37 @@ export function currentV5SkillEvaluationContracts(
   }>;
   for (const task of skillPackage.evaluation.tasks) {
     const scenario: SkillEvalScenarioV3 = {
-      ...task, skill: skillPackage.sidecar.name, category: 'full-task', expectedSelection: true,
-      expectedSkills: [], forbiddenSkills: [], heldOut: true, adjacentSkills: [], tags: ['held-out', 'full-task'],
+      ...task,
+      skill: skillPackage.sidecar.name,
+      category: 'full-task',
+      expectedSelection: true,
+      expectedSkills: [],
+      forbiddenSkills: [],
+      heldOut: true,
+      adjacentSkills: [],
+      tags: ['held-out', 'full-task'],
     };
-    const materializerIds = materializerRegistry.filter((item) => item.matches(scenario))
-      .map((item) => item.id).sort();
-    const scorerIds = scorerRegistry.filter((item) => item.scenarioIds.includes(task.id))
-      .map((item) => item.id).sort();
+    const materializerIds = materializerRegistry
+      .filter((item) => item.matches(scenario))
+      .map((item) => item.id)
+      .sort();
+    const scorerIds = scorerRegistry
+      .filter((item) => item.scenarioIds.includes(task.id))
+      .map((item) => item.id)
+      .sort();
     if (!materializerIds.length || !scorerIds.length) continue;
     contracts.set(task.id, {
       evaluationContractVersion: contractVersion,
       evaluationContractHash: skillEvaluationV5ContractHash({
-        contractVersion, skill: skillPackage.sidecar.name, packageVersion: skillPackage.sidecar.version,
-        scenario: task, materializerIds, scorerIds,
+        contractVersion,
+        skill: skillPackage.sidecar.name,
+        packageVersion: skillPackage.sidecar.version,
+        scenario: task,
+        materializerIds,
+        scorerIds,
       }),
-      materializerIds, scorerIds,
+      materializerIds,
+      scorerIds,
     });
   }
   return contracts;

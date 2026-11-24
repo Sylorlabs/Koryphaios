@@ -13,11 +13,19 @@ vi.mock('$lib/stores/project.svelte', () => ({ projectStore: { currentPath: '/pr
 /** Build server-shaped data so live events and reload use the same contract. */
 function checklist(id = 'plan', count = 6): Checklist {
   return {
-    id, title: `Plan ${id}`, scope: 'session', sessionId: 'chat',
-    createdAt: 1, updatedAt: 1, activity: [],
+    id,
+    title: `Plan ${id}`,
+    scope: 'session',
+    sessionId: 'chat',
+    createdAt: 1,
+    updatedAt: 1,
+    activity: [],
     items: Array.from({ length: count }, (_, index) => ({
-      id: `step-${index}`, title: `Step ${index + 1}`, order: index,
-      status: index === 0 ? 'done' : 'pending', createdAt: 1,
+      id: `step-${index}`,
+      title: `Step ${index + 1}`,
+      order: index,
+      status: index === 0 ? 'done' : 'pending',
+      createdAt: 1,
     })),
   };
 }
@@ -35,8 +43,12 @@ it('automatically shows agent events and lets the user collapse and expand the l
   const toggle = screen.getByRole('button', { name: /Collapse checklist: Plan plan/ });
   expect(toggle.getAttribute('aria-expanded')).toBe('true');
   expect(screen.getAllByRole('checkbox')).toHaveLength(6);
-  expect(screen.getByRole('checkbox', { name: 'Reopen: Step 1' }).getAttribute('aria-checked')).toBe('true');
-  expect(screen.getByRole('list', { name: 'Checklist items' }).classList.contains('docked-items')).toBe(true);
+  expect(
+    screen.getByRole('checkbox', { name: 'Reopen: Step 1' }).getAttribute('aria-checked'),
+  ).toBe('true');
+  expect(
+    screen.getByRole('list', { name: 'Checklist items' }).classList.contains('docked-items'),
+  ).toBe(true);
   await fireEvent.click(toggle);
   expect(screen.queryByRole('checkbox')).toBeNull();
   await fireEvent.click(screen.getByRole('button', { name: /Expand checklist: Plan plan/ }));
@@ -86,12 +98,18 @@ it('archives on user close and retains the panel with an error when closing fail
   await screen.findByRole('alert');
   expect(screen.getByText('Connection lost')).toBeTruthy();
   expect(screen.getByText('Step 2')).toBeTruthy();
-  apiFetch.mockResolvedValueOnce({ json: async () => ({ ok: true, data: { ...saved, archivedAt: 2 } }) });
+  apiFetch.mockResolvedValueOnce({
+    json: async () => ({ ok: true, data: { ...saved, archivedAt: 2 } }),
+  });
   await fireEvent.click(screen.getByRole('button', { name: 'Close checklist: Plan plan' }));
   await waitFor(() => expect(screen.queryByText('Step 2')).toBeNull());
-  expect(apiFetch).toHaveBeenLastCalledWith(expect.stringContaining('/api/checklists/plan'), expect.objectContaining({
-    method: 'PATCH', body: JSON.stringify({ archived: true }),
-  }));
+  expect(apiFetch).toHaveBeenLastCalledWith(
+    expect.stringContaining('/api/checklists/plan'),
+    expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ archived: true }),
+    }),
+  );
 });
 
 it('offers a dismiss control when /checklist opens an empty panel', async () => {
@@ -116,13 +134,15 @@ it('scopes a checklist created in a chat to that chat', async () => {
     json: async () => ({ ok: true, data: { ...checklist('new'), title: 'Ship the fix' } }),
   });
   await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-  await waitFor(() => expect(apiFetch).toHaveBeenLastCalledWith(
-    expect.stringContaining('/api/checklists'),
-    expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({ title: 'Ship the fix', sessionId: 'chat', scope: 'session' }),
-    }),
-  ));
+  await waitFor(() =>
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      expect.stringContaining('/api/checklists'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ title: 'Ship the fix', sessionId: 'chat', scope: 'session' }),
+      }),
+    ),
+  );
 });
 
 it('updates progress live and keeps session and project lists in their own scope', async () => {
@@ -130,13 +150,22 @@ it('updates progress live and keeps session and project lists in their own scope
   const saved = checklist();
   checklistStore.handleUpdated({ checklist: saved });
   checklistStore.handleUpdated({ checklist: { ...checklist('other'), sessionId: 'other-chat' } });
-  checklistStore.handleUpdated({ checklist: { ...checklist('project'), scope: 'project', projectPath: '/project' } });
-  checklistStore.handleUpdated({ checklist: { ...checklist('foreign'), scope: 'project', projectPath: '/elsewhere' } });
+  checklistStore.handleUpdated({
+    checklist: { ...checklist('project'), scope: 'project', projectPath: '/project' },
+  });
+  checklistStore.handleUpdated({
+    checklist: { ...checklist('foreign'), scope: 'project', projectPath: '/elsewhere' },
+  });
   await tick();
   expect(screen.queryByText('Plan other')).toBeNull();
   expect(screen.queryByText('Plan foreign')).toBeNull();
   expect(screen.getByText('Plan project')).toBeTruthy();
-  checklistStore.handleUpdated({ checklist: { ...saved, items: saved.items.map((item, index) => index === 1 ? { ...item, status: 'done' } : item) } });
+  checklistStore.handleUpdated({
+    checklist: {
+      ...saved,
+      items: saved.items.map((item, index) => (index === 1 ? { ...item, status: 'done' } : item)),
+    },
+  });
   await tick();
   expect(screen.getByText('2/6')).toBeTruthy();
 });

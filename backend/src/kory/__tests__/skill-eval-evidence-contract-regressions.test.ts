@@ -23,7 +23,10 @@ import {
   DATA_PERFORMANCE_VISUALIZATION_SCORERS,
 } from '../../eval/skills/skill-eval-data-performance-visualization-fixtures';
 import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
-import { createConceptFixtures, scoreConceptFixture } from '../../eval/skills/skill-eval-concept-fixtures';
+import {
+  createConceptFixtures,
+  scoreConceptFixture,
+} from '../../eval/skills/skill-eval-concept-fixtures';
 import { hasRegressionText } from '../../eval/skills/skill-eval-fixture-helpers';
 import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
@@ -133,9 +136,13 @@ async function capacityGapFixture(policy: Record<string, unknown> = { interpolat
   };
   const write = (value: unknown = artifact) =>
     writeFileSync(artifactPath, `${JSON.stringify(value, null, 2)}\n`);
-  const score = () => fixture.scorer.score({
-    scenario: fixture.scenario, experiment: {} as never, workingDirectory: fixture.root, observation,
-  });
+  const score = () =>
+    fixture.scorer.score({
+      scenario: fixture.scenario,
+      experiment: {} as never,
+      workingDirectory: fixture.root,
+      observation,
+    });
   write();
   return { ...fixture, artifact, artifactPath, sourcePath, write, score };
 }
@@ -185,12 +192,18 @@ describe('evidence contract regressions', () => {
   test('planning verification criteria are falsifiable and not evidence-label placeholders', () => {
     const pkg = loadV5SkillPackages().packages.find((item) => item.sidecar.name === 'planning')!;
     const scenarios = buildSkillEvalSuiteV3(pkg).scenarios;
-    const checks = scenarios.filter((item) => item.id.startsWith('planning-full-task-'))
-      .map((task) => ({ task, assertion: task.falsifiableChecks.find((check) =>
-        check.id === 'verification-discipline')!.assertion }));
+    const checks = scenarios
+      .filter((item) => item.id.startsWith('planning-full-task-'))
+      .map((task) => ({
+        task,
+        assertion: task.falsifiableChecks.find((check) => check.id === 'verification-discipline')!
+          .assertion,
+      }));
     expect(checks).toHaveLength(2);
     for (const { task, assertion } of checks) {
-      expect(task.requiredEvidence.some((entry) => entry.toLowerCase() === assertion.toLowerCase())).toBe(false);
+      expect(
+        task.requiredEvidence.some((entry) => entry.toLowerCase() === assertion.toLowerCase()),
+      ).toBe(false);
       expect(assertion).toMatch(/observed result|observable pass\/fail/u);
     }
     expect(checks[0]!.assertion).toContain('session TTL');
@@ -397,15 +410,27 @@ describe('evidence contract regressions', () => {
     const session = JSON.parse(WEB_LIVE_SESSION) as {
       browser: string;
       locale: string;
-      keyboard: { focusOnOpen: string; tabStops: string[]; closedByEscape: boolean; focusAfterEscape: string };
+      keyboard: {
+        focusOnOpen: string;
+        tabStops: string[];
+        closedByEscape: boolean;
+        focusAfterEscape: string;
+      };
       errorState: { visible: boolean; role: string; text: string };
-      zoom200: { horizontalOverflow: boolean; dialogFits: boolean; longTextFits: boolean; dialogRectWidth: number; viewportWidth: number };
+      zoom200: {
+        horizontalOverflow: boolean;
+        dialogFits: boolean;
+        longTextFits: boolean;
+        dialogRectWidth: number;
+        viewportWidth: number;
+      };
     };
     const submission = {
       environment: {
         browser: session.browser,
         locale: session.locale,
-        screenReader: 'orca 43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800',
+        screenReader:
+          'orca 43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800',
       },
       keyboard: session.keyboard,
       errorState: session.errorState,
@@ -418,7 +443,9 @@ describe('evidence contract regressions', () => {
           at: 'orca 43.1',
           manual: true,
           passed: true,
-          observations: ['Speech Dispatcher log records "Löschen fehlgeschlagen. Erneut versuchen." for the opened dialog'],
+          observations: [
+            'Speech Dispatcher log records "Löschen fehlgeschlagen. Erneut versuchen." for the opened dialog',
+          ],
         },
         {
           task: 'focus-escape-defect',
@@ -427,7 +454,9 @@ describe('evidence contract regressions', () => {
           at: 'orca 43.1',
           manual: true,
           passed: true,
-          observations: ['recorded tabStops show focus left the dialog onto the Seitenreiter (document body)'],
+          observations: [
+            'recorded tabStops show focus left the dialog onto the Seitenreiter (document body)',
+          ],
         },
         {
           task: 'zoom-200-reflow',
@@ -436,7 +465,9 @@ describe('evidence contract regressions', () => {
           at: 'orca 43.1',
           manual: true,
           passed: true,
-          observations: ['dialog fits at 200 percent zoom: no horizontal overflow at viewport width 640'],
+          observations: [
+            'dialog fits at 200 percent zoom: no horizontal overflow at viewport width 640',
+          ],
         },
       ],
       automation: {
@@ -448,7 +479,8 @@ describe('evidence contract regressions', () => {
       conflicts: [
         {
           claimId: 'focus-trap',
-          evidence: 'the recorded tabStops place one Tab stop on the document body outside the dialog',
+          evidence:
+            'the recorded tabStops place one Tab stop on the document body outside the dialog',
           verdict: 'rejected',
         },
       ],
@@ -458,21 +490,29 @@ describe('evidence contract regressions', () => {
       untested: ['NVDA on Windows and VoiceOver on macOS were not driven'],
     };
     writeFileSync(join(root, '.kory-eval/web-verification.json'), JSON.stringify(submission));
-    expect((await scorer.score({
-      scenario,
-      experiment: {} as never,
-      workingDirectory: root,
-      observation,
-    })).passed).toBe(true);
+    expect(
+      (
+        await scorer.score({
+          scenario,
+          experiment: {} as never,
+          workingDirectory: root,
+          observation,
+        })
+      ).passed,
+    ).toBe(true);
 
     submission.environment.screenReader = 'NVDA 2026.2 (labeled as the recorded technology)';
     writeFileSync(join(root, '.kory-eval/web-verification.json'), JSON.stringify(submission));
-    expect((await scorer.score({
-      scenario,
-      experiment: {} as never,
-      workingDirectory: root,
-      observation,
-    })).passed).toBe(false);
+    expect(
+      (
+        await scorer.score({
+          scenario,
+          experiment: {} as never,
+          workingDirectory: root,
+          observation,
+        })
+      ).passed,
+    ).toBe(false);
   });
 
   test('Android verification preserves the exact TalkBack identity without capability padding', async () => {
@@ -540,7 +580,8 @@ describe('evidence contract regressions', () => {
       conflicts: [
         {
           claimId: 'spoken-state-change',
-          evidence: 'the recording captured no utterance, so the Espresso assertion cannot attest spoken output',
+          evidence:
+            'the recording captured no utterance, so the Espresso assertion cannot attest spoken output',
           verdict: 'rejected',
         },
         {
@@ -560,21 +601,29 @@ describe('evidence contract regressions', () => {
       untested: ['spoken output was not captured and Switch Access input was not exercised'],
     };
     writeFileSync(join(root, '.kory-eval/android-verification.json'), JSON.stringify(submission));
-    expect((await scorer.score({
-      scenario,
-      experiment: {} as never,
-      workingDirectory: root,
-      observation,
-    })).passed).toBe(true);
+    expect(
+      (
+        await scorer.score({
+          scenario,
+          experiment: {} as never,
+          workingDirectory: root,
+          observation,
+        })
+      ).passed,
+    ).toBe(true);
 
     submission.environment.assistiveTechnology = 'TalkBack 17.0 (capability-padded identity)';
     writeFileSync(join(root, '.kory-eval/android-verification.json'), JSON.stringify(submission));
-    expect((await scorer.score({
-      scenario,
-      experiment: {} as never,
-      workingDirectory: root,
-      observation,
-    })).passed).toBe(false);
+    expect(
+      (
+        await scorer.score({
+          scenario,
+          experiment: {} as never,
+          workingDirectory: root,
+          observation,
+        })
+      ).passed,
+    ).toBe(false);
   });
 
   test('application-security scorer accepts canonical roots and safe option allowlisting', async () => {
@@ -785,58 +834,108 @@ test('candidate may clean generated analysis output', () => {
     ['null-aware interpolation policy', { interpolation: 'none-across-null-values' }],
     ['connection prohibition', { rendering: 'Do not connect across missing values.' }],
     ['segment prohibition', { rendering: 'Do not draw a line segment across either gap.' }],
-    ['passive line prohibition', { rendering: 'Gaps stay visible: no line is drawn across missing telemetry.' }],
-    ['null filter prohibition', { rendering: 'Break paths at null values and never filter nulls before connecting lines.' }],
-    ['interpolation list prohibition', { rendering: 'Null metrics remain explicit gaps. No smoothing, interpolation, aggregation, or derived metrics.' }],
-    ['prose none policy', { interpolation: 'None. Source observations are retained as supplied; null metric values remain explicit gaps.' }],
-    ['pronominal interpolation list', { rendering: 'Null observations stay visible as gaps; do not filter, interpolate, or connect across them.' }],
-    ['pronominal reconnect list', { rendering: 'Split the series into segments; never filter, reconnect, interpolate, or smooth across them.' }],
-  ])('capacity scorer accepts %s without requiring a preferred prose spelling', async (_name, policy) => {
-    const { artifact, artifactPath, sourcePath, score } = await capacityGapFixture(policy);
-    const sourceBytes = readFileSync(sourcePath);
-    const bytes = readFileSync(artifactPath, 'utf8');
-    const result = await score();
-    expect(result.passed).toBe(true);
-    expect(result.verification).toBe(1);
-    expect(result.evidence).toContain('missing intervals explicitly non-interpolated: yes');
-    expect(result.evidence).toContain(
-      'host-owned negative gap probes: interpolation enablement=rejected; null-dropping break-path=rejected',
-    );
-    expect(result.evidence.join('\n')).toContain(
-      'success=passed; negative gap corruption=rejected; recovery reread=passed',
-    );
-    expect(result.evidence.join('\n')).toContain(`artifactSha256=${sha256Path(artifactPath)}`);
-    expect(result.evidence.join('\n')).toContain(`sourceSha256=${sha256Path(sourcePath)}`);
-    expect(result.evidence.join('\n')).toContain('browser rendering and reader usability are unobserved');
-    expect(readFileSync(artifactPath, 'utf8')).toBe(bytes);
-    expect(readFileSync(sourcePath)).toEqual(sourceBytes);
+    [
+      'passive line prohibition',
+      { rendering: 'Gaps stay visible: no line is drawn across missing telemetry.' },
+    ],
+    [
+      'null filter prohibition',
+      { rendering: 'Break paths at null values and never filter nulls before connecting lines.' },
+    ],
+    [
+      'interpolation list prohibition',
+      {
+        rendering:
+          'Null metrics remain explicit gaps. No smoothing, interpolation, aggregation, or derived metrics.',
+      },
+    ],
+    [
+      'prose none policy',
+      {
+        interpolation:
+          'None. Source observations are retained as supplied; null metric values remain explicit gaps.',
+      },
+    ],
+    [
+      'pronominal interpolation list',
+      {
+        rendering:
+          'Null observations stay visible as gaps; do not filter, interpolate, or connect across them.',
+      },
+    ],
+    [
+      'pronominal reconnect list',
+      {
+        rendering:
+          'Split the series into segments; never filter, reconnect, interpolate, or smooth across them.',
+      },
+    ],
+  ])(
+    'capacity scorer accepts %s without requiring a preferred prose spelling',
+    async (_name, policy) => {
+      const { artifact, artifactPath, sourcePath, score } = await capacityGapFixture(policy);
+      const sourceBytes = readFileSync(sourcePath);
+      const bytes = readFileSync(artifactPath, 'utf8');
+      const result = await score();
+      expect(result.passed).toBe(true);
+      expect(result.verification).toBe(1);
+      expect(result.evidence).toContain('missing intervals explicitly non-interpolated: yes');
+      expect(result.evidence).toContain(
+        'host-owned negative gap probes: interpolation enablement=rejected; null-dropping break-path=rejected',
+      );
+      expect(result.evidence.join('\n')).toContain(
+        'success=passed; negative gap corruption=rejected; recovery reread=passed',
+      );
+      expect(result.evidence.join('\n')).toContain(`artifactSha256=${sha256Path(artifactPath)}`);
+      expect(result.evidence.join('\n')).toContain(`sourceSha256=${sha256Path(sourcePath)}`);
+      expect(result.evidence.join('\n')).toContain(
+        'browser rendering and reader usability are unobserved',
+      );
+      expect(readFileSync(artifactPath, 'utf8')).toBe(bytes);
+      expect(readFileSync(sourcePath)).toEqual(sourceBytes);
 
-    // Neither a forbidden structured policy nor an executable null-dropping path
-    // may be excused by otherwise correct prose, metadata or candidate claims.
-    for (const corruption of [
-      { chart: { ...artifact.chart, missingness: { ...artifact.chart.missingness, interpolation: true } } },
-      { vconcat: [{
-        mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
-        transform: [{ filter: 'isValid(datum.medianMs)' }],
-        encoding: { y: { field: 'medianMs', type: 'quantitative' } },
-      }] },
-    ]) {
-      writeFileSync(artifactPath, JSON.stringify({ ...artifact, ...corruption }));
-      const corrupted = await score();
-      expect(corrupted.passed).toBe(false);
-      expect(corrupted.verification).toBe(0);
-      expect(corrupted.evidence).toContain('missing intervals explicitly non-interpolated: no');
-      expect(corrupted.evidence.join('\n')).toContain('negative gap corruption=not run');
-    }
-    writeFileSync(artifactPath, bytes);
-    expect(await score()).toEqual(result);
+      // Neither a forbidden structured policy nor an executable null-dropping path
+      // may be excused by otherwise correct prose, metadata or candidate claims.
+      for (const corruption of [
+        {
+          chart: {
+            ...artifact.chart,
+            missingness: { ...artifact.chart.missingness, interpolation: true },
+          },
+        },
+        {
+          vconcat: [
+            {
+              mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
+              transform: [{ filter: 'isValid(datum.medianMs)' }],
+              encoding: { y: { field: 'medianMs', type: 'quantitative' } },
+            },
+          ],
+        },
+      ]) {
+        writeFileSync(artifactPath, JSON.stringify({ ...artifact, ...corruption }));
+        const corrupted = await score();
+        expect(corrupted.passed).toBe(false);
+        expect(corrupted.verification).toBe(0);
+        expect(corrupted.evidence).toContain('missing intervals explicitly non-interpolated: no');
+        expect(corrupted.evidence.join('\n')).toContain('negative gap corruption=not run');
+      }
+      writeFileSync(artifactPath, bytes);
+      expect(await score()).toEqual(result);
 
-    const unspecified = { ...artifact, chart: { ...artifact.chart, missingness: {
-      missingIntervals: ['10:10', '10:15'],
-    } } };
-    writeFileSync(artifactPath, JSON.stringify(unspecified));
-    expect((await score()).passed).toBe(false);
-  });
+      const unspecified = {
+        ...artifact,
+        chart: {
+          ...artifact.chart,
+          missingness: {
+            missingIntervals: ['10:10', '10:15'],
+          },
+        },
+      };
+      writeFileSync(artifactPath, JSON.stringify(unspecified));
+      expect((await score()).passed).toBe(false);
+    },
+  );
 
   test('capacity scorer accepts camelCase fallback keys and a text-only fallback', async () => {
     const { artifact, write, score } = await capacityGapFixture();
@@ -881,8 +980,14 @@ test('candidate may clean generated analysis output', () => {
   test.each([
     ['linear interpolation', { interpolation: 'linear' }],
     ['enabled interpolation', { interpolation: 'enabled' }],
-    ['affirmative reconnect clause', { rendering: 'No interpolation; connect a line across missing intervals.' }],
-    ['affirmative interpolation clause', { rendering: 'No interpolation, but interpolate across both gaps.' }],
+    [
+      'affirmative reconnect clause',
+      { rendering: 'No interpolation; connect a line across missing intervals.' },
+    ],
+    [
+      'affirmative interpolation clause',
+      { rendering: 'No interpolation, but interpolate across both gaps.' },
+    ],
     ['negated line break', { rendering: 'Do not break the line across either gap.' }],
   ])('capacity scorer rejects contradictory %s policy', async (_name, contradiction) => {
     const { artifact, artifactPath, sourcePath, write, score } = await capacityGapFixture();
@@ -902,41 +1007,77 @@ test('candidate may clean generated analysis output', () => {
   });
 
   test('capacity scorer does not credit a negated line-break declaration', async () => {
-    const { score } = await capacityGapFixture({ rendering: 'Do not break the line across either gap.' });
+    const { score } = await capacityGapFixture({
+      rendering: 'Do not break the line across either gap.',
+    });
     const result = await score();
     expect(result.passed).toBe(false);
     expect(result.evidence).toContain('missing intervals explicitly non-interpolated: no');
   });
 
   test.each([
-    ['nested valid filter', { mark: { type: 'line', invalid: 'break-paths-show-path-domains' }, transform: [
-      { filter: { and: [{ field: 'medianMs', valid: true }] } },
-    ] }],
-    ['negated invalid filter', { mark: { type: 'line', invalid: 'break-paths-show-path-domains' }, transform: [
-      { filter: { not: { field: 'p95Ms', valid: false } } },
-    ] }],
-    ['truthy telemetry filter', { mark: { type: 'line', invalid: 'break-paths-show-path-domains' }, transform: [
-      { filter: 'datum.medianMs' },
-    ] }],
-    ['bracket-access validity filter', { mark: { type: 'line', invalid: 'break-paths-show-path-domains' }, transform: [
-      { filter: 'isValid(datum["medianMs"])' },
-    ] }],
-    ['reverse null comparison filter', { mark: { type: 'line', invalid: 'break-paths-show-path-domains' }, transform: [
-      { filter: 'null !== datum.p95Ms' },
-    ] }],
-    ['parenthesized conjunctive filter', { mark: { type: 'line', invalid: 'break-paths-show-path-domains' }, transform: [
-      { filter: '(isValid(datum.medianMs)) && isValid(datum.time)' },
-    ] }],
-    ['null imputation', { mark: { type: 'line', invalid: 'break-paths-show-path-domains' }, transform: [
-      { impute: 'medianMs', key: 'time', value: 0 },
-    ] }],
+    [
+      'nested valid filter',
+      {
+        mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
+        transform: [{ filter: { and: [{ field: 'medianMs', valid: true }] } }],
+      },
+    ],
+    [
+      'negated invalid filter',
+      {
+        mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
+        transform: [{ filter: { not: { field: 'p95Ms', valid: false } } }],
+      },
+    ],
+    [
+      'truthy telemetry filter',
+      {
+        mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
+        transform: [{ filter: 'datum.medianMs' }],
+      },
+    ],
+    [
+      'bracket-access validity filter',
+      {
+        mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
+        transform: [{ filter: 'isValid(datum["medianMs"])' }],
+      },
+    ],
+    [
+      'reverse null comparison filter',
+      {
+        mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
+        transform: [{ filter: 'null !== datum.p95Ms' }],
+      },
+    ],
+    [
+      'parenthesized conjunctive filter',
+      {
+        mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
+        transform: [{ filter: '(isValid(datum.medianMs)) && isValid(datum.time)' }],
+      },
+    ],
+    [
+      'null imputation',
+      {
+        mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
+        transform: [{ impute: 'medianMs', key: 'time', value: 0 }],
+      },
+    ],
   ])('capacity scorer rejects executable %s', async (_name, path) => {
     const { artifact, artifactPath, sourcePath, write, score } = await capacityGapFixture();
     const success = await score();
     const source = readFileSync(sourcePath);
-    const corrupted = { ...artifact, vconcat: [{
-      ...path, encoding: { y: { field: 'medianMs', type: 'quantitative' } },
-    }] };
+    const corrupted = {
+      ...artifact,
+      vconcat: [
+        {
+          ...path,
+          encoding: { y: { field: 'medianMs', type: 'quantitative' } },
+        },
+      ],
+    };
     write(corrupted);
     const bytes = readFileSync(artifactPath);
     const rejected = await score();
@@ -951,11 +1092,15 @@ test('candidate may clean generated analysis output', () => {
 
   test('capacity scorer inspects executable line paths inside the chart wrapper', async () => {
     const { artifact, write, score } = await capacityGapFixture();
-    write({ ...artifact, chart: { ...artifact.chart,
-      mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
-      transform: [{ filter: 'isValid(datum.medianMs)' }],
-      encoding: { y: { field: 'medianMs', type: 'quantitative' } },
-    } });
+    write({
+      ...artifact,
+      chart: {
+        ...artifact.chart,
+        mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
+        transform: [{ filter: 'isValid(datum.medianMs)' }],
+        encoding: { y: { field: 'medianMs', type: 'quantitative' } },
+      },
+    });
     const result = await score();
     expect(result.passed).toBe(false);
     expect(result.evidence).toContain('executable line-path topology: reconnect-risk');
@@ -963,30 +1108,57 @@ test('candidate may clean generated analysis output', () => {
 
   test.each([
     ['default Vega-Lite path break', { type: 'line' }, true],
-    ['explicit Vega-Lite path break', { type: 'line', invalid: 'break-paths-filter-domains' }, true],
+    [
+      'explicit Vega-Lite path break',
+      { type: 'line', invalid: 'break-paths-filter-domains' },
+      true,
+    ],
     ['Vega-Lite reconnect filter', { type: 'line', invalid: 'filter' }, false],
     ['Vega-Lite forced invalid display', { type: 'line', invalid: 'show' }, false],
     ['unsupported legacy invalid mode', { type: 'line', invalid: 'break-path' }, false],
-    ['unsupported Vega defined predicate', { type: 'line', invalid: 'filter', defined: '!isValid(datum.medianMs)' }, false],
-  ])('capacity scorer handles %s without imaginary Vega-Lite tokens', async (_name, mark, expected) => {
-    const { artifact, write, score } = await capacityGapFixture();
-    write({ ...artifact, vconcat: [{ mark, encoding: {
-      x: { field: 'time', type: 'ordinal' },
-      y: { field: 'medianMs', type: 'quantitative' },
-    } }] });
-    const result = await score();
-    expect(result.passed).toBe(expected);
-    expect(result.evidence).toContain(
-      `executable line-path topology: ${expected ? 'gap-preserving' : 'reconnect-risk'}`,
-    );
-  });
+    [
+      'unsupported Vega defined predicate',
+      { type: 'line', invalid: 'filter', defined: '!isValid(datum.medianMs)' },
+      false,
+    ],
+  ])(
+    'capacity scorer handles %s without imaginary Vega-Lite tokens',
+    async (_name, mark, expected) => {
+      const { artifact, write, score } = await capacityGapFixture();
+      write({
+        ...artifact,
+        vconcat: [
+          {
+            mark,
+            encoding: {
+              x: { field: 'time', type: 'ordinal' },
+              y: { field: 'medianMs', type: 'quantitative' },
+            },
+          },
+        ],
+      });
+      const result = await score();
+      expect(result.passed).toBe(expected);
+      expect(result.evidence).toContain(
+        `executable line-path topology: ${expected ? 'gap-preserving' : 'reconnect-risk'}`,
+      );
+    },
+  );
 
   test('capacity scorer rejects a scale override that makes missing points drawable', async () => {
     const { artifact, write, score } = await capacityGapFixture();
-    write({ ...artifact, config: { scale: { invalid: { y: { value: 0 } } } },
-      vconcat: [{ mark: 'line', encoding: {
-        y: { field: 'medianMs', type: 'quantitative' },
-      } }] });
+    write({
+      ...artifact,
+      config: { scale: { invalid: { y: { value: 0 } } } },
+      vconcat: [
+        {
+          mark: 'line',
+          encoding: {
+            y: { field: 'medianMs', type: 'quantitative' },
+          },
+        },
+      ],
+    });
     const result = await score();
     expect(result.passed).toBe(false);
     expect(result.evidence).toContain('executable line-path topology: reconnect-risk');
@@ -995,16 +1167,33 @@ test('candidate may clean generated analysis output', () => {
   test.each([
     ['timestamp validity filter', { filter: 'isValid(datum.time)' }],
     ['structured timestamp filter', { filter: { field: 'time', valid: true } }],
-    ['null-preserving disjunction', { filter: { or: [
-      { field: 'medianMs', valid: true }, { field: 'medianMs', equal: null },
-    ] } }],
-    ['null-preserving expression', { filter: 'isValid(datum.medianMs) || datum.medianMs === null' }],
+    [
+      'null-preserving disjunction',
+      {
+        filter: {
+          or: [
+            { field: 'medianMs', valid: true },
+            { field: 'medianMs', equal: null },
+          ],
+        },
+      },
+    ],
+    [
+      'null-preserving expression',
+      { filter: 'isValid(datum.medianMs) || datum.medianMs === null' },
+    ],
   ])('capacity scorer retains gap-preserving %s', async (_name, transform) => {
     const { artifact, write, score } = await capacityGapFixture();
-    write({ ...artifact, transform: [transform], vconcat: [{
-      mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
-      encoding: { y: { field: 'medianMs', type: 'quantitative' } },
-    }] });
+    write({
+      ...artifact,
+      transform: [transform],
+      vconcat: [
+        {
+          mark: { type: 'line', invalid: 'break-paths-show-path-domains' },
+          encoding: { y: { field: 'medianMs', type: 'quantitative' } },
+        },
+      ],
+    });
     const result = await score();
     expect(result.passed).toBe(true);
     expect(result.evidence).toContain('executable line-path topology: gap-preserving');
@@ -1043,8 +1232,11 @@ test('candidate may clean generated analysis output', () => {
         'force-custom-plan: broad session setting regresses unrelated workload',
       ],
       effects: {
-        writeCpu: '0.2 percent', storage: '0.01 GiB', lock: 'writers not blocked',
-        neighbor: '1.1 percent', planningCpu: '19 percent for the rejected force_custom_plan setting',
+        writeCpu: '0.2 percent',
+        storage: '0.01 GiB',
+        lock: 'writers not blocked',
+        neighbor: '1.1 percent',
+        planningCpu: '19 percent for the rejected force_custom_plan setting',
       },
       concurrency: '850 writes per second',
       hierarchyBoundary: boundary,
@@ -1073,7 +1265,9 @@ test('candidate may clean generated analysis output', () => {
       workingDirectory: root,
       observation,
     });
-    expect(neighborOnly.evidence.join('\n')).toContain('performance-debugging/GPU boundary: missing');
+    expect(neighborOnly.evidence.join('\n')).toContain(
+      'performance-debugging/GPU boundary: missing',
+    );
     expect(neighborOnly.passed).toBe(false);
 
     write('the boundary is recorded elsewhere');
@@ -1212,9 +1406,10 @@ test('candidate may clean generated analysis output', () => {
       const z2 = 1.96 ** 2;
       const scale = 1 + z2 / row.eligibleSessions;
       const center = (rate + z2 / (2 * row.eligibleSessions)) / scale;
-      const halfWidth = (1.96 * Math.sqrt(
-        (rate * (1 - rate) + z2 / (4 * row.eligibleSessions)) / row.eligibleSessions,
-      )) / scale;
+      const halfWidth =
+        (1.96 *
+          Math.sqrt((rate * (1 - rate) + z2 / (4 * row.eligibleSessions)) / row.eligibleSessions)) /
+        scale;
       return {
         regionLabel: row.region ?? `Unknown (${row.regionCode})`,
         regionCode: row.regionCode ?? null,
@@ -1246,7 +1441,8 @@ test('candidate may clean generated analysis output', () => {
       `${JSON.stringify({
         analyticalTask: 'rate comparison with uncertainty',
         encoding: {
-          type: 'dot-and-interval', order: 'descending conversion rate',
+          type: 'dot-and-interval',
+          order: 'descending conversion rate',
           x: { field: 'rate', type: 'quantitative' },
           interval: { field: 'interval95' },
         },
@@ -1299,17 +1495,13 @@ test('candidate may clean generated analysis output', () => {
       const large = rows.find((row) => Number(row.eligibleSessions) >= 50)!;
       large.lowSample = true;
     });
-    expect((await rescore()).evidence.join('\n')).toContain(
-      'two <50 samples visibly flagged: no',
-    );
+    expect((await rescore()).evidence.join('\n')).toContain('two <50 samples visibly flagged: no');
 
     asSpec((rows) => {
       const small = rows.find((row) => Number(row.eligibleSessions) < 50)!;
       small.lowSample = false;
     });
-    expect((await rescore()).evidence.join('\n')).toContain(
-      'two <50 samples visibly flagged: no',
-    );
+    expect((await rescore()).evidence.join('\n')).toContain('two <50 samples visibly flagged: no');
 
     writeFileSync(artifactPath, originalArtifact);
 
@@ -1319,11 +1511,20 @@ test('candidate may clean generated analysis output', () => {
     const unresolved = regionOnly.rows.find((row) => row.regionLabel === 'Unknown (R8)')!;
     unresolved.region = unresolved.regionLabel;
     delete unresolved.regionLabel;
-    writeFileSync(join(root, '.kory-eval/visualization-conversion.json'),
-      `${JSON.stringify(regionOnly)}\n`);
-    expect((await scorer.score({
-      scenario, experiment: {} as never, workingDirectory: root, observation,
-    })).passed).toBe(true);
+    writeFileSync(
+      join(root, '.kory-eval/visualization-conversion.json'),
+      `${JSON.stringify(regionOnly)}\n`,
+    );
+    expect(
+      (
+        await scorer.score({
+          scenario,
+          experiment: {} as never,
+          workingDirectory: root,
+          observation,
+        })
+      ).passed,
+    ).toBe(true);
 
     const wrongDenominator = JSON.parse(
       readFileSync(join(root, '.kory-eval/visualization-conversion.json'), 'utf8'),
@@ -1616,7 +1817,10 @@ describe('concept harness integrity classification', () => {
   test('a symlinked candidate path is still an integrity failure', () => {
     const { definition, root } = conceptWorkspace();
     rmSync(join(root, 'candidate.ts'));
-    writeFileSync(join(root, 'real-candidate.ts'), 'export function solve() { return { ok: true }; }\n');
+    writeFileSync(
+      join(root, 'real-candidate.ts'),
+      'export function solve() { return { ok: true }; }\n',
+    );
     symlinkSync(join(root, 'real-candidate.ts'), join(root, 'candidate.ts'));
     const result = scoreConceptFixture(definition as never, root);
     expect(result.integrityFailure).toBe(true);

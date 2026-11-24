@@ -10,7 +10,9 @@ export function strictJson(text: string): unknown {
     while (/[\x20\t\r\n]/u.test(text[offset] ?? '\0')) offset += 1;
   };
   const string = (): string => {
-    const match = /^"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/u.exec(text.slice(offset));
+    const match = /^"(?:[^"\\\u0000-\u001f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*"/u.exec(
+      text.slice(offset),
+    );
     if (!match) invalid();
     offset += match[0].length;
     return JSON.parse(match[0]) as string;
@@ -48,7 +50,10 @@ export function strictJson(text: string): unknown {
         if (separator !== ',') invalid();
       }
     }
-    const literal = /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/u.exec(text.slice(offset));
+    const literal =
+      /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/u.exec(
+        text.slice(offset),
+      );
     if (!literal) invalid();
     offset += literal[0].length;
   };
@@ -66,17 +71,36 @@ export function exactRecord(value: unknown, keys: readonly string[]): Record<str
 }
 
 export function validateAdjudication(output: string): void {
-  const result = exactRecord(strictJson(output), ['artifactA', 'artifactB', 'preference', 'rationale']);
-  const strings = (value: unknown) => Array.isArray(value) && value.every((item) => typeof item === 'string');
+  const result = exactRecord(strictJson(output), [
+    'artifactA',
+    'artifactB',
+    'preference',
+    'rationale',
+  ]);
+  const strings = (value: unknown) =>
+    Array.isArray(value) && value.every((item) => typeof item === 'string');
   for (const key of ['artifactA', 'artifactB']) {
-    const score = exactRecord(result[key], ['passed', 'quality', 'verification', 'integrityFailure', 'evidence']);
-    if (typeof score.passed !== 'boolean' || typeof score.integrityFailure !== 'boolean' || !strings(score.evidence)) invalid();
+    const score = exactRecord(result[key], [
+      'passed',
+      'quality',
+      'verification',
+      'integrityFailure',
+      'evidence',
+    ]);
+    if (
+      typeof score.passed !== 'boolean' ||
+      typeof score.integrityFailure !== 'boolean' ||
+      !strings(score.evidence)
+    )
+      invalid();
     for (const field of ['quality', 'verification']) {
       const number = score[field];
-      if (typeof number !== 'number' || !Number.isFinite(number) || number < 0 || number > 1) invalid();
+      if (typeof number !== 'number' || !Number.isFinite(number) || number < 0 || number > 1)
+        invalid();
     }
   }
-  if (!['A', 'B', 'tie'].includes(result.preference as string) || !strings(result.rationale)) invalid();
+  if (!['A', 'B', 'tie'].includes(result.preference as string) || !strings(result.rationale))
+    invalid();
 }
 
 // This route's model emits an adjudication that repeats keys inside an artifact
@@ -152,9 +176,10 @@ export function normalizeDuplicateKeys(text: string): string {
         if (separator !== ',') throw new Error('Invalid reviewer JSON (details redacted).');
       }
     }
-    const literal = /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/u.exec(
-      text.slice(index),
-    );
+    const literal =
+      /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/u.exec(
+        text.slice(index),
+      );
     if (!literal) throw new Error('Invalid reviewer JSON (details redacted).');
     index += literal[0].length;
     return literal[0];

@@ -97,7 +97,10 @@ describe('VoiceConductorHud', () => {
     expect(fake.steerManager).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByTestId('voice-conductor-confirm'));
     await vi.waitFor(() =>
-      expect(fake.steerManager).toHaveBeenCalledWith('chat-a', 'rewrite the parser with a state machine'),
+      expect(fake.steerManager).toHaveBeenCalledWith(
+        'chat-a',
+        'rewrite the parser with a state machine',
+      ),
     );
   });
 

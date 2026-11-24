@@ -314,12 +314,15 @@ describe('iOS 27 native SwiftUI evaluator sidecar', () => {
       ).toBe(false);
       const green = runIOSSwiftUINativeControl(documents, 'repaired');
       if (!green.passed) {
-        console.error('Native iPad repaired-control diagnostics:', JSON.stringify({
-          blockers: green.blockers,
-          failedChecks: green.checks.filter((check) => !check.passed),
-          evidence: green.evidence.slice(-20),
-          screenshots: green.screenshots.length,
-        }));
+        console.error(
+          'Native iPad repaired-control diagnostics:',
+          JSON.stringify({
+            blockers: green.blockers,
+            failedChecks: green.checks.filter((check) => !check.passed),
+            evidence: green.evidence.slice(-20),
+            screenshots: green.screenshots.length,
+          }),
+        );
       }
       expect(green.passed).toBe(true);
       expect(

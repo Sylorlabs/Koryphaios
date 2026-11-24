@@ -21,7 +21,10 @@ function fixture() {
   mkdirSync(join(outside, 'parent', 'sub'), { recursive: true });
   writeFileSync(path, 'ORIGINAL_PUBLIC_DATA');
   writeFileSync(join(outside, 'parent', 'sub', 'probe.txt'), 'OUTSIDE_CONTENT_CANARY');
-  writeFileSync(join(outside, 'parent', 'sub', 'OUTSIDE_FILENAME_CANARY.txt'), 'OUTSIDE_CONTENT_CANARY');
+  writeFileSync(
+    join(outside, 'parent', 'sub', 'OUTSIDE_FILENAME_CANARY.txt'),
+    'OUTSIDE_CONTENT_CANARY',
+  );
   return { root, workspace, outside, path };
 }
 
@@ -74,15 +77,23 @@ const { snapshotSkillEvalWorkspace } = await import(${JSON.stringify(resolve(imp
 process.stdout.write(JSON.stringify({ snapshot: snapshotSkillEvalWorkspace(workspace) }) + '\\n');
 `;
   const child = Bun.spawn([process.execPath, '-e', source], {
-    cwd: f.root, stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
+    cwd: f.root,
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
   child.stdin.write(JSON.stringify({ ...f, mode, mkfifoBinary }));
   child.stdin.end();
   let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 1_200);
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGKILL');
+  }, 1_200);
   try {
     const [code, stdout, stderr] = await Promise.all([
-      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
     ]);
     return { code, stdout, stderr, timedOut };
   } finally {
@@ -93,10 +104,17 @@ process.stdout.write(JSON.stringify({ snapshot: snapshotSkillEvalWorkspace(works
 }
 
 describe('text-patch workspace snapshot bounded reads', () => {
-  test.skipIf(!isUnix()).each([
-    'leaf-symlink', 'growth', 'replacement', 'parent-swap',
-    'ancestor-swap', 'root-swap', 'directory-list',
-  ])('does not publish post-observation %s bytes or outside metadata', async (mode) => {
+  test
+    .skipIf(!isUnix())
+    .each([
+      'leaf-symlink',
+      'growth',
+      'replacement',
+      'parent-swap',
+      'ancestor-swap',
+      'root-swap',
+      'directory-list',
+    ])('does not publish post-observation %s bytes or outside metadata', async (mode) => {
     const result = await racedSnapshot(fixture(), mode);
     expect(result.stdout).toContain('snapshot-replaced\n');
     expect(result.stderr).toBe('');
@@ -108,20 +126,25 @@ describe('text-patch workspace snapshot bounded reads', () => {
     expect(result.stdout).not.toContain('REPLACEMENT_CONTENT_CANARY');
   });
 
-  test.skipIf(!isUnix() || !mkfifoBinary)('rejects a post-lstat FIFO without blocking the host', async () => {
-    const result = await racedSnapshot(fixture(), 'fifo');
-    expect(result.stdout).toContain('snapshot-replaced\n');
-    expect(result.stderr).toBe('');
-    expect(result.timedOut).toBe(false);
-    expect(result.code).toBe(0);
-    expect(result.stdout).toContain('content omitted');
-  });
+  test.skipIf(!isUnix() || !mkfifoBinary)(
+    'rejects a post-lstat FIFO without blocking the host',
+    async () => {
+      const result = await racedSnapshot(fixture(), 'fifo');
+      expect(result.stdout).toContain('snapshot-replaced\n');
+      expect(result.stderr).toBe('');
+      expect(result.timedOut).toBe(false);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toContain('content omitted');
+    },
+  );
 
   test('omits invalid UTF-8 instead of inventing replacement text', () => {
     const f = fixture();
     writeFileSync(f.path, Buffer.from([0xff]));
     const snapshot = snapshotSkillEvalWorkspace(f.workspace);
-    expect(snapshot).toContain('FILE parent/sub/probe.txt (1 bytes; binary or too large; content omitted)');
+    expect(snapshot).toContain(
+      'FILE parent/sub/probe.txt (1 bytes; binary or too large; content omitted)',
+    );
     expect(snapshot).not.toContain('�');
   });
 
@@ -136,7 +159,9 @@ describe('text-patch workspace snapshot bounded reads', () => {
     mkdirSync(join(f.workspace, '.git'));
     writeFileSync(join(f.workspace, '.git', 'secret'), 'SKIPPED_METADATA_CANARY');
     const snapshot = snapshotSkillEvalWorkspace(f.workspace);
-    const contents = [...snapshot.matchAll(/<kory-file-content>\n([\s\S]*?)\n<\/kory-file-content>/gu)];
+    const contents = [
+      ...snapshot.matchAll(/<kory-file-content>\n([\s\S]*?)\n<\/kory-file-content>/gu),
+    ];
     expect(contents.reduce((sum, match) => sum + Buffer.byteLength(match[1]!), 0)).toBe(400_000);
     expect(snapshot).toContain('FILE d.txt (120000 bytes; truncated)');
     expect(snapshot).not.toContain('SKIPPED_METADATA_CANARY');
@@ -148,18 +173,23 @@ describe('text-patch workspace snapshot bounded reads', () => {
     writeFileSync(join(f.workspace, 'a-utf8.txt'), '﻿héllo 新 😀\n');
     const exact = snapshotSkillEvalWorkspace(f.workspace);
     expect(exact).toContain('﻿héllo 新 😀\n');
-    expect(exact).toContain('FILE e-large.txt (120001 bytes; binary or too large; content omitted)');
+    expect(exact).toContain(
+      'FILE e-large.txt (120001 bytes; binary or too large; content omitted)',
+    );
     expect(exact).toContain('FILE f-binary.txt (1 bytes; binary or too large; content omitted)');
   });
 
   test('truncates only complete UTF-8 code points at the total-byte boundary', () => {
     const f = fixture();
     rmSync(join(f.workspace, 'parent'), { recursive: true });
-    for (const name of ['a.txt', 'b.txt', 'c.txt']) writeFileSync(join(f.workspace, name), 'x'.repeat(120_000));
+    for (const name of ['a.txt', 'b.txt', 'c.txt'])
+      writeFileSync(join(f.workspace, name), 'x'.repeat(120_000));
     writeFileSync(join(f.workspace, 'd.txt'), 'x'.repeat(39_997));
     writeFileSync(join(f.workspace, 'e.txt'), '😀');
     const snapshot = snapshotSkillEvalWorkspace(f.workspace);
-    expect(snapshot).toContain('FILE e.txt (4 bytes; truncated)\n<kory-file-content>\n\n</kory-file-content>');
+    expect(snapshot).toContain(
+      'FILE e.txt (4 bytes; truncated)\n<kory-file-content>\n\n</kory-file-content>',
+    );
     expect(snapshot).not.toContain('\uD83D');
   });
 });

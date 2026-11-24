@@ -120,7 +120,9 @@ async function resolveTargetChat(
   const { sessions } = requireConfig();
   const target = await sessions.get(sessionId);
   if (!target) {
-    throw new Error(`No chat with id '${sessionId}'. Use search_chats or list_sessions to find chat ids.`);
+    throw new Error(
+      `No chat with id '${sessionId}'. Use search_chats or list_sessions to find chat ids.`,
+    );
   }
   const caller = await callerChat(ctx);
   if (!sameProject(caller, target)) {
@@ -248,10 +250,13 @@ export class CreateChatTool implements Tool {
       title: { type: 'string', description: 'Chat title (defaults to "Task from <this chat>").' },
       workingDirectory: {
         type: 'string',
-        description: 'Project folder. Must be this chat\'s own folder; omit it to use that folder.',
+        description: "Project folder. Must be this chat's own folder; omit it to use that folder.",
       },
       model: { type: 'string', description: 'Manager model for the new chat (optional).' },
-      initialMessage: { type: 'string', description: 'First message for the new chat. Requires start: true.' },
+      initialMessage: {
+        type: 'string',
+        description: 'First message for the new chat. Requires start: true.',
+      },
       start: {
         type: 'boolean',
         description: 'Start a turn with initialMessage now (default false).',
@@ -270,15 +275,13 @@ export class CreateChatTool implements Tool {
         start?: boolean;
       };
       const caller = await callerChat(ctx);
-      const requestedDir = typeof input.workingDirectory === 'string' ? input.workingDirectory.trim() : '';
+      const requestedDir =
+        typeof input.workingDirectory === 'string' ? input.workingDirectory.trim() : '';
       if (requestedDir && projectKey({ workingDirectory: requestedDir }) !== projectKey(caller)) {
-        return fail(
-          call,
-          this.name,
-          'A chat can only be created in this chat\'s project folder.',
-        );
+        return fail(call, this.name, "A chat can only be created in this chat's project folder.");
       }
-      const initialMessage = typeof input.initialMessage === 'string' ? input.initialMessage.trim() : '';
+      const initialMessage =
+        typeof input.initialMessage === 'string' ? input.initialMessage.trim() : '';
       if (initialMessage && input.start !== true) {
         return fail(
           call,
@@ -289,8 +292,12 @@ export class CreateChatTool implements Tool {
       if (initialMessage.length > MAX_MESSAGE_CHARS) {
         return fail(call, this.name, `initialMessage exceeds ${MAX_MESSAGE_CHARS} characters.`);
       }
-      const title = (input.title?.trim() || `Task from ${caller.title}`).slice(0, SESSION.MAX_TITLE_LENGTH);
-      const model = typeof input.model === 'string' && input.model.trim() ? input.model.trim() : undefined;
+      const title = (input.title?.trim() || `Task from ${caller.title}`).slice(
+        0,
+        SESSION.MAX_TITLE_LENGTH,
+      );
+      const model =
+        typeof input.model === 'string' && input.model.trim() ? input.model.trim() : undefined;
       const created = await createChat({
         title,
         workingDirectory: caller.workingDirectory,
@@ -328,7 +335,7 @@ export class SendToChatTool implements Tool {
     type: 'object',
     properties: {
       sessionId: SESSION_ID_SCHEMA,
-      message: { type: 'string', description: 'The message for that chat\'s agent.' },
+      message: { type: 'string', description: "The message for that chat's agent." },
     },
     required: ['sessionId', 'message'],
   };
@@ -384,13 +391,14 @@ export class InterruptChatTool implements Tool {
       if (!reason) return fail(call, this.name, 'A reason for stopping is required.');
       const target = await resolveTargetChat(ctx, input.sessionId, { active: true });
       if (runStatus(target.id) === 'idle') {
-        return done(call, this.name, `"${target.title}" (${target.id}) is not running; nothing to stop.`);
+        return done(
+          call,
+          this.name,
+          `"${target.title}" (${target.id}) is not running; nothing to stop.`,
+        );
       }
       const caller = await callerChat(ctx);
-      await interruptChat(
-        target.id,
-        `Session cancelled by ${agentLabel(caller)}: ${reason}`,
-      );
+      await interruptChat(target.id, `Session cancelled by ${agentLabel(caller)}: ${reason}`);
       return done(
         call,
         this.name,
@@ -420,9 +428,13 @@ export class ArchiveChatTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     try {
       const { archiveChat } = requireConfig();
-      const target = await resolveTargetChat(ctx, (call.input as { sessionId?: unknown }).sessionId, {
-        active: false,
-      });
+      const target = await resolveTargetChat(
+        ctx,
+        (call.input as { sessionId?: unknown }).sessionId,
+        {
+          active: false,
+        },
+      );
       if (target.archivedAt !== undefined) {
         return done(call, this.name, `"${target.title}" (${target.id}) is already archived.`);
       }
@@ -533,7 +545,9 @@ export class SearchChatsTool implements Tool {
       if (!query) return fail(call, this.name, 'query is required.');
       const limit = clampLimit(input.limit, 20, 50);
       const caller = await callerChat(ctx);
-      const candidates = (await sessions.listActive()).filter((session) => sameProject(caller, session));
+      const candidates = (await sessions.listActive()).filter((session) =>
+        sameProject(caller, session),
+      );
       const needle = query.toLowerCase();
       const textMatches = await messages.searchSessionMessages(
         candidates.map((session) => session.id),

@@ -130,7 +130,9 @@ describe('the conductor listening indicator', () => {
     const el = strip();
     expect(el.getAttribute('data-mode')).toBe('conductor');
     expect(screen.getByTestId('voice-capture-label')).toHaveTextContent('Listening for a command');
-    expect(screen.getByTestId('voice-capture-label').getAttribute('style')).toContain('--color-info');
+    expect(screen.getByTestId('voice-capture-label').getAttribute('style')).toContain(
+      '--color-info',
+    );
     expect(el).toHaveTextContent('Listening for a voice command');
 
     voiceRecorder.end();
@@ -138,7 +140,9 @@ describe('the conductor listening indicator', () => {
     flushSync();
     expect(strip().getAttribute('data-mode')).toBe('dictation');
     expect(screen.getByTestId('voice-capture-label')).toHaveTextContent('Recording');
-    expect(screen.getByTestId('voice-capture-label').getAttribute('style')).toContain('--color-error');
+    expect(screen.getByTestId('voice-capture-label').getAttribute('style')).toContain(
+      '--color-error',
+    );
     unmount();
   });
 

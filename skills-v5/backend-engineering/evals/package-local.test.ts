@@ -170,7 +170,8 @@ test('examples distinguish modeled replay from unavailable topology evidence', (
       ?.assertion,
   ).toContain('unavailable');
   expect(
-    syncTask?.falsifiableChecks.find((check) => check.id === 'overlapping-sync-ownership')?.assertion,
+    syncTask?.falsifiableChecks.find((check) => check.id === 'overlapping-sync-ownership')
+      ?.assertion,
   ).toContain('unavailable');
 
   const readme = readFileSync(join(root, 'evals/README.md'), 'utf8');

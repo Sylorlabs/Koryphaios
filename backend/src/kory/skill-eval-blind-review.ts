@@ -55,7 +55,9 @@ export function completePairForScenario(
     .sort((left, right) => {
       const leftTime = [left.withSkill.recordedAt, left.withoutSkill.recordedAt].sort().at(-1)!;
       const rightTime = [right.withSkill.recordedAt, right.withoutSkill.recordedAt].sort().at(-1)!;
-      return rightTime.localeCompare(leftTime) || right.comparisonId.localeCompare(left.comparisonId);
+      return (
+        rightTime.localeCompare(leftTime) || right.comparisonId.localeCompare(left.comparisonId)
+      );
     });
   return pairs[0] ?? null;
 }

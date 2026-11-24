@@ -49,7 +49,18 @@ describe('session-scoped event types', () => {
   });
 
   test('every scoped member is a known event type prefix family', () => {
-    const prefixes = ['agent.', 'stream.', 'context.', 'session.', 'run.', 'turn.', 'compaction.', 'kory.', 'permission.', 'terminal.'];
+    const prefixes = [
+      'agent.',
+      'stream.',
+      'context.',
+      'session.',
+      'run.',
+      'turn.',
+      'compaction.',
+      'kory.',
+      'permission.',
+      'terminal.',
+    ];
     for (const type of SESSION_SCOPED_EVENT_TYPES) {
       expect(prefixes.some((prefix) => type.startsWith(prefix))).toBe(true);
     }

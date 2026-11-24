@@ -13,11 +13,7 @@ import { summarizeBillingSpend } from './cost-summary';
 import type { ResourceBudgetEntry, ResourceBudgetSnapshot } from './resource-budget';
 
 export type PriceSource =
-  | 'catalog'
-  | 'models.dev'
-  | 'provider-reported'
-  | 'openrouter-equivalent'
-  | 'unknown';
+  'catalog' | 'models.dev' | 'provider-reported' | 'openrouter-equivalent' | 'unknown';
 
 export const PRICE_UNIT = 'USD per 1M tokens';
 const MAX_LISTED_MODELS = 100;
@@ -94,7 +90,9 @@ function catalogPrice(def: ModelDef): PriceFigures | null {
   };
 }
 
-function contextFacts(def: ModelDef | undefined): Pick<ModelPriceFacts, 'contextWindow' | 'contextSource'> {
+function contextFacts(
+  def: ModelDef | undefined,
+): Pick<ModelPriceFacts, 'contextWindow' | 'contextSource'> {
   if (
     def &&
     def.contextVerified === true &&
@@ -235,7 +233,9 @@ export function buildModelPricingReport(
     if (filterProvider && scoped.length === 0) {
       limitations.push(`Provider "${filterProvider}" is not connected or has no status entry.`);
     }
-    const flat = scoped.flatMap((provider) => provider.models.map((def) => ({ provider: provider.name, def })));
+    const flat = scoped.flatMap((provider) =>
+      provider.models.map((def) => ({ provider: provider.name, def })),
+    );
     truncated = flat.length > MAX_LISTED_MODELS;
     for (const { provider, def } of flat.slice(0, MAX_LISTED_MODELS)) {
       out.push(describeModelPrice(provider, def.apiModelId ?? def.id, def, deps));
@@ -255,8 +255,18 @@ export interface SpendCapStatus {
   enabled: boolean;
   action: string;
   /** null = no limit configured for that window. USD. */
-  limitsUsd: { sessionHourly: number | null; sessionDaily: number | null; globalHourly: number | null; globalDaily: number | null };
-  spentUsd: { sessionHour: number | null; sessionDay: number | null; globalHour: number | null; globalDay: number | null };
+  limitsUsd: {
+    sessionHourly: number | null;
+    sessionDaily: number | null;
+    globalHourly: number | null;
+    globalDaily: number | null;
+  };
+  spentUsd: {
+    sessionHour: number | null;
+    sessionDay: number | null;
+    globalHour: number | null;
+    globalDay: number | null;
+  };
   sessionId?: string;
   paused: boolean;
   pauseReason?: string;
@@ -291,10 +301,29 @@ export interface UsageSummaryReport {
     /** True when some metered usage had no price, so totalUsd is a lower bound. */
     pricingIncomplete: boolean;
   };
-  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number } | null;
-  byProvider: Array<{ provider: string; spendUsd: number | null; tokensIn: number; tokensOut: number; pricingIncomplete: boolean }>;
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  } | null;
+  byProvider: Array<{
+    provider: string;
+    spendUsd: number | null;
+    tokensIn: number;
+    tokensOut: number;
+    pricingIncomplete: boolean;
+  }>;
   subscriptionProviders: Array<{ provider: string; tokensIn: number; tokensOut: number }>;
-  byModel: Array<{ provider: string; model: string; spendUsd: number | null; tokensIn: number; tokensOut: number; pricingIncomplete: boolean }>;
+  byModel: Array<{
+    provider: string;
+    model: string;
+    spendUsd: number | null;
+    tokensIn: number;
+    tokensOut: number;
+    pricingIncomplete: boolean;
+  }>;
   spendCap: SpendCapStatus | null;
   quotas: Array<{
     provider: string;
@@ -357,7 +386,8 @@ export async function buildUsageSummary(
   ]);
 
   const ledgerAvailable = allRows !== null;
-  if (!ledgerAvailable) limitations.push('The usage ledger is unavailable; spend and tokens are unknown, not zero.');
+  if (!ledgerAvailable)
+    limitations.push('The usage ledger is unavailable; spend and tokens are unknown, not zero.');
   const rows = (allRows ?? []).filter((row) => {
     if (!scopedIds) return true;
     return row.sessionId !== null && scopedIds.has(row.sessionId);
@@ -380,9 +410,16 @@ export async function buildUsageSummary(
       )
     : null;
 
-  const subscriptionByProvider = new Map<string, { provider: string; tokensIn: number; tokensOut: number }>();
+  const subscriptionByProvider = new Map<
+    string,
+    { provider: string; tokensIn: number; tokensOut: number }
+  >();
   for (const row of subscriptionRows) {
-    const entry = subscriptionByProvider.get(row.provider) ?? { provider: row.provider, tokensIn: 0, tokensOut: 0 };
+    const entry = subscriptionByProvider.get(row.provider) ?? {
+      provider: row.provider,
+      tokensIn: 0,
+      tokensOut: 0,
+    };
     entry.tokensIn += row.tokensIn;
     entry.tokensOut += row.tokensOut;
     subscriptionByProvider.set(row.provider, entry);
@@ -390,7 +427,15 @@ export async function buildUsageSummary(
 
   const byModelMap = new Map<
     string,
-    { provider: string; model: string; spendUsd: number; known: boolean; tokensIn: number; tokensOut: number; pricingIncomplete: boolean }
+    {
+      provider: string;
+      model: string;
+      spendUsd: number;
+      known: boolean;
+      tokensIn: number;
+      tokensOut: number;
+      pricingIncomplete: boolean;
+    }
   >();
   for (const row of meteredRows) {
     const key = `${row.provider}::${row.model}`;
@@ -416,7 +461,9 @@ export async function buildUsageSummary(
 
   const pricingIncomplete = meteredRows.some((row) => row.unknownRows > 0);
   if (pricingIncomplete) {
-    limitations.push('Some metered usage has no known price; the spend total is a lower bound, not a complete figure.');
+    limitations.push(
+      'Some metered usage has no known price; the spend total is a lower bound, not a complete figure.',
+    );
   }
 
   const quotas: UsageSummaryReport['quotas'] = [];
@@ -439,7 +486,9 @@ export async function buildUsageSummary(
     }
     limitations.push(...budget.limitations);
   } else {
-    limitations.push('Subscription and balance state could not be read; quotas are unknown, not zero.');
+    limitations.push(
+      'Subscription and balance state could not be read; quotas are unknown, not zero.',
+    );
   }
 
   return {

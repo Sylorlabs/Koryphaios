@@ -45,11 +45,7 @@ export function buildKoryCliMcpConfig(
     {
       name: 'kory',
       command: process.env.KORY_MCP_BRIDGE_COMMAND?.trim() || process.execPath,
-      args: [
-        script,
-        '--provider',
-        provider,
-      ],
+      args: [script, '--provider', provider],
       env: {
         KORY_BACKEND_URL: backendUrl,
         KORY_BRIDGE_AUTH_FILE: grant.path,
@@ -59,9 +55,7 @@ export function buildKoryCliMcpConfig(
   ];
 }
 
-export function serializeKoryMcpServers(
-  servers: CliMcpServerConfig[],
-): Record<string, unknown> {
+export function serializeKoryMcpServers(servers: CliMcpServerConfig[]): Record<string, unknown> {
   const mcpServers: Record<string, unknown> = {};
   for (const server of servers) {
     mcpServers[server.name] = {

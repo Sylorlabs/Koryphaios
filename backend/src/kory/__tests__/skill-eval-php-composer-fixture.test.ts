@@ -204,7 +204,9 @@ if ($result['ok'] !== true || !($result['value'] instanceof Quantity) || $result
         verification: 1,
         integrityFailure: false,
       });
-      expect(score.evidence).toContain('candidate regressions reject original defective starter: yes');
+      expect(score.evidence).toContain(
+        'candidate regressions reject original defective starter: yes',
+      );
       expect(readFileSync(join(root, candidate.source), 'utf8')).toBe(candidate.code);
 
       // These tests have the old keyword coverage and pass under the repaired

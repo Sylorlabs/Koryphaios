@@ -318,7 +318,12 @@ describe('FeedEntry tool output panel', () => {
           id: 'read-1',
           metadata: {
             toolCall: { name: 'read_file', input: { path: 'src/theme.ts' } },
-            toolResult: { name: 'read_file', output: 'export const theme = {};', isError: false, durationMs: 10 },
+            toolResult: {
+              name: 'read_file',
+              output: 'export const theme = {};',
+              isError: false,
+              durationMs: 10,
+            },
           },
         },
         {
@@ -326,7 +331,12 @@ describe('FeedEntry tool output panel', () => {
           id: 'search-1',
           metadata: {
             toolCall: { name: 'grep', input: { pattern: 'surface' } },
-            toolResult: { name: 'grep', output: 'theme.ts:12: surface', isError: false, durationMs: 20 },
+            toolResult: {
+              name: 'grep',
+              output: 'theme.ts:12: surface',
+              isError: false,
+              durationMs: 20,
+            },
           },
         },
       ],
@@ -359,11 +369,14 @@ describe('FeedEntry tool output panel', () => {
   });
 
   it('names a legacy failed MCP grep in the summary and preserves its diagnostic', async () => {
-    const output = "Input validation error: Invalid arguments for tool kory__grep: data must have required property 'pattern'";
-    renderEntry(toolResultEntry({
-      toolCall: { name: 'call_mcp_tool', input: {} },
-      toolResult: { name: 'call_mcp_tool', output, isError: true },
-    }));
+    const output =
+      "Input validation error: Invalid arguments for tool kory__grep: data must have required property 'pattern'";
+    renderEntry(
+      toolResultEntry({
+        toolCall: { name: 'call_mcp_tool', input: {} },
+        toolResult: { name: 'call_mcp_tool', output, isError: true },
+      }),
+    );
     const toggle = screen.getByRole('button', { name: 'grep failed' });
     expect(toggle).not.toHaveTextContent('call_mcp_tool');
     await fireEvent.click(toggle);
@@ -371,75 +384,110 @@ describe('FeedEntry tool output panel', () => {
   });
 
   it('identifies a successful CLI MCP call by server and destination rather than the dispatcher', async () => {
-    renderEntry(toolResultEntry({
-      toolCall: { name: 'call_mcp_tool', input: {
-        server_name: 'github', tool_name: 'list_issues', arguments: { repo: 'app' },
-      } },
-      toolResult: { name: 'call_mcp_tool', output: 'Open issues: 3', isError: false },
-    }));
+    renderEntry(
+      toolResultEntry({
+        toolCall: {
+          name: 'call_mcp_tool',
+          input: {
+            server_name: 'github',
+            tool_name: 'list_issues',
+            arguments: { repo: 'app' },
+          },
+        },
+        toolResult: { name: 'call_mcp_tool', output: 'Open issues: 3', isError: false },
+      }),
+    );
     const toggle = screen.getByRole('button', { name: 'Used github MCP · list_issues' });
     expect(toggle).not.toHaveTextContent('call_mcp_tool');
     await fireEvent.click(toggle);
-    expect(screen.getByRole('region', { name: 'Tool details' })).toHaveTextContent('github MCP · list_issues');
+    expect(screen.getByRole('region', { name: 'Tool details' })).toHaveTextContent(
+      'github MCP · list_issues',
+    );
     expect(screen.getByText('Open issues: 3')).toBeTruthy();
   });
 
   it.each(['mcp__kory__kory__read_file', 'kory__read_file'])(
-    'presents restored %s as a native file action', async (name) => {
-    renderEntry(toolResultEntry({
-      toolCall: { name, input: { path: 'README.md' } },
-      toolResult: { name, output: 'Readme', isError: false },
-    }));
-    const toggle = screen.getByRole('button', { name: 'Read README.md' });
-    expect(toggle).toHaveTextContent('Read README.md');
-    expect(toggle).not.toHaveTextContent(/MCP|kory__/);
-    expect(toggle).not.toHaveAttribute('aria-describedby');
-    await fireEvent.click(toggle);
-    expect(screen.getByRole('region', { name: 'Tool details' })).not.toHaveTextContent(/MCP|kory__/);
-    expect(screen.getByLabelText('Tool output')).toHaveTextContent('Readme');
-  });
-
-  it.each(['rename_session', 'kory__rename_session', 'mcp__kory__kory__rename_session', 'call_mcp_tool'])(
-    'shows %s as a session rename through running, completed, and failed states',
+    'presents restored %s as a native file action',
     async (name) => {
-      const input = name === 'call_mcp_tool'
-        ? { server_name: 'kory', tool_name: 'kory__rename_session', arguments: { title: 'Tool Animation Fix' } }
-        : { title: 'Tool Animation Fix' };
-      const pending: FeedEntryLocal = {
-        ...toolResultEntry(), type: 'tool_call',
-        metadata: { toolCall: { name, input } },
-      };
-      const { container, rerender } = renderEntry(pending);
-      const toggle = screen.getByRole('button', { name: 'Renaming session Tool Animation Fix' });
-      expect(toggle).not.toHaveTextContent(/MCP|call_mcp_tool/);
-      expect(container.querySelector('[data-tool-icon="session"]')).toBeTruthy();
+      renderEntry(
+        toolResultEntry({
+          toolCall: { name, input: { path: 'README.md' } },
+          toolResult: { name, output: 'Readme', isError: false },
+        }),
+      );
+      const toggle = screen.getByRole('button', { name: 'Read README.md' });
+      expect(toggle).toHaveTextContent('Read README.md');
+      expect(toggle).not.toHaveTextContent(/MCP|kory__/);
+      expect(toggle).not.toHaveAttribute('aria-describedby');
       await fireEvent.click(toggle);
-      await rerender({ entry: {
-        ...pending, type: 'tool_result', metadata: {
-          ...pending.metadata,
-          toolResult: { name, output: 'Session renamed to: Tool Animation Fix', isError: false },
-        },
-      } });
-      expect(screen.getByRole('button', { name: 'Renamed session Tool Animation Fix' })).toBe(toggle);
-      expect(screen.getByRole('region', { name: 'Tool details' })).not.toHaveTextContent('MCP');
-      await rerender({ entry: {
-        ...pending, type: 'tool_result', metadata: {
-          ...pending.metadata,
-          toolResult: { name, output: 'Error: Session unavailable', isError: true },
-        },
-      } });
-      expect(screen.getByRole('button', { name: 'Rename session failed Tool Animation Fix' })).toBe(toggle);
-      expect(screen.getByText('Error: Session unavailable')).toBeTruthy();
+      expect(screen.getByRole('region', { name: 'Tool details' })).not.toHaveTextContent(
+        /MCP|kory__/,
+      );
+      expect(screen.getByLabelText('Tool output')).toHaveTextContent('Readme');
     },
   );
 
+  it.each([
+    'rename_session',
+    'kory__rename_session',
+    'mcp__kory__kory__rename_session',
+    'call_mcp_tool',
+  ])('shows %s as a session rename through running, completed, and failed states', async (name) => {
+    const input =
+      name === 'call_mcp_tool'
+        ? {
+            server_name: 'kory',
+            tool_name: 'kory__rename_session',
+            arguments: { title: 'Tool Animation Fix' },
+          }
+        : { title: 'Tool Animation Fix' };
+    const pending: FeedEntryLocal = {
+      ...toolResultEntry(),
+      type: 'tool_call',
+      metadata: { toolCall: { name, input } },
+    };
+    const { container, rerender } = renderEntry(pending);
+    const toggle = screen.getByRole('button', { name: 'Renaming session Tool Animation Fix' });
+    expect(toggle).not.toHaveTextContent(/MCP|call_mcp_tool/);
+    expect(container.querySelector('[data-tool-icon="session"]')).toBeTruthy();
+    await fireEvent.click(toggle);
+    await rerender({
+      entry: {
+        ...pending,
+        type: 'tool_result',
+        metadata: {
+          ...pending.metadata,
+          toolResult: { name, output: 'Session renamed to: Tool Animation Fix', isError: false },
+        },
+      },
+    });
+    expect(screen.getByRole('button', { name: 'Renamed session Tool Animation Fix' })).toBe(toggle);
+    expect(screen.getByRole('region', { name: 'Tool details' })).not.toHaveTextContent('MCP');
+    await rerender({
+      entry: {
+        ...pending,
+        type: 'tool_result',
+        metadata: {
+          ...pending.metadata,
+          toolResult: { name, output: 'Error: Session unavailable', isError: true },
+        },
+      },
+    });
+    expect(screen.getByRole('button', { name: 'Rename session failed Tool Animation Fix' })).toBe(
+      toggle,
+    );
+    expect(screen.getByText('Error: Session unavailable')).toBeTruthy();
+  });
+
   it('shows a live Antigravity edit, completion and failure without bridge labels', async () => {
     const input = {
-      ServerName: 'kory', ToolName: 'kory__edit_file',
+      ServerName: 'kory',
+      ToolName: 'kory__edit_file',
       Arguments: { path: 'src/theme.ts', old_str: 'before', new_str: 'after' },
     };
     const pending: FeedEntryLocal = {
-      ...toolResultEntry(), type: 'tool_call',
+      ...toolResultEntry(),
+      type: 'tool_call',
       metadata: {
         toolCall: { name: 'call_mcp_tool', input },
         toolInputPreview: JSON.stringify(input),
@@ -450,39 +498,59 @@ describe('FeedEntry tool output panel', () => {
     expect(toggle).not.toHaveTextContent(/MCP|kory__|call_mcp_tool/);
     expect(toggle.getAttribute('title')).not.toMatch(/MCP|kory__|call_mcp_tool/);
     await fireEvent.click(toggle);
-    expect(screen.getByRole('region', { name: 'Tool details' })).not.toHaveTextContent(/MCP|kory__|call_mcp_tool/);
+    expect(screen.getByRole('region', { name: 'Tool details' })).not.toHaveTextContent(
+      /MCP|kory__|call_mcp_tool/,
+    );
     expect(screen.getByLabelText('File changes')).toHaveTextContent('- before');
     expect(screen.getByLabelText('File changes')).toHaveTextContent('+ after');
 
     const completed: FeedEntryLocal = {
-      ...pending, type: 'tool_result', metadata: {
+      ...pending,
+      type: 'tool_result',
+      metadata: {
         ...pending.metadata,
         toolResult: { name: 'call_mcp_tool', output: 'Updated', isError: false },
       },
     };
     await rerender({ entry: completed });
-    expect(screen.getByRole('button', { name: 'Edited theme.ts' })).toHaveAttribute('aria-expanded', 'true');
-    await rerender({ entry: {
-      ...completed, metadata: {
-        ...completed.metadata,
-        toolResult: { name: 'call_mcp_tool', output: 'Original text not found', isError: true },
+    expect(screen.getByRole('button', { name: 'Edited theme.ts' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    await rerender({
+      entry: {
+        ...completed,
+        metadata: {
+          ...completed.metadata,
+          toolResult: { name: 'call_mcp_tool', output: 'Original text not found', isError: true },
+        },
       },
-    } });
-    expect(screen.getByRole('button', { name: 'edit file failed theme.ts' })).not.toHaveTextContent(/MCP|kory__/);
+    });
+    expect(screen.getByRole('button', { name: 'edit file failed theme.ts' })).not.toHaveTextContent(
+      /MCP|kory__/,
+    );
     expect(screen.getByLabelText('Tool output')).toHaveTextContent('Original text not found');
   });
 
   it('hides dispatcher plumbing in an Antigravity command card but keeps command and output', async () => {
-    const input = { ServerName: 'kory', ToolName: 'kory__bash', Arguments: { command: 'git status' } };
-    renderEntry(toolResultEntry({
-      toolCall: { name: 'call_mcp_tool', input },
-      toolInputPreview: JSON.stringify(input),
-      toolResult: { name: 'call_mcp_tool', output: 'Working tree clean', isError: false },
-    }));
+    const input = {
+      ServerName: 'kory',
+      ToolName: 'kory__bash',
+      Arguments: { command: 'git status' },
+    };
+    renderEntry(
+      toolResultEntry({
+        toolCall: { name: 'call_mcp_tool', input },
+        toolInputPreview: JSON.stringify(input),
+        toolResult: { name: 'call_mcp_tool', output: 'Working tree clean', isError: false },
+      }),
+    );
     const toggle = screen.getByRole('button', { name: 'Ran git status' });
     expect(toggle).not.toHaveTextContent(/MCP|kory__|call_mcp_tool/);
     await fireEvent.click(toggle);
-    expect(screen.getByRole('region', { name: 'Tool details' })).not.toHaveTextContent(/MCP|kory__|call_mcp_tool|ServerName/);
+    expect(screen.getByRole('region', { name: 'Tool details' })).not.toHaveTextContent(
+      /MCP|kory__|call_mcp_tool|ServerName/,
+    );
     expect(screen.getByRole('region', { name: 'Command' })).toHaveTextContent('git status');
     expect(screen.getByLabelText('Tool output')).toHaveTextContent('Working tree clean');
   });
@@ -550,7 +618,9 @@ describe('FeedEntry tool output panel', () => {
     const toggle = screen.getByRole('button', { name: 'Executing command' });
     await fireEvent.click(toggle);
     expect(screen.getByRole('region', { name: 'Command input' })).toHaveTextContent(command);
-    expect(screen.getByRole('region', { name: 'Command output' })).toHaveTextContent('Waiting for output…');
+    expect(screen.getByRole('region', { name: 'Command output' })).toHaveTextContent(
+      'Waiting for output…',
+    );
     await rerender({ entry: completed });
     expect(screen.getByRole('button', { name: 'Command executed' })).toBe(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -560,10 +630,15 @@ describe('FeedEntry tool output panel', () => {
   });
 
   it('keeps failed command input separate from diagnostics', async () => {
-    renderEntry(toolResultEntry({
-      toolCall: { name: 'bash', input: { command: 'bun run missing-script', workdir: '/workspace/app' } },
-      toolResult: { name: 'bash', output: 'Script not found', isError: true, durationMs: 12 },
-    }));
+    renderEntry(
+      toolResultEntry({
+        toolCall: {
+          name: 'bash',
+          input: { command: 'bun run missing-script', workdir: '/workspace/app' },
+        },
+        toolResult: { name: 'bash', output: 'Script not found', isError: true, durationMs: 12 },
+      }),
+    );
     const toggle = screen.getByRole('button', { name: 'bash failed bun run missing-script' });
     expect(toggle).toHaveAccessibleDescription('12 ms');
     await fireEvent.click(toggle);
@@ -578,43 +653,112 @@ describe('FeedEntry tool output panel', () => {
   });
 
   it.each([
-    ['read_note', { title: 'Research' }, 'Reading note Research', 'Read note Research', 'note', 'read'],
-    ['create_note', { title: 'Research', content: 'New findings' }, 'Creating note Research', 'Created note Research', 'note', 'create'],
-    ['update_note', { title: 'Research', content: 'Updated findings' }, 'Editing note Research', 'Edited note Research', 'note', 'edit'],
+    [
+      'read_note',
+      { title: 'Research' },
+      'Reading note Research',
+      'Read note Research',
+      'note',
+      'read',
+    ],
+    [
+      'create_note',
+      { title: 'Research', content: 'New findings' },
+      'Creating note Research',
+      'Created note Research',
+      'note',
+      'create',
+    ],
+    [
+      'update_note',
+      { title: 'Research', content: 'Updated findings' },
+      'Editing note Research',
+      'Edited note Research',
+      'note',
+      'edit',
+    ],
     ['read_note_base', { baseId: 'b1' }, 'Reading Base b1', 'Read Base b1', 'base', 'read'],
-    ['create_note_base', { name: 'Projects' }, 'Creating Base Projects', 'Created Base Projects', 'base', 'create'],
-    ['update_note_base', { baseId: 'b1', name: 'Projects' }, 'Editing Base Projects', 'Edited Base Projects', 'base', 'edit'],
+    [
+      'create_note_base',
+      { name: 'Projects' },
+      'Creating Base Projects',
+      'Created Base Projects',
+      'base',
+      'create',
+    ],
+    [
+      'update_note_base',
+      { baseId: 'b1', name: 'Projects' },
+      'Editing Base Projects',
+      'Edited Base Projects',
+      'base',
+      'edit',
+    ],
     ['get_note_graph_summary', {}, 'Reading note network', 'Read note network', 'network', 'read'],
-    ['link_notes', { fromTitle: 'Research', toTitle: 'Findings' }, 'Linking notes · Research → Findings', 'Linked notes · Research → Findings', 'network', 'link'],
-    ['create_note_canvas', { document: { name: 'Sprint' } }, 'Creating canvas Sprint', 'Created canvas Sprint', 'canvas', 'create'],
-    ['patch_note_canvas', { name: 'Sprint', noteId: 'n1' }, 'Editing canvas Sprint', 'Edited canvas Sprint', 'canvas', 'edit'],
-  ] as const)('preserves %s details and its own icon when it completes', async (name, input, running, complete, icon, intent) => {
-    const pending: FeedEntryLocal = {
-      ...toolResultEntry(), type: 'tool_call',
-      metadata: { toolCall: { id: 'call-1', name: `kory__${name}`, input } },
-    };
-    const { container, rerender } = renderEntry(pending);
-    const marker = container.querySelector('.activity-icon');
-    expect(marker).toHaveAttribute('data-tool-icon', icon);
-    expect(marker).toHaveAttribute('data-tool-intent', intent);
-    expect(marker).toHaveAttribute('data-tool-state', 'running');
-    const toggle = screen.getByRole('button', { name: running });
-    await fireEvent.click(toggle);
-    expect(screen.getByRole('region', { name: 'Tool input' })).toBeTruthy();
-    await rerender({ entry: {
-      ...pending, type: 'tool_result', metadata: {
-        ...pending.metadata,
-        toolResult: { callId: 'call-1', name: `kory__${name}`, output: '{"status":"saved"}', isError: false },
-      },
-    } });
-    expect(screen.getByRole('button', { name: complete })).toBe(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.queryByRole('button', { name: running })).toBeNull();
-    expect(container.querySelector('.activity-icon')).toBe(marker);
-    expect(marker).toHaveAttribute('data-tool-state', 'completed');
-    expect(marker).toHaveAttribute('data-tool-icon', icon);
-    expect(screen.getByRole('region', { name: 'Tool response' })).toHaveTextContent('saved');
-  });
+    [
+      'link_notes',
+      { fromTitle: 'Research', toTitle: 'Findings' },
+      'Linking notes · Research → Findings',
+      'Linked notes · Research → Findings',
+      'network',
+      'link',
+    ],
+    [
+      'create_note_canvas',
+      { document: { name: 'Sprint' } },
+      'Creating canvas Sprint',
+      'Created canvas Sprint',
+      'canvas',
+      'create',
+    ],
+    [
+      'patch_note_canvas',
+      { name: 'Sprint', noteId: 'n1' },
+      'Editing canvas Sprint',
+      'Edited canvas Sprint',
+      'canvas',
+      'edit',
+    ],
+  ] as const)(
+    'preserves %s details and its own icon when it completes',
+    async (name, input, running, complete, icon, intent) => {
+      const pending: FeedEntryLocal = {
+        ...toolResultEntry(),
+        type: 'tool_call',
+        metadata: { toolCall: { id: 'call-1', name: `kory__${name}`, input } },
+      };
+      const { container, rerender } = renderEntry(pending);
+      const marker = container.querySelector('.activity-icon');
+      expect(marker).toHaveAttribute('data-tool-icon', icon);
+      expect(marker).toHaveAttribute('data-tool-intent', intent);
+      expect(marker).toHaveAttribute('data-tool-state', 'running');
+      const toggle = screen.getByRole('button', { name: running });
+      await fireEvent.click(toggle);
+      expect(screen.getByRole('region', { name: 'Tool input' })).toBeTruthy();
+      await rerender({
+        entry: {
+          ...pending,
+          type: 'tool_result',
+          metadata: {
+            ...pending.metadata,
+            toolResult: {
+              callId: 'call-1',
+              name: `kory__${name}`,
+              output: '{"status":"saved"}',
+              isError: false,
+            },
+          },
+        },
+      });
+      expect(screen.getByRole('button', { name: complete })).toBe(toggle);
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.queryByRole('button', { name: running })).toBeNull();
+      expect(container.querySelector('.activity-icon')).toBe(marker);
+      expect(marker).toHaveAttribute('data-tool-state', 'completed');
+      expect(marker).toHaveAttribute('data-tool-icon', icon);
+      expect(screen.getByRole('region', { name: 'Tool response' })).toHaveTextContent('saved');
+    },
+  );
 
   it('keeps note input separate from the real output and shows action icons inside groups', async () => {
     const created = toolResultEntry({
@@ -622,38 +766,78 @@ describe('FeedEntry tool output panel', () => {
       toolResult: { name: 'create_note', output: '{"id":"n1","title":"Research"}', isError: false },
     });
     const { container } = renderEntry({
-      ...created, type: 'tool_group', metadata: {}, entries: [created],
+      ...created,
+      type: 'tool_group',
+      metadata: {},
+      entries: [created],
     });
     await fireEvent.click(container.querySelector('.tool-summary') as HTMLElement);
-    expect(container.querySelector('[data-tool-icon="note"]')).toHaveAttribute('data-tool-intent', 'create');
+    expect(container.querySelector('[data-tool-icon="note"]')).toHaveAttribute(
+      'data-tool-intent',
+      'create',
+    );
     // A one-step group narrates the same words as its step; open the step itself.
     await fireEvent.click(screen.getAllByRole('button', { name: 'Created note Research' }).at(-1)!);
     expect(screen.getByRole('region', { name: 'Tool input' })).toHaveTextContent('New findings');
     expect(screen.getByRole('region', { name: 'Tool response' })).toHaveTextContent('n1');
-    expect(screen.getByRole('region', { name: 'Tool response' })).not.toHaveTextContent('New findings');
+    expect(screen.getByRole('region', { name: 'Tool response' })).not.toHaveTextContent(
+      'New findings',
+    );
     await fireEvent.click(screen.getByRole('button', { name: 'Copy input' }));
-    expect(mocks.copyText).toHaveBeenLastCalledWith(JSON.stringify({ title: 'Research', content: 'New findings' }, null, 2));
+    expect(mocks.copyText).toHaveBeenLastCalledWith(
+      JSON.stringify({ title: 'Research', content: 'New findings' }, null, 2),
+    );
   });
 
   it('updates the actual agent drilldown while keeping the same open tool row', async () => {
     const sessionId = 'agent-tool-render';
     const agentId = 'canvas-worker';
     agentStore.upsertAgentThreadEntry(sessionId, agentId, {
-      timestamp: 100, type: 'tool_call', agentId, agentName: 'Worker', glowClass: '', text: '',
+      timestamp: 100,
+      type: 'tool_call',
+      agentId,
+      agentName: 'Worker',
+      glowClass: '',
+      text: '',
       metadata: { toolCall: { id: 'canvas-call', name: 'patch_note_canvas', input: {} } },
     });
     render(AgentToolFeedHarness, { sessionId, agentId });
     const toggle = screen.getByRole('button', { name: 'Editing canvas' });
     await fireEvent.click(toggle);
     agentStore.upsertAgentThreadEntry(sessionId, agentId, {
-      timestamp: 150, type: 'tool_call', agentId, agentName: 'Worker', glowClass: '', text: '',
-      metadata: { toolCall: { id: 'canvas-call', name: 'patch_note_canvas', input: { name: 'Sprint', noteId: 'n1' } } },
+      timestamp: 150,
+      type: 'tool_call',
+      agentId,
+      agentName: 'Worker',
+      glowClass: '',
+      text: '',
+      metadata: {
+        toolCall: {
+          id: 'canvas-call',
+          name: 'patch_note_canvas',
+          input: { name: 'Sprint', noteId: 'n1' },
+        },
+      },
     });
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Editing canvas Sprint' })).toBe(toggle));
-    agentStore.completeAgentThreadEntry(sessionId, agentId, 'canvas-call', 'Updated canvas', {
-      callId: 'canvas-call', name: 'patch_note_canvas', output: '{"revision":2}', isError: false,
-    }, 200);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Edited canvas Sprint' })).toBe(toggle));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Editing canvas Sprint' })).toBe(toggle),
+    );
+    agentStore.completeAgentThreadEntry(
+      sessionId,
+      agentId,
+      'canvas-call',
+      'Updated canvas',
+      {
+        callId: 'canvas-call',
+        name: 'patch_note_canvas',
+        output: '{"revision":2}',
+        isError: false,
+      },
+      200,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Edited canvas Sprint' })).toBe(toggle),
+    );
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('region', { name: 'Tool response' })).toHaveTextContent('2');
   });

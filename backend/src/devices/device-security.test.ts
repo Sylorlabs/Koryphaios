@@ -286,9 +286,19 @@ test('linked devices chunk encrypted RPC payloads larger than one device envelop
     onPaired: async () => {},
     onRequest: async () => null,
   });
-  stops.push(() => host.stop(), () => mobile.stop());
+  stops.push(
+    () => host.stop(),
+    () => mobile.stop(),
+  );
   await Promise.all([host.connect(), mobile.connect()]);
   const payload = 'linked-payload-'.repeat(180_000);
-  const response = await mobile.rpc(hostKeys.identity.id, 'echo', { payload }, 'user', undefined, 10_000);
+  const response = await mobile.rpc(
+    hostKeys.identity.id,
+    'echo',
+    { payload },
+    'user',
+    undefined,
+    10_000,
+  );
   expect(response.payload).toBe(payload);
 });

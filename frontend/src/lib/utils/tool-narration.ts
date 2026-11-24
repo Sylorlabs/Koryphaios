@@ -43,10 +43,18 @@ function stepClause(step: FeedEntryLocal): Clause {
     return { kind: 'read', items: names, running };
   }
   if (tool.kind === 'search') {
-    return { kind: 'search', items: tool.target && tool.target !== 'workspace' ? [quote(tool.target)] : [], running };
+    return {
+      kind: 'search',
+      items: tool.target && tool.target !== 'workspace' ? [quote(tool.target)] : [],
+      running,
+    };
   }
   if (tool.intent === 'list') {
-    return { kind: 'list', items: [tool.target === 'workspace' ? 'workspace' : basename(tool.target)], running };
+    return {
+      kind: 'list',
+      items: [tool.target === 'workspace' ? 'workspace' : basename(tool.target)],
+      running,
+    };
   }
   return {
     kind: 'other',

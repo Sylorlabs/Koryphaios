@@ -106,9 +106,7 @@ for (let step = 0; step < 4; step += 1) {
   await page.keyboard.press('Tab');
   trap.push(await focusedId());
 }
-const trapHeld = trap.every(
-  (id) => id === 'cancel' || id === 'confirm-button' || id === 'dialog',
-);
+const trapHeld = trap.every((id) => id === 'cancel' || id === 'confirm-button' || id === 'dialog');
 
 await page.keyboard.press('Escape');
 await page.waitForTimeout(120);
@@ -183,7 +181,8 @@ const session = {
   ],
   spokenOutput: {
     captured: false,
-    reason: 'No screen reader was driven in this session; only browser focus and geometry were measured.',
+    reason:
+      'No screen reader was driven in this session; only browser focus and geometry were measured.',
   },
 };
 

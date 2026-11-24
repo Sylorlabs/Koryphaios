@@ -130,9 +130,7 @@ function serverMessages(parts: TranscriptPart[], content: string): DisplayMessag
 }
 
 function receive(message: WSMessage) {
-  wsStore.connection!.onmessage!(
-    new MessageEvent('message', { data: JSON.stringify(message) }),
-  );
+  wsStore.connection!.onmessage!(new MessageEvent('message', { data: JSON.stringify(message) }));
 }
 
 function ancillary(path: string): Response {
@@ -233,9 +231,11 @@ describe('transcript reload parity', () => {
 
     state.activeSessionId = background;
     feedStore.activateSessionFeed(background);
-    expect(await feedStore.loadSessionMessages(background, [
-      { id: 'user-1', role: 'user', content: 'Refactor a.ts', createdAt: 50 },
-    ])).toBe(true);
+    expect(
+      await feedStore.loadSessionMessages(background, [
+        { id: 'user-1', role: 'user', content: 'Refactor a.ts', createdAt: 50 },
+      ]),
+    ).toBe(true);
 
     expect(feedStore.feed.map((row) => [row.type, row.text])).toEqual([
       ['user_message', 'Refactor a.ts'],

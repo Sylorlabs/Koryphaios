@@ -200,7 +200,9 @@ export const MEDIA_RUNTIME_CONCEPTS: readonly ConceptFixture[] = [
 // Retain the synthetic media vectors as isolated unit controls; full-task dispatch
 // uses actual encoded media and post-encode probes in skill-eval-audio-production-runtime.
 const fixtures = createConceptFixtures(
-  MEDIA_RUNTIME_CONCEPTS.filter((d) => d.skill !== 'audio-production' && d.skill !== 'bun-deno-runtime'),
+  MEDIA_RUNTIME_CONCEPTS.filter(
+    (d) => d.skill !== 'audio-production' && d.skill !== 'bun-deno-runtime',
+  ),
 );
 export const MEDIA_RUNTIME_CONCEPT_SKILL_EVAL_MATERIALIZERS = fixtures.materializers;
 export const MEDIA_RUNTIME_CONCEPT_SKILL_EVAL_SCORERS = fixtures.scorers;

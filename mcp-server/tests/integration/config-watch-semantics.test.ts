@@ -82,17 +82,20 @@ describe.each(['build', 'compilation'] as const)('%s config watch semantics', mo
   });
 
   async function expectPackageChange(): Promise<void> {
-    await vi.waitFor(() => {
-      expect(packageChanged).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          type: 'config-changed',
-          category: 'config',
-          path: join(workspaceRoot, 'package.json'),
-          relativePath: 'package.json',
-        })
-      );
-      expect(dependencyChanged).toHaveBeenCalledTimes(1);
-    }, { timeout: 3000, interval: 25 });
+    await vi.waitFor(
+      () => {
+        expect(packageChanged).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            type: 'config-changed',
+            category: 'config',
+            path: join(workspaceRoot, 'package.json'),
+            relativePath: 'package.json',
+          })
+        );
+        expect(dependencyChanged).toHaveBeenCalledTimes(1);
+      },
+      { timeout: 3000, interval: 25 }
+    );
   }
 
   it.each(['immediately', 'after another config event'])(

@@ -65,11 +65,7 @@ import {
 
 /** Denial text a CLI harness can act on: names the managed-call spelling that
  *  reaches the kory server. Unknown providers get the generic phrasing. */
-function nativeToolRedirectReason(
-  nativeTool: string,
-  koryTool: string,
-  provider?: string,
-): string {
+function nativeToolRedirectReason(nativeTool: string, koryTool: string, provider?: string): string {
   const n = JSON.stringify(nativeTool);
   const k = JSON.stringify(koryTool);
   if (provider === 'antigravity') return antigravityNativeToolRedirectReason(nativeTool, koryTool);
@@ -529,7 +525,11 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           ...(normalizedRole === 'manager'
             ? {
                 renameSession: (title: string) => kory.renameSession(sessionId, title),
-                forkChat: async (input: { sessionId?: string; messageId?: string; title?: string }) => {
+                forkChat: async (input: {
+                  sessionId?: string;
+                  messageId?: string;
+                  title?: string;
+                }) => {
                   const outcome = await forkChatCoordinated({
                     sourceSessionId: input.sessionId ?? sessionId,
                     messageId: input.messageId,

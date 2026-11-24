@@ -73,11 +73,7 @@ function formatSize(chars: number): string {
  * receipt). When the output parses, oversized string leaves are shrunk until
  * the serialized form fits; otherwise the text is sliced as before.
  */
-export function capToolOutputForContext(
-  output: string,
-  cap: number,
-  archiveId?: string,
-): string {
+export function capToolOutputForContext(output: string, cap: number, archiveId?: string): string {
   if (output.length <= cap) return output;
   const marker = (omitted: number) =>
     `\n…[truncated ${omitted} chars${archiveId ? ` — durable preview via fetch_context id=${archiveId}` : ''}]`;
@@ -98,7 +94,10 @@ export function capToolOutputForContext(
     if (Array.isArray(node)) {
       for (const [index, child] of node.entries()) {
         if (typeof child === 'string')
-          slots.push({ get: () => String(node[index]), set: (value) => void (node[index] = value) });
+          slots.push({
+            get: () => String(node[index]),
+            set: (value) => void (node[index] = value),
+          });
         else collect(child);
       }
       return;
@@ -108,7 +107,10 @@ export function capToolOutputForContext(
       for (const key of Object.keys(record)) {
         const child = record[key];
         if (typeof child === 'string')
-          slots.push({ get: () => String(record[key]), set: (value) => void (record[key] = value) });
+          slots.push({
+            get: () => String(record[key]),
+            set: (value) => void (record[key] = value),
+          });
         else collect(child);
       }
     }

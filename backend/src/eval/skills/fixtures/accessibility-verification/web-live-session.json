@@ -9,12 +9,7 @@
     "initialFocus": "other",
     "focusOnOpen": "cancel",
     "dialogOpen": true,
-    "tabStops": [
-      "confirm-button",
-      "body",
-      "cancel",
-      "confirm-button"
-    ],
+    "tabStops": ["confirm-button", "body", "cancel", "confirm-button"],
     "trapHeld": false,
     "closedByEscape": true,
     "focusAfterEscape": "open"
@@ -41,37 +36,17 @@
     "recordedBy": "scripts/record-accessibility-verification-orca-session.ts",
     "steps": {
       "page-ready": [],
-      "tab-to-help": [
-        "Tab Hilfe Druckknopf."
-      ],
-      "tab-to-open": [
-        "Tab Ordner löschen... Druckknopf."
-      ],
-      "activate-open": [
-        "Enter"
-      ],
+      "tab-to-help": ["Tab Hilfe Druckknopf."],
+      "tab-to-open": ["Tab Ordner löschen... Druckknopf."],
+      "activate-open": ["Enter"],
       "dialog-opened": [],
-      "dialog-tab-1": [
-        "Tab Endgültig löschen Druckknopf."
-      ],
-      "dialog-tab-2": [
-        "Tab German Seitenreiter."
-      ],
-      "dialog-tab-3": [
-        "Tab Translate options Druckknopf."
-      ],
-      "dialog-escape": [
-        "Escape"
-      ],
-      "reopen-dialog": [
-        "Enter"
-      ],
-      "confirm-reach": [
-        "Tab Abbrechen Druckknopf. Tab Endgültig löschen Druckknopf."
-      ],
-      "confirm-activate": [
-        "Enter Löschen fehlgeschlagen. Erneut versuchen."
-      ]
+      "dialog-tab-1": ["Tab Endgültig löschen Druckknopf."],
+      "dialog-tab-2": ["Tab German Seitenreiter."],
+      "dialog-tab-3": ["Tab Translate options Druckknopf."],
+      "dialog-escape": ["Escape"],
+      "reopen-dialog": ["Enter"],
+      "confirm-reach": ["Tab Abbrechen Druckknopf. Tab Endgültig löschen Druckknopf."],
+      "confirm-activate": ["Enter Löschen fehlgeschlagen. Erneut versuchen."]
     }
   },
   "spokenCapture": {

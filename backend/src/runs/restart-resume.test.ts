@@ -19,7 +19,11 @@ import {
   type SessionTurnCommandSource,
 } from './session-run-store';
 import type { SessionTurnSubmission } from '../kory/manager';
-import { renderRestartContinuationPrompt, renderPartialOutput, CONTINUATION_PARTIAL_OUTPUT_LIMIT } from './continuation-prompt';
+import {
+  renderRestartContinuationPrompt,
+  renderPartialOutput,
+  CONTINUATION_PARTIAL_OUTPUT_LIMIT,
+} from './continuation-prompt';
 
 const SESSION_ID = 'session-resume-test';
 
@@ -137,9 +141,7 @@ describe('restart resume of interrupted runs', () => {
     // The continuation itself is active at this point, so the third boot marks
     // it interrupted. That continuation is never queued for another resume.
     const third = boot(sqlite);
-    expect(await third.coordinator.recoverInterruptedRuns({ resumeInterruptedRuns: true })).toBe(
-      1,
-    );
+    expect(await third.coordinator.recoverInterruptedRuns({ resumeInterruptedRuns: true })).toBe(1);
     expect(third.coordinator.listPendingRunResumes()).toEqual([]);
     const secondPass = await admitPendingRunResumes(third.coordinator, admit, { enabled: true });
     expect(secondPass).toEqual({ admitted: 0, deferred: 0, skipped: 0 });
@@ -192,9 +194,7 @@ describe('restart resume of interrupted runs', () => {
 
     // Boot 3: the continuation itself is interrupted. It must not be resumed.
     const third = boot(sqlite);
-    expect(await third.coordinator.recoverInterruptedRuns({ resumeInterruptedRuns: true })).toBe(
-      1,
-    );
+    expect(await third.coordinator.recoverInterruptedRuns({ resumeInterruptedRuns: true })).toBe(1);
     expect(third.coordinator.listPendingRunResumes()).toEqual([]);
     expect(await admitPendingRunResumes(third.coordinator, admit, { enabled: true })).toEqual({
       admitted: 0,
@@ -327,7 +327,11 @@ describe('continuation prompt', () => {
 
   test('the restart prompt is host-authored instructions, not a user request', () => {
     const prompt = renderRestartContinuationPrompt(undefined);
-    expect(prompt.startsWith('The previous run was interrupted by a restart; continue from where you left off.')).toBe(true);
+    expect(
+      prompt.startsWith(
+        'The previous run was interrupted by a restart; continue from where you left off.',
+      ),
+    ).toBe(true);
     expect(prompt).toContain('Do not restart the task');
   });
 });

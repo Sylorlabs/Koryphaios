@@ -40,7 +40,12 @@ const STATUS_INFO: Record<AgentStatus, AgentStatusInfo> = {
   idle: { label: 'Idle', tone: 'muted', group: 'finished', live: false },
 };
 
-const UNKNOWN_STATUS: AgentStatusInfo = { label: 'Working', tone: 'active', group: 'running', live: true };
+const UNKNOWN_STATUS: AgentStatusInfo = {
+  label: 'Working',
+  tone: 'active',
+  group: 'running',
+  live: true,
+};
 
 export function agentStatusInfo(
   status: AgentStatus | string | undefined,
@@ -55,7 +60,12 @@ export function agentStatusInfo(
 }
 
 /** Order the lineage groups render in: what needs the user first. */
-export const AGENT_GROUP_ORDER: readonly AgentStatusGroup[] = ['waiting', 'failed', 'running', 'finished'];
+export const AGENT_GROUP_ORDER: readonly AgentStatusGroup[] = [
+  'waiting',
+  'failed',
+  'running',
+  'finished',
+];
 
 export const AGENT_GROUP_LABELS: Record<AgentStatusGroup, string> = {
   waiting: 'Waiting',
@@ -106,7 +116,20 @@ export function clip(text: string, max: number): string {
 }
 
 // Most telling first: a grep's pattern says more than the folder it searched.
-const ARG_KEYS = ['command', 'cmd', 'pattern', 'query', 'file_path', 'filePath', 'path', 'file', 'url', 'name', 'agentName', 'task'];
+const ARG_KEYS = [
+  'command',
+  'cmd',
+  'pattern',
+  'query',
+  'file_path',
+  'filePath',
+  'path',
+  'file',
+  'url',
+  'name',
+  'agentName',
+  'task',
+];
 
 /** The one argument that says what a tool call is doing right now. */
 export function toolCallArgument(input: Record<string, unknown> | undefined): string {
@@ -157,7 +180,10 @@ export function agentElapsedMs(
 /** First meaningful line of an agent's output, for a one-line result summary. */
 export function resultSummary(content: string | undefined, max = 140): string {
   if (!content) return '';
-  const lines = content.split('\n').map((part) => part.trim()).filter(Boolean);
+  const lines = content
+    .split('\n')
+    .map((part) => part.trim())
+    .filter(Boolean);
   // A heading ("## Summary") labels the result rather than stating it.
   const line = lines.find((part) => !part.startsWith('#')) ?? lines[0];
   const text = line?.replace(/^[#>*\-\s`]+/, '').trim();

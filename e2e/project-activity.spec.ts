@@ -3,12 +3,16 @@ import { createAuthSession, injectAuthIntoPage } from './helpers/auth';
 import { E2E_BACKEND_URL } from './helpers/urls';
 import { createIdleSessionRun } from '../shared/src/run/SessionRun';
 
-test('open project activity tracks live outcomes and cross-window chat membership', async ({ page, request }) => {
+test('open project activity tracks live outcomes and cross-window chat membership', async ({
+  page,
+  request,
+}) => {
   const auth = await createAuthSession(request);
   const headers = { Authorization: auth.bearerToken };
   const create = async (title: string) => {
     const response = await request.post(`${E2E_BACKEND_URL}/api/sessions`, {
-      headers, data: { title, workingDirectory: '/synthetic-chart-project' },
+      headers,
+      data: { title, workingDirectory: '/synthetic-chart-project' },
     });
     expect(response.ok()).toBe(true);
     return (await response.json()).data.id as string;
@@ -27,12 +31,24 @@ test('open project activity tracks live outcomes and cross-window chat membershi
   const activity = page.getByRole('button', { name: 'Show synthetic-chart-project chat activity' });
   await expect(activity).toBeVisible();
   await expect.poll(() => Boolean(push)).toBe(true);
-  const outcome = (id: string, phase: 'done' | 'error', revision: number) => push(JSON.stringify({
-    type: 'run.state', sessionId: id, timestamp: Date.now(),
-    payload: { snapshot: {
-      ...createIdleSessionRun(id), runId: `fixture-${id}`, phase, status: 'terminal', revision,
-    }, transition: null },
-  }));
+  const outcome = (id: string, phase: 'done' | 'error', revision: number) =>
+    push(
+      JSON.stringify({
+        type: 'run.state',
+        sessionId: id,
+        timestamp: Date.now(),
+        payload: {
+          snapshot: {
+            ...createIdleSessionRun(id),
+            runId: `fixture-${id}`,
+            phase,
+            status: 'terminal',
+            revision,
+          },
+          transition: null,
+        },
+      }),
+    );
   outcome(first, 'done', 100);
   await activity.click();
   const dialog = page.getByRole('dialog', { name: 'synthetic-chart-project activity' });

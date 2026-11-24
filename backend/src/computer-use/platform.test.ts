@@ -249,14 +249,33 @@ describe('native helper transport', () => {
   });
   it('runs a queue of steps across windows in one native round trip', async () => {
     const requests: unknown[] = [];
-    const windowA = { appId: 'macos:/A', windowId: 'w1', title: 'A', pid: 11, scope: 'window' as const };
-    const windowB = { appId: 'macos:/B', windowId: 'w2', title: 'B', pid: 22, scope: 'window' as const };
+    const windowA = {
+      appId: 'macos:/A',
+      windowId: 'w1',
+      title: 'A',
+      pid: 11,
+      scope: 'window' as const,
+    };
+    const windowB = {
+      appId: 'macos:/B',
+      windowId: 'w2',
+      title: 'B',
+      pid: 22,
+      scope: 'window' as const,
+    };
     const adapter = createComputerPlatformAdapter({
       platform: 'win32',
       invoke: async (request) => {
         requests.push(request);
-        if ((request as { kind: string }).kind === 'discover') return { targets: [windowA, windowB] };
-        return { text: 'Ran 2 steps.', steps: [{ index: 0, status: 'done' }, { index: 1, status: 'done' }] };
+        if ((request as { kind: string }).kind === 'discover')
+          return { targets: [windowA, windowB] };
+        return {
+          text: 'Ran 2 steps.',
+          steps: [
+            { index: 0, status: 'done' },
+            { index: 1, status: 'done' },
+          ],
+        };
       },
     });
     const result = await adapter.execute({
@@ -269,7 +288,10 @@ describe('native helper transport', () => {
     });
     expect(result.text).toBe('Ran 2 steps.');
     expect(result.steps?.map((step) => step.status)).toEqual(['done', 'done']);
-    const dispatched = requests.at(-1) as { steps: Array<Record<string, unknown>>; observationId?: string };
+    const dispatched = requests.at(-1) as {
+      steps: Array<Record<string, unknown>>;
+      observationId?: string;
+    };
     // Every step is rebuilt from the live window list, never from the agent's claim.
     expect(dispatched.steps[0]).toMatchObject({ kind: 'click', target: windowA, x: 10, y: 12 });
     expect(dispatched.steps[1]).toMatchObject({ kind: 'type', target: windowB, text: 'hello' });
@@ -281,7 +303,13 @@ describe('native helper transport', () => {
       invoke: async (request) =>
         (request as { kind: string }).kind === 'discover' ? { targets: [] } : { text: 'never' },
     });
-    const gone = { appId: 'macos:/A', windowId: 'w1', title: 'A', pid: 11, scope: 'window' as const };
+    const gone = {
+      appId: 'macos:/A',
+      windowId: 'w1',
+      title: 'A',
+      pid: 11,
+      scope: 'window' as const,
+    };
     await expect(adapter.execute({ kind: 'sequence', steps: [] })).rejects.toThrow('1 to 64 steps');
     await expect(
       adapter.execute({
@@ -300,13 +328,22 @@ describe('native helper transport', () => {
     ).rejects.toThrow('Unsupported queue step');
   });
   it('surfaces user interference instead of cancelling the task', async () => {
-    const windowA = { appId: 'macos:/A', windowId: 'w1', title: 'A', pid: 11, scope: 'window' as const };
+    const windowA = {
+      appId: 'macos:/A',
+      windowId: 'w1',
+      title: 'A',
+      pid: 11,
+      scope: 'window' as const,
+    };
     const adapter = createComputerPlatformAdapter({
       platform: 'win32',
       invoke: async (request) =>
         (request as { kind: string }).kind === 'discover'
           ? { targets: [windowA] }
-          : { text: 'Ran 1 steps.', interference: { kind: 'user-input', message: 'Someone typed.' } },
+          : {
+              text: 'Ran 1 steps.',
+              interference: { kind: 'user-input', message: 'Someone typed.' },
+            },
     });
     const result = await adapter.execute({
       kind: 'sequence',
@@ -316,7 +353,13 @@ describe('native helper transport', () => {
   });
   it('moves a window off screen and puts it back by request', async () => {
     const requests: Array<Record<string, unknown>> = [];
-    const windowA = { appId: 'macos:/A', windowId: 'w1', title: 'A', pid: 11, scope: 'window' as const };
+    const windowA = {
+      appId: 'macos:/A',
+      windowId: 'w1',
+      title: 'A',
+      pid: 11,
+      scope: 'window' as const,
+    };
     const adapter = createComputerPlatformAdapter({
       platform: 'win32',
       invoke: async (request) => {
@@ -333,9 +376,9 @@ describe('native helper transport', () => {
     expect(hiddenCall.target).toMatchObject({ windowId: 'w1', pid: 11 });
     await adapter.execute({ kind: 'place', target: windowA, hidden: false });
     expect(requests.at(-1)!.hidden).toBe(false);
-    await expect(
-      adapter.execute({ kind: 'place', target: windowA } as never),
-    ).rejects.toThrow('explicit hidden flag');
+    await expect(adapter.execute({ kind: 'place', target: windowA } as never)).rejects.toThrow(
+      'explicit hidden flag',
+    );
   });
   it('delivers input to the authorized process instead of the session that has focus', () => {
     // A computer use task must not take the user's focus or pointer: every event is

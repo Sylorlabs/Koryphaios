@@ -74,7 +74,18 @@ const FIXTURE_SLUGS = [
   'fusion-claude-sonnet-5-5-max-sidekick-swe-2-high',
 ];
 
-const EFFORT_ORDER = ['none', 'minimal', 'low', 'fast', 'medium', 'high', 'xhigh', 'ultra', 'max', 'slow'];
+const EFFORT_ORDER = [
+  'none',
+  'minimal',
+  'low',
+  'fast',
+  'medium',
+  'high',
+  'xhigh',
+  'ultra',
+  'max',
+  'slow',
+];
 const NAME_WORD =
   /\s+(No Thinking|Minimal|Low|Medium|High|XHigh|Ultra|Max|Slow|Fast|Priority)(?=\s|$)/gi;
 
@@ -144,9 +155,7 @@ function fixtureCatalog(slugs: string[]): FusionCatalog {
     };
   }
   const finish = (option: FusionSlotOption, efforts: Set<string>) => {
-    option.efforts = [...efforts].sort(
-      (a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b),
-    );
+    option.efforts = [...efforts].sort((a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b));
     option.defaultEffort = option.efforts.includes('medium')
       ? 'medium'
       : (option.efforts[0] ?? null);
@@ -224,10 +233,7 @@ describe('resolveFusionSlug / availability', () => {
   it('reports unavailable pairings', () => {
     // Fast Fable has no SWE-2 pairing.
     expect(
-      isFusionPairingAvailable(
-        catalog,
-        sel({ lead: 'claude-fable-5-2', leadFast: true }),
-      ),
+      isFusionPairingAvailable(catalog, sel({ lead: 'claude-fable-5-2', leadFast: true })),
     ).toBe(false);
     // Sonnet has no Sonnet sidekick at all.
     expect(
@@ -246,12 +252,7 @@ describe('resolveFusionSlug / availability', () => {
     const std = availableSidekicks(catalog, 'claude-opus-5-5', false);
     expect(std).toEqual(['swe-2', 'glm-5-2', 'gpt-6-luna']);
     const fastFable = availableSidekicks(catalog, 'claude-fable-5-2', true);
-    expect(fastFable).toEqual([
-      'gpt-6-luna',
-      'gpt-5-6-luna',
-      'gpt-6-1-terra',
-      'gpt-5-6-sol',
-    ]);
+    expect(fastFable).toEqual(['gpt-6-luna', 'gpt-5-6-luna', 'gpt-6-1-terra', 'gpt-5-6-sol']);
   });
 
   it('detects the lead fast tier per pairing', () => {
@@ -326,9 +327,7 @@ describe('adjustFusionSelection', () => {
       ...catalog,
       pairings: { ...catalog.pairings },
     };
-    delete gap.pairings[
-      fusionPairingKey('claude-sonnet-5-5', false, 'swe-2', 'medium')
-    ];
+    delete gap.pairings[fusionPairingKey('claude-sonnet-5-5', false, 'swe-2', 'medium')];
     const out = adjustFusionSelection(
       gap,
       sel({ lead: 'claude-sonnet-5-5', sidekickEffort: 'medium' }),

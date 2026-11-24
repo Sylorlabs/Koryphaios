@@ -22,9 +22,7 @@ function positiveSafeInteger(value: unknown): value is number {
 
 /** Mirror the vendor's normalization: positive integers, capped by the
  *  reported hard ceiling, de-duplicated and ascending. Never invent a tier. */
-export function supportedProductContextWindows(
-  entry: ProductContextWindowEntry,
-): number[] {
+export function supportedProductContextWindows(entry: ProductContextWindowEntry): number[] {
   const raw = entry.contextWindow?.supportedLengths;
   if (!Array.isArray(raw)) return [];
   const ceiling = positiveSafeInteger(entry.maxInputTokens) ? entry.maxInputTokens : undefined;
@@ -62,7 +60,5 @@ export function resolveProductContextBudget(
 ): number | undefined {
   if (options.length < 2) return undefined;
   const maximum = options[options.length - 1];
-  return positiveSafeInteger(configured) && options.includes(configured)
-    ? configured
-    : maximum;
+  return positiveSafeInteger(configured) && options.includes(configured) ? configured : maximum;
 }

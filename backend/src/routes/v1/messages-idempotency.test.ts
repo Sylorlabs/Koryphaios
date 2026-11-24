@@ -313,9 +313,7 @@ describe('message send idempotency through the session-turn ledger', () => {
       await kory.shutdown();
     } finally {
       sqlite.close();
-      await agentSteeringStore
-        .remove(`usrsteer_${sessionId}_${CLIENT_ID}`)
-        .catch(() => undefined);
+      await agentSteeringStore.remove(`usrsteer_${sessionId}_${CLIENT_ID}`).catch(() => undefined);
     }
   });
 

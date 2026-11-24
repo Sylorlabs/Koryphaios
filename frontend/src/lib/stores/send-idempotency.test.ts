@@ -15,7 +15,10 @@ vi.mock('./sessions.svelte', () => ({
   },
 }));
 vi.mock('./auth.svelte', () => ({ authStore: { ensureSession: async () => true, token: 't' } }));
-vi.mock('$lib/utils/api-url', () => ({ apiUrl: (path: string) => path, getWsUrl: () => 'ws://x/ws' }));
+vi.mock('$lib/utils/api-url', () => ({
+  apiUrl: (path: string) => path,
+  getWsUrl: () => 'ws://x/ws',
+}));
 vi.mock('$lib/api.svelte', () => ({
   apiFetch: (path: string, init?: RequestInit) => state.apiFetch(path, init),
   parseJsonResponse: async (response: Response) => response.json(),
@@ -29,7 +32,9 @@ import { wsStore } from './websocket.svelte';
 import { feedStore } from './feed.svelte';
 
 const ok = (messageId: string) =>
-  new Response(JSON.stringify({ ok: true, data: { status: 'processing', runId: 'r1', messageId } }));
+  new Response(
+    JSON.stringify({ ok: true, data: { status: 'processing', runId: 'r1', messageId } }),
+  );
 
 function postedBodies() {
   return state.apiFetch.mock.calls

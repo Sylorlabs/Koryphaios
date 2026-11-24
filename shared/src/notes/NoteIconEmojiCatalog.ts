@@ -15,10 +15,13 @@ export interface NoteEmojiCategory {
 }
 
 const rows = (text: string): NoteEmojiEntry[] =>
-  text.trim().split(/\s*\n\s*/).map((line) => {
-    const [emoji, ...words] = line.trim().split(/\s+/);
-    return { emoji: emoji!, name: words.join(' ') };
-  });
+  text
+    .trim()
+    .split(/\s*\n\s*/)
+    .map((line) => {
+      const [emoji, ...words] = line.trim().split(/\s+/);
+      return { emoji: emoji!, name: words.join(' ') };
+    });
 
 export const NOTE_EMOJI_CATALOG: readonly NoteEmojiCategory[] = [
   {
@@ -219,7 +222,10 @@ export const NOTE_EMOJI_CATALOG: readonly NoteEmojiCategory[] = [
 export function searchNoteEmoji(query: string): readonly NoteEmojiEntry[] {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const entries = NOTE_EMOJI_CATALOG.flatMap((category) =>
-    category.entries.map((entry) => ({ ...entry, haystack: `${category.label} ${entry.name}`.toLowerCase() })),
+    category.entries.map((entry) => ({
+      ...entry,
+      haystack: `${category.label} ${entry.name}`.toLowerCase(),
+    })),
   );
   if (terms.length === 0) return entries.map(({ emoji, name }) => ({ emoji, name }));
   return entries

@@ -13,7 +13,10 @@ const expected = {
   model: 'gpt-5.6-sol',
 };
 
-function run(variant: 'with-skill' | 'without-skill', changes: Partial<SkillEvaluationRun> = {}): SkillEvaluationRun {
+function run(
+  variant: 'with-skill' | 'without-skill',
+  changes: Partial<SkillEvaluationRun> = {},
+): SkillEvaluationRun {
   return {
     id: variant,
     skill: 'test',
@@ -46,67 +49,127 @@ function run(variant: 'with-skill' | 'without-skill', changes: Partial<SkillEval
 
 describe('qualification campaign resume', () => {
   test('skips only an actual current, same-model skill/no-skill pair', () => {
-    expect(hasCompleteCurrentSkillPair([run('with-skill'), run('without-skill')], expected)).toBe(true);
+    expect(hasCompleteCurrentSkillPair([run('with-skill'), run('without-skill')], expected)).toBe(
+      true,
+    );
   });
 
   test('does not use a previous model or a different provider for requested model', () => {
-    expect(hasCompleteCurrentSkillPair([
-      run('with-skill', { model: 'gpt-5.5-sol' }),
-      run('without-skill', { model: 'gpt-5.5-sol' }),
-    ], expected)).toBe(false);
-    expect(hasCompleteCurrentSkillPair([
-      run('with-skill'), run('without-skill', { model: 'gpt-5.5-sol' }),
-    ], expected)).toBe(false);
-    expect(hasCompleteCurrentSkillPair([
-      run('with-skill', { provider: 'other' }),
-      run('without-skill', { provider: 'other' }),
-    ], expected)).toBe(false);
+    expect(
+      hasCompleteCurrentSkillPair(
+        [
+          run('with-skill', { model: 'gpt-5.5-sol' }),
+          run('without-skill', { model: 'gpt-5.5-sol' }),
+        ],
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      hasCompleteCurrentSkillPair(
+        [run('with-skill'), run('without-skill', { model: 'gpt-5.5-sol' })],
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      hasCompleteCurrentSkillPair(
+        [run('with-skill', { provider: 'other' }), run('without-skill', { provider: 'other' })],
+        expected,
+      ),
+    ).toBe(false);
   });
 
   test('does not combine distinct pairs, failed infrastructure, stale revisions or contracts', () => {
-    expect(hasCompleteCurrentSkillPair([
-      run('with-skill'), run('without-skill', { comparisonId: 'pair-2' }),
-    ], expected)).toBe(false);
-    expect(hasCompleteCurrentSkillPair([
-      run('with-skill'), run('without-skill', {
-        infrastructureFailure: { kind: 'provider', retryable: true, evidence: ['timeout'], detail: 'timeout' },
-      }),
-    ], expected)).toBe(false);
-    expect(hasCompleteCurrentSkillPair([
-      run('with-skill'), run('without-skill', { integrityFailure: true }),
-    ], expected)).toBe(false);
-    for (const field of ['revisionHash', 'evaluationContractHash', 'harnessVersion', 'scenarioId'] as const) {
-      expect(hasCompleteCurrentSkillPair([
-        run('with-skill'), run('without-skill', { [field]: 'stale' }),
-      ], expected)).toBe(false);
+    expect(
+      hasCompleteCurrentSkillPair(
+        [run('with-skill'), run('without-skill', { comparisonId: 'pair-2' })],
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      hasCompleteCurrentSkillPair(
+        [
+          run('with-skill'),
+          run('without-skill', {
+            infrastructureFailure: {
+              kind: 'provider',
+              retryable: true,
+              evidence: ['timeout'],
+              detail: 'timeout',
+            },
+          }),
+        ],
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      hasCompleteCurrentSkillPair(
+        [run('with-skill'), run('without-skill', { integrityFailure: true })],
+        expected,
+      ),
+    ).toBe(false);
+    for (const field of [
+      'revisionHash',
+      'evaluationContractHash',
+      'harnessVersion',
+      'scenarioId',
+    ] as const) {
+      expect(
+        hasCompleteCurrentSkillPair(
+          [run('with-skill'), run('without-skill', { [field]: 'stale' })],
+          expected,
+        ),
+      ).toBe(false);
     }
   });
 
   test('never skips qualification using two arms from different task or evaluator identities', () => {
     for (const field of [
-      'skill', 'caseId', 'suiteId',
-      'materializerId', 'deterministicScorerId',
+      'skill',
+      'caseId',
+      'suiteId',
+      'materializerId',
+      'deterministicScorerId',
     ] as const) {
-      expect(hasCompleteCurrentSkillPair([
-        run('with-skill'), run('without-skill', { [field]: 'other' }),
-      ], expected)).toBe(false);
+      expect(
+        hasCompleteCurrentSkillPair(
+          [run('with-skill'), run('without-skill', { [field]: 'other' })],
+          expected,
+        ),
+      ).toBe(false);
     }
-    expect(hasCompleteCurrentSkillPair([
-      run('with-skill'), run('without-skill', { evaluationContractVersion: 2 }),
-    ], expected)).toBe(false);
-    expect(hasCompleteCurrentSkillPair([
-      run('with-skill', { skill: 'other' }),
-      run('without-skill', { skill: 'other' }),
-    ], expected)).toBe(false);
-    expect(hasCompleteCurrentSkillPair([
-      run('with-skill', { evaluationContractVersion: 2 }),
-      run('without-skill', { evaluationContractVersion: 2 }),
-    ], expected)).toBe(false);
-    for (const field of ['suiteId', 'evaluationContractVersion', 'materializerId', 'deterministicScorerId'] as const) {
-      expect(hasCompleteCurrentSkillPair([
-        run('with-skill', { [field]: undefined }),
-        run('without-skill', { [field]: undefined }),
-      ], expected)).toBe(false);
+    expect(
+      hasCompleteCurrentSkillPair(
+        [run('with-skill'), run('without-skill', { evaluationContractVersion: 2 })],
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      hasCompleteCurrentSkillPair(
+        [run('with-skill', { skill: 'other' }), run('without-skill', { skill: 'other' })],
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      hasCompleteCurrentSkillPair(
+        [
+          run('with-skill', { evaluationContractVersion: 2 }),
+          run('without-skill', { evaluationContractVersion: 2 }),
+        ],
+        expected,
+      ),
+    ).toBe(false);
+    for (const field of [
+      'suiteId',
+      'evaluationContractVersion',
+      'materializerId',
+      'deterministicScorerId',
+    ] as const) {
+      expect(
+        hasCompleteCurrentSkillPair(
+          [run('with-skill', { [field]: undefined }), run('without-skill', { [field]: undefined })],
+          expected,
+        ),
+      ).toBe(false);
     }
   });
 });

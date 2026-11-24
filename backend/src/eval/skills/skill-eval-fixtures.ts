@@ -323,10 +323,7 @@ import {
   HARDWARE_RUNTIME_MATERIALIZERS,
   HARDWARE_RUNTIME_SCORERS,
 } from './skill-eval-hardware-runtime';
-import {
-  IMAGEGEN_MATERIALIZERS,
-  IMAGEGEN_SCORERS,
-} from './skill-eval-imagegen-runtime';
+import { IMAGEGEN_MATERIALIZERS, IMAGEGEN_SCORERS } from './skill-eval-imagegen-runtime';
 import {
   EMBEDDED_RUNTIME_MATERIALIZERS,
   EMBEDDED_RUNTIME_SCORERS,

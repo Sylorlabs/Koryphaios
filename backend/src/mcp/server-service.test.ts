@@ -155,7 +155,10 @@ describe('ManageMcpServerTool', () => {
   test('add action is blocked in planning interaction', async () => {
     const tool = new ManageMcpServerTool();
     const ctx = makeCtx({
-      permissionPolicy: { mode: 'guarded', interactionMode: 'plan' } as ToolContext['permissionPolicy'],
+      permissionPolicy: {
+        mode: 'guarded',
+        interactionMode: 'plan',
+      } as ToolContext['permissionPolicy'],
     });
     const result = await tool.run(
       ctx,
@@ -168,7 +171,10 @@ describe('ManageMcpServerTool', () => {
   test('update action is blocked in planning interaction', async () => {
     const tool = new ManageMcpServerTool();
     const ctx = makeCtx({
-      permissionPolicy: { mode: 'guarded', interactionMode: 'plan' } as ToolContext['permissionPolicy'],
+      permissionPolicy: {
+        mode: 'guarded',
+        interactionMode: 'plan',
+      } as ToolContext['permissionPolicy'],
     });
     const result = await tool.run(
       ctx,
@@ -181,7 +187,10 @@ describe('ManageMcpServerTool', () => {
   test('remove action is blocked in planning interaction', async () => {
     const tool = new ManageMcpServerTool();
     const ctx = makeCtx({
-      permissionPolicy: { mode: 'guarded', interactionMode: 'plan' } as ToolContext['permissionPolicy'],
+      permissionPolicy: {
+        mode: 'guarded',
+        interactionMode: 'plan',
+      } as ToolContext['permissionPolicy'],
     });
     const result = await tool.run(ctx, makeCall({ action: 'remove', name: 'test' }));
     expect(result.isError).toBe(true);

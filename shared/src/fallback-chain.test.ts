@@ -14,7 +14,12 @@ import {
 describe('fallback chain normalization', () => {
   test('current step shape keeps provider, reasoning and label', () => {
     expect(
-      normalizeFallbackStep({ provider: 'openai', model: 'gpt-5', reasoningLevel: 'high', label: ' Fast ' }),
+      normalizeFallbackStep({
+        provider: 'openai',
+        model: 'gpt-5',
+        reasoningLevel: 'high',
+        label: ' Fast ',
+      }),
     ).toEqual({ provider: 'openai', model: 'gpt-5', reasoningLevel: 'high', label: 'Fast' });
   });
 
@@ -46,7 +51,12 @@ describe('fallback chain normalization', () => {
 
   test('a chain fills default triggers and turn-return policy', () => {
     const chain = normalizeFallbackChain({ steps: [{ provider: 'openai', model: 'gpt-5' }] });
-    expect(chain.triggers).toEqual({ usageLimit: true, rateLimit: true, providerError: true, timeout: true });
+    expect(chain.triggers).toEqual({
+      usageLimit: true,
+      rateLimit: true,
+      providerError: true,
+      timeout: true,
+    });
     expect(chain.returnToPrimary).toBe('next_turn');
     expect(chain.steps).toHaveLength(1);
   });
@@ -57,7 +67,12 @@ describe('fallback chain normalization', () => {
       triggers: { usageLimit: false, rateLimit: true, providerError: false, timeout: true },
       returnToPrimary: 'never',
     });
-    expect(chain.triggers).toEqual({ usageLimit: false, rateLimit: true, providerError: false, timeout: true });
+    expect(chain.triggers).toEqual({
+      usageLimit: false,
+      rateLimit: true,
+      providerError: false,
+      timeout: true,
+    });
     expect(chain.returnToPrimary).toBe('never');
   });
 
@@ -90,15 +105,28 @@ describe('fallback hop transcript notice', () => {
     expect(event).toEqual({
       type: 'notice',
       tone: 'info',
-      text: fallbackHopNoticeText({ fromModel: 'opus', toModel: 'sonnet', reason: 'usage_limit', stepIndex: 0 }),
+      text: fallbackHopNoticeText({
+        fromModel: 'opus',
+        toModel: 'sonnet',
+        reason: 'usage_limit',
+        stepIndex: 0,
+      }),
       timestamp: 10,
       fallback: { fromModel: 'opus', toModel: 'sonnet', reason: 'usage_limit', stepIndex: 0 },
     });
   });
 
   test('a notice sits between the text before and after the hop, never duplicating text', () => {
-    const before = turnEventFromWSMessage({ type: 'stream.delta', timestamp: 1, payload: { content: 'Hello ' } });
-    const after = turnEventFromWSMessage({ type: 'stream.delta', timestamp: 20, payload: { content: 'world' } });
+    const before = turnEventFromWSMessage({
+      type: 'stream.delta',
+      timestamp: 1,
+      payload: { content: 'Hello ' },
+    });
+    const after = turnEventFromWSMessage({
+      type: 'stream.delta',
+      timestamp: 20,
+      payload: { content: 'world' },
+    });
     const parts = reduceTurnEvents([before!, turnEventFromWSMessage(hop)!, after!]);
     expect(parts.map((part) => part.kind)).toEqual(['text', 'notice', 'text']);
     const text = parts.flatMap((part) => (part.kind === 'text' ? [part.text] : [])).join('');
@@ -106,6 +134,12 @@ describe('fallback hop transcript notice', () => {
   });
 
   test('a malformed hop payload maps to nothing', () => {
-    expect(turnEventFromWSMessage({ type: 'session.fallback.hop', timestamp: 1, payload: { sessionId: 's1' } })).toBeNull();
+    expect(
+      turnEventFromWSMessage({
+        type: 'session.fallback.hop',
+        timestamp: 1,
+        payload: { sessionId: 's1' },
+      }),
+    ).toBeNull();
   });
 });

@@ -217,7 +217,11 @@ export function publicKeyId(pubkey: string): string | null {
 /** Verify a minisign signature over file bytes with the configured public key.
  *  Tauri signs with the prehashed (`ED`) variant, which signs BLAKE2b-512 of the
  *  file; the plain (`Ed`) variant signs the bytes directly. */
-export function verifyMinisignature(data: Buffer, encodedSignature: string, encodedPubkey: string): boolean {
+export function verifyMinisignature(
+  data: Buffer,
+  encodedSignature: string,
+  encodedPubkey: string,
+): boolean {
   const sigText = decodeBase64Text(encodedSignature);
   const pkText = decodeBase64Text(encodedPubkey);
   if (sigText === null || pkText === null) return false;
@@ -225,11 +229,13 @@ export function verifyMinisignature(data: Buffer, encodedSignature: string, enco
   const keyBytes = Buffer.from((pkText.split(/\r?\n/)[1] ?? '').trim(), 'base64');
   if (sigBytes.length !== 74 || keyBytes.length !== 42) return false;
   if (!sigBytes.subarray(2, 10).equals(keyBytes.subarray(2, 10))) return false;
-  const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), keyBytes.subarray(10, 42)]);
+  const spki = Buffer.concat([
+    Buffer.from('302a300506032b6570032100', 'hex'),
+    keyBytes.subarray(10, 42),
+  ]);
   const publicKey = createPublicKey({ key: spki, format: 'der', type: 'spki' });
   const algorithm = sigBytes.subarray(0, 2).toString('latin1');
-  const message =
-    algorithm === 'ED' ? createHash('blake2b512').update(data).digest() : data;
+  const message = algorithm === 'ED' ? createHash('blake2b512').update(data).digest() : data;
   return cryptoVerify(null, message, publicKey, sigBytes.subarray(10, 74));
 }
 
@@ -248,7 +254,8 @@ export function assetNamesFromJson(value: unknown): string[] {
       : null;
   if (!list) throw new Error('assets JSON must be an array or an object with an "assets" array');
   return list.map((asset) => {
-    const name = asset && typeof asset === 'object' ? (asset as { name?: unknown }).name : undefined;
+    const name =
+      asset && typeof asset === 'object' ? (asset as { name?: unknown }).name : undefined;
     if (typeof name !== 'string') throw new Error('every asset entry needs a string "name"');
     return name;
   });
@@ -270,7 +277,10 @@ function urlFileName(url: string): string | null {
 }
 
 /** Check a parsed latest.json against the release contract. Pure: no I/O. */
-export function verifyUpdaterManifest(manifest: unknown, options: VerifyOptions = {}): VerifyResult {
+export function verifyUpdaterManifest(
+  manifest: unknown,
+  options: VerifyOptions = {},
+): VerifyResult {
   const errors: string[] = [];
   const warnings: string[] = [];
   const result: VerifyResult = { errors, warnings, version: null, platforms: [] };
@@ -300,7 +310,11 @@ export function verifyUpdaterManifest(manifest: unknown, options: VerifyOptions 
     }
   }
 
-  if (typeof body.pub_date !== 'string' || !RFC3339.test(body.pub_date) || Number.isNaN(Date.parse(body.pub_date))) {
+  if (
+    typeof body.pub_date !== 'string' ||
+    !RFC3339.test(body.pub_date) ||
+    Number.isNaN(Date.parse(body.pub_date))
+  ) {
     errors.push(`pub_date must be an RFC 3339 timestamp, got ${JSON.stringify(body.pub_date)}`);
   }
   if (body.notes !== undefined && typeof body.notes !== 'string') {
@@ -327,7 +341,8 @@ export function verifyUpdaterManifest(manifest: unknown, options: VerifyOptions 
   let publicKeyIdHex: string | null = null;
   if (options.pubkey !== undefined) {
     publicKeyIdHex = publicKeyId(options.pubkey);
-    if (publicKeyIdHex === null) errors.push('configured updater pubkey is not a minisign public key');
+    if (publicKeyIdHex === null)
+      errors.push('configured updater pubkey is not a minisign public key');
   }
 
   for (const [platform, entry] of Object.entries(entries)) {
@@ -346,7 +361,9 @@ export function verifyUpdaterManifest(manifest: unknown, options: VerifyOptions 
     } else {
       const tagSegment = url.split('/releases/download/')[1]?.split('/')[0];
       if (expectedTag && tagSegment !== expectedTag) {
-        errors.push(`${platform}: url names release ${tagSegment ?? '(none)'}, expected ${expectedTag}`);
+        errors.push(
+          `${platform}: url names release ${tagSegment ?? '(none)'}, expected ${expectedTag}`,
+        );
       }
       const fileName = urlFileName(url);
       if (!fileName) {
@@ -354,10 +371,14 @@ export function verifyUpdaterManifest(manifest: unknown, options: VerifyOptions 
       } else {
         if (rule) {
           if (!rule.kind.test(fileName)) {
-            errors.push(`${platform}: ${fileName} is not an updater payload (expected ${rule.kindLabel})`);
+            errors.push(
+              `${platform}: ${fileName} is not an updater payload (expected ${rule.kindLabel})`,
+            );
           }
           if (!rule.arch.test(fileName)) {
-            errors.push(`${platform}: ${fileName} does not name the ${rule.archLabel} architecture`);
+            errors.push(
+              `${platform}: ${fileName} does not name the ${rule.archLabel} architecture`,
+            );
           }
         }
         if (options.assetNames && !options.assetNames.includes(fileName)) {
@@ -428,7 +449,8 @@ export function parseCliArguments(argv: readonly string[]): CliArguments {
           plugins?: { updater?: { pubkey?: unknown } };
         };
         const pubkey = conf.plugins?.updater?.pubkey;
-        if (typeof pubkey !== 'string') throw new Error('tauri.conf.json has no plugins.updater.pubkey');
+        if (typeof pubkey !== 'string')
+          throw new Error('tauri.conf.json has no plugins.updater.pubkey');
         options.pubkey = pubkey;
         index++;
         break;
@@ -448,39 +470,52 @@ export function parseCliArguments(argv: readonly string[]): CliArguments {
   return { manifestPath: positional[0], options };
 }
 
-function main(argv: readonly string[]): number {
+export interface CliOutput {
+  out: (line: string) => void;
+  err: (line: string) => void;
+  warn: (line: string) => void;
+}
+
+export function runCli(
+  argv: readonly string[],
+  output: CliOutput = {
+    out: (line) => console.log(line),
+    err: (line) => console.error(line),
+    warn: (line) => console.warn(line),
+  },
+): number {
   let parsed: CliArguments;
   try {
     parsed = parseCliArguments(argv);
   } catch (error) {
-    console.error(`verify-updater-manifest: ${(error as Error).message}`);
+    output.err(`verify-updater-manifest: ${(error as Error).message}`);
     return 2;
   }
   const path = resolve(parsed.manifestPath);
   if (!existsSync(path)) {
-    console.error(`verify-updater-manifest: ${path} does not exist`);
+    output.err(`verify-updater-manifest: ${path} does not exist`);
     return 2;
   }
   let manifest: unknown;
   try {
     manifest = readJson(path);
   } catch (error) {
-    console.error(`verify-updater-manifest: ${path} is not valid JSON: ${(error as Error).message}`);
+    output.err(`verify-updater-manifest: ${path} is not valid JSON: ${(error as Error).message}`);
     return 1;
   }
   const result = verifyUpdaterManifest(manifest, parsed.options);
-  for (const warning of result.warnings) console.warn(`warning: ${warning}`);
+  for (const warning of result.warnings) output.warn(`warning: ${warning}`);
   if (result.errors.length > 0) {
-    for (const error of result.errors) console.error(`error: ${error}`);
-    console.error(`latest.json is not publishable (${result.errors.length} problem(s))`);
+    for (const error of result.errors) output.err(`error: ${error}`);
+    output.err(`latest.json is not publishable (${result.errors.length} problem(s))`);
     return 1;
   }
-  console.log(
+  output.out(
     `latest.json ok: v${result.version} with ${result.platforms.length} platform(s): ${result.platforms.join(', ')}`,
   );
   return 0;
 }
 
 if (import.meta.main) {
-  process.exit(main(process.argv.slice(2)));
+  process.exitCode = runCli(process.argv.slice(2));
 }

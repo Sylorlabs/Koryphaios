@@ -62,13 +62,14 @@ test('isolated backend tests forward only explicitly selected iOS simulator devi
   expect(env.KORY_IOS_EVAL_NATIVE_TESTS).toBe('1');
   expect(env.KORY_IOS_EVAL_DEVELOPER_DIR).toBeUndefined();
   expect(() =>
-    createIsolatedTestEnvironment(
-      { KORY_IOS_EVAL_IPHONE_UDID: 'not-a-udid' },
-      join(root, 'home'),
-    ),
+    createIsolatedTestEnvironment({ KORY_IOS_EVAL_IPHONE_UDID: 'not-a-udid' }, join(root, 'home')),
   ).toThrow('KORY_IOS_EVAL_IPHONE_UDID must be a valid explicit simulator UDID');
-  expect(createIsolatedTestEnvironment({}, join(root, 'home')).KORY_IOS_EVAL_IPHONE_UDID).toBeUndefined();
-  expect(createIsolatedTestEnvironment({}, join(root, 'home')).KORY_IOS_EVAL_NATIVE_TESTS).toBeUndefined();
+  expect(
+    createIsolatedTestEnvironment({}, join(root, 'home')).KORY_IOS_EVAL_IPHONE_UDID,
+  ).toBeUndefined();
+  expect(
+    createIsolatedTestEnvironment({}, join(root, 'home')).KORY_IOS_EVAL_NATIVE_TESTS,
+  ).toBeUndefined();
   expect(() =>
     createIsolatedTestEnvironment({ KORY_IOS_EVAL_NATIVE_TESTS: 'yes' }, join(root, 'home')),
   ).toThrow('KORY_IOS_EVAL_NATIVE_TESTS must be 0 or 1');

@@ -15,7 +15,15 @@
  */
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -67,8 +75,10 @@ function refusedOnInteractiveDisplay(): string | null {
     return 'Desktop evaluation cannot verify that it owns the display';
   }
   if (owner && process.getuid?.() === Number(owner)) {
-    return 'Refusing to open windows on the interactive display: run in a separate login session ' +
-      'that does not hold the console, or in a virtual machine (KORY_SKILL_EVAL_DESKTOP_VM=1)';
+    return (
+      'Refusing to open windows on the interactive display: run in a separate login session ' +
+      'that does not hold the console, or in a virtual machine (KORY_SKILL_EVAL_DESKTOP_VM=1)'
+    );
   }
   return null;
 }
@@ -115,13 +125,17 @@ function osa(script: string): string {
  * AppleScript path only as a fallback when no helper is configured.
  */
 const defaultHelper = join(homedir(), '.koryphaios', 'bin', 'kory-macos-window-helper');
-const axHelper = process.env.KORY_TAURI_AX_HELPER?.trim() || (existsSync(defaultHelper) ? defaultHelper : '');
+const axHelper =
+  process.env.KORY_TAURI_AX_HELPER?.trim() || (existsSync(defaultHelper) ? defaultHelper : '');
 const helperReady = Boolean(axHelper) && existsSync(axHelper);
 const controlPath = join(root, '.kory-control.json');
 const statusPath = join(root, '.kory-status');
 
 function ax(request: Record<string, unknown>): Record<string, any> {
-  const out = execFileSync(axHelper, [], { input: `${JSON.stringify(request)}\n`, encoding: 'utf8' });
+  const out = execFileSync(axHelper, [], {
+    input: `${JSON.stringify(request)}\n`,
+    encoding: 'utf8',
+  });
   const answer = out.split('\n').filter(Boolean).pop();
   if (!answer) throw new Error('Native window helper returned nothing');
   return JSON.parse(answer) as Record<string, any>;
@@ -156,20 +170,29 @@ const desktopBounds = (): { x: number; y: number; w: number; h: number } => {
 
 function intersectsDesktop(window: ServerWindow): boolean {
   const desktop = desktopBounds();
-  return window.x + window.w > desktop.x && window.x < desktop.x + desktop.w &&
-    window.y + window.h > desktop.y && window.y < desktop.y + desktop.h;
+  return (
+    window.x + window.w > desktop.x &&
+    window.x < desktop.x + desktop.w &&
+    window.y + window.h > desktop.y &&
+    window.y < desktop.y + desktop.h
+  );
 }
 
 /** The application window, by the title it registers, with an area fallback. */
 function applicationWindow(): ServerWindow | undefined {
   const windows = serverWindows().filter((window) => window.h > 120 && window.w > 120);
-  return windows.find((window) => window.name === 'Native Workspace Fixture') ??
-    windows.sort((a, b) => b.w * b.h - a.w * a.h)[0];
+  return (
+    windows.find((window) => window.name === 'Native Workspace Fixture') ??
+    windows.sort((a, b) => b.w * b.h - a.w * a.h)[0]
+  );
 }
 
 /** Ask the fixture to act. The file content must change or the app sees no new request. */
 function requestAction(action: string, extra: Record<string, unknown> = {}): void {
-  writeFileSync(controlPath, `${JSON.stringify({ action, nonce: `${Date.now()}-${Math.random()}`, ...extra })}\n`);
+  writeFileSync(
+    controlPath,
+    `${JSON.stringify({ action, nonce: `${Date.now()}-${Math.random()}`, ...extra })}\n`,
+  );
 }
 
 function publishedStatus(): string {
@@ -196,8 +219,9 @@ function sendKey(name: string, extra: Record<string, unknown> = {}): void {
   if (helperReady) ax({ kind: 'key', name, pid, global: true, id: 'key', ...extra });
 }
 
-const appName = readdirSync(join(root, 'src-tauri', 'target', 'release', 'bundle', 'macos'))
-  .find((entry) => entry.endsWith('.app'));
+const appName = readdirSync(join(root, 'src-tauri', 'target', 'release', 'bundle', 'macos')).find(
+  (entry) => entry.endsWith('.app'),
+);
 if (!appName) throw new Error('No packaged macOS application found for the fixture');
 const appPath = join(root, 'src-tauri', 'target', 'release', 'bundle', 'macos', appName);
 const executableName = readdirSync(join(appPath, 'Contents', 'MacOS'))[0];
@@ -207,7 +231,12 @@ const processName = executableName;
 
 function bundleExecutable(bundle: string): string {
   const name = String(
-    execFileSync('plutil', ['-extract', 'CFBundleExecutable', 'raw', join(bundle, 'Contents', 'Info.plist')]),
+    execFileSync('plutil', [
+      '-extract',
+      'CFBundleExecutable',
+      'raw',
+      join(bundle, 'Contents', 'Info.plist'),
+    ]),
   ).trim();
   return join(bundle, 'Contents', 'MacOS', name);
 }
@@ -230,9 +259,14 @@ function launch(): number {
     try {
       process.kill(childPid, 0);
       if (helperReady) {
-        if (serverWindows(childPid).some((window) => window.h > 120 && window.w > 120)) return childPid;
+        if (serverWindows(childPid).some((window) => window.h > 120 && window.w > 120))
+          return childPid;
       } else {
-        const pid = Number(osa(`tell application "System Events" to get unix id of first process whose name is "${processName}" and background only is false`));
+        const pid = Number(
+          osa(
+            `tell application "System Events" to get unix id of first process whose name is "${processName}" and background only is false`,
+          ),
+        );
         if (Number.isSafeInteger(pid) && pid > 0) return pid;
       }
     } catch {
@@ -257,9 +291,7 @@ async function waitForWindow(): Promise<void> {
   // A bundle launched from a background process can stay hidden, and a hidden window is
   // not on screen and cannot be captured. Ask for the window before waiting for it.
   try {
-    osa(
-      `tell application "System Events" to tell process "${processName}" to set visible to true`,
-    );
+    osa(`tell application "System Events" to tell process "${processName}" to set visible to true`);
     osa(
       `tell application "System Events" to tell process "${processName}" to set frontmost to true`,
     );
@@ -295,9 +327,13 @@ function windowFrame(): { x: number; y: number; width: number; height: number } 
       for (let wait = 0; wait < 8; wait += 1) {
         execFileSync('sleep', ['0.4']);
         const candidate = applicationWindow();
-        if (candidate && intersectsDesktop(candidate)) return {
-          x: candidate.x, y: candidate.y, width: candidate.w, height: candidate.h,
-        };
+        if (candidate && intersectsDesktop(candidate))
+          return {
+            x: candidate.x,
+            y: candidate.y,
+            width: candidate.w,
+            height: candidate.h,
+          };
       }
       window = applicationWindow();
     }
@@ -362,7 +398,9 @@ function clickButton(label: string): void {
     requestAction(action);
     return;
   }
-  osa(`tell application "System Events" to tell process "${processName}" to click ${buttonPath(label)}`);
+  osa(
+    `tell application "System Events" to tell process "${processName}" to click ${buttonPath(label)}`,
+  );
 }
 
 function statusText(): string {
@@ -370,14 +408,20 @@ function statusText(): string {
   if (published) return published;
   const texts = axContents()
     .filter((line) => line.startsWith('static text '))
-    .map((line) => line.slice('static text '.length).replace(/ of .*$/u, '').trim())
+    .map((line) =>
+      line
+        .slice('static text '.length)
+        .replace(/ of .*$/u, '')
+        .trim(),
+    )
     .filter(Boolean);
   return texts.join(' | ');
 }
 
 function capturePixels(target: string): { sha256: string; width: number; height: number } {
   const frame = windowFrame();
-  const appCapture = process.env.KORY_SCREEN_CAPTURE_BIN?.trim() ||
+  const appCapture =
+    process.env.KORY_SCREEN_CAPTURE_BIN?.trim() ||
     join(import.meta.dir, '..', 'desktop', 'src-tauri', 'target', 'release', 'Koryphaios');
   if (existsSync(appCapture)) {
     // Computer use belongs to the Koryphaios application, so the capture runs as that
@@ -407,8 +451,10 @@ function sheetCount(): number {
   if (helperReady) {
     // The system folder picker is a sheet with its own window server entry, and it is the
     // only window the app owns that is named "Open" or that is large and untitled.
-    return serverWindows().filter((window) =>
-      window.name === 'Open' || (window.name === '' && window.w >= 700 && window.h >= 350)).length;
+    return serverWindows().filter(
+      (window) =>
+        window.name === 'Open' || (window.name === '' && window.w >= 700 && window.h >= 350),
+    ).length;
   }
   try {
     const count = osa(
@@ -471,7 +517,12 @@ function cancelDialog(): void {
 /** The narrow "go to folder" sheet, which has no title of its own. */
 function goToSheet(): ServerWindow | undefined {
   return serverWindows().find(
-    (window) => window.name === '' && window.w >= 380 && window.w <= 620 && window.h >= 110 && window.h <= 320,
+    (window) =>
+      window.name === '' &&
+      window.w >= 380 &&
+      window.w <= 620 &&
+      window.h >= 110 &&
+      window.h <= 320,
   );
 }
 
@@ -494,11 +545,25 @@ function acceptFolder(path: string): void {
         execFileSync('sleep', ['0.3']);
       }
     }
-    ax({ kind: 'key', name: 'g', code: 5, command: true, shift: true, global: true, pid, id: 'goto' });
+    ax({
+      kind: 'key',
+      name: 'g',
+      code: 5,
+      command: true,
+      shift: true,
+      global: true,
+      pid,
+      id: 'goto',
+    });
     execFileSync('sleep', ['1']);
     const sheet = goToSheet();
     if (sheet) {
-      ax({ kind: 'click', x: Math.round(sheet.x + sheet.w / 2), y: Math.round(sheet.y + sheet.h * 0.38), id: 'field' });
+      ax({
+        kind: 'click',
+        x: Math.round(sheet.x + sheet.w / 2),
+        y: Math.round(sheet.y + sheet.h * 0.38),
+        id: 'field',
+      });
       execFileSync('sleep', ['0.6']);
     }
     ax({ kind: 'type', text: path, pid, id: 'path' });
@@ -514,7 +579,9 @@ function acceptFolder(path: string): void {
   }
   osa(`tell application "System Events" to keystroke "g" using {command down, shift down}`);
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    const contents = osa(`tell application "System Events" to tell process "${processName}" to get entire contents of window 1`);
+    const contents = osa(
+      `tell application "System Events" to tell process "${processName}" to get entire contents of window 1`,
+    );
     if (/sheet|text field/iu.test(contents)) break;
     execFileSync('sleep', ['0.25']);
   }
@@ -528,34 +595,52 @@ function acceptFolder(path: string): void {
 let pid = 0;
 try {
   if (ScenarioGuard(scenario)) throw new Error(`Unsupported scenario ${scenario}`);
-  const version = /"version":\s*"([^"]+)"/u.exec(readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'))?.[1] ?? '';
+  const version =
+    /"version":\s*"([^"]+)"/u.exec(
+      readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'),
+    )?.[1] ?? '';
   const tauriVersion = /^2\./u.test(version) ? version : '2.0.0';
 
   pid = launch();
   await waitForWindow();
   const frame = windowFrame();
   event('window:created');
-  note('tauri-packaged-runtime', existsSync(executablePath),
-    `Launched the packaged bundle ${appName} as pid ${pid}, window ${frame.width}x${frame.height}`);
+  note(
+    'tauri-packaged-runtime',
+    existsSync(executablePath),
+    `Launched the packaged bundle ${appName} as pid ${pid}, window ${frame.width}x${frame.height}`,
+  );
 
   const firstCapture = capturePixels(capturePath);
   event('renderer:capture');
-  note('native-renderer-and-capture', firstCapture.width > 100 && firstCapture.height > 100,
-    `Captured ${firstCapture.width}x${firstCapture.height} pixels from the window server for the live native window`);
-  note('native-window-lifecycle', frame.width > 100 && frame.height > 100,
-    `Window server reported a live window titled "Native Workspace Fixture" for pid ${pid}`);
+  note(
+    'native-renderer-and-capture',
+    firstCapture.width > 100 && firstCapture.height > 100,
+    `Captured ${firstCapture.width}x${firstCapture.height} pixels from the window server for the live native window`,
+  );
+  note(
+    'native-window-lifecycle',
+    frame.width > 100 && frame.height > 100,
+    `Window server reported a live window titled "Native Workspace Fixture" for pid ${pid}`,
+  );
 
   await chooseFolder(root);
   event('dialog:opened');
-  note('native-folder-dialog-opened', dialogOpen(),
-    'The operating system folder picker opened as a native sheet on the app window');
+  note(
+    'native-folder-dialog-opened',
+    dialogOpen(),
+    'The operating system folder picker opened as a native sheet on the app window',
+  );
 
   cancelDialog();
   event('dialog:cancelled');
   await sleep(600);
   const cancelled = statusText();
-  note('native-dialog-cancel-is-none', /No folder selected/u.test(cancelled),
-    `After a native cancel the status region read ${JSON.stringify(cancelled.slice(0, 120))}`);
+  note(
+    'native-dialog-cancel-is-none',
+    /No folder selected/u.test(cancelled),
+    `After a native cancel the status region read ${JSON.stringify(cancelled.slice(0, 120))}`,
+  );
 
   const insidePath = join(root, 'safe-workspace', 'inside');
   await chooseFolder(insidePath);
@@ -563,14 +648,20 @@ try {
   await sleep(1200);
   const chosen = statusText();
   event('dialog:accepted');
-  note('native-folder-selection', chosen.includes('inside'),
-    `After accepting the folder the status region read ${JSON.stringify(chosen.slice(0, 160))}`);
+  note(
+    'native-folder-selection',
+    chosen.includes('inside'),
+    `After accepting the folder the status region read ${JSON.stringify(chosen.slice(0, 160))}`,
+  );
 
   clickButton('Read workspace');
   await sleep(900);
   const readInside = statusText();
-  note('allowed-command-inside-root', /contained workspace fixture/u.test(readInside),
-    `Reading the selected workspace returned ${JSON.stringify(readInside.slice(0, 160))}`);
+  note(
+    'allowed-command-inside-root',
+    /contained workspace fixture/u.test(readInside),
+    `Reading the selected workspace returned ${JSON.stringify(readInside.slice(0, 160))}`,
+  );
 
   const link = join(root, 'safe-workspace', 'selected-link');
   await chooseFolder(link);
@@ -583,20 +674,29 @@ try {
   clickButton('Read workspace');
   await sleep(900);
   const readSwapped = statusText();
-  note('symlink-swap-at-use-denied', !/ESCAPED WORKSPACE/u.test(readSwapped),
-    `After retargeting the selected link outside the workspace the read returned ${JSON.stringify(readSwapped.slice(0, 160))}`);
+  note(
+    'symlink-swap-at-use-denied',
+    !/ESCAPED WORKSPACE/u.test(readSwapped),
+    `After retargeting the selected link outside the workspace the read returned ${JSON.stringify(readSwapped.slice(0, 160))}`,
+  );
   execFileSync('rm', ['-f', link]);
   renameSync(`${link}.orig`, link);
 
-  const capabilities = readFileSync(join(root, 'src-tauri', 'capabilities', 'default.json'), 'utf8');
+  const capabilities = readFileSync(
+    join(root, 'src-tauri', 'capabilities', 'default.json'),
+    'utf8',
+  );
   const handler = readFileSync(join(root, 'src-tauri', 'src', 'lib.rs'), 'utf8');
   const exposed = [...handler.matchAll(/#\[tauri::command\][\s\S]*?fn\s+([a-z_]+)/gu)]
     .map((item) => item[1]!)
     // The status channel belongs to the verification harness, not to the product surface.
     .filter((name) => !name.startsWith('kory_'));
   const denies = !/fs:allow|shell:allow|process:allow/u.test(capabilities);
-  note('unexposed-command-denied', denies && exposed.length === 2,
-    `Packaged capability set grants ${JSON.stringify(capabilities.match(/"[a-z]+:[a-z-]+"/gu) ?? [])} and the native handler exposes only ${JSON.stringify(exposed)}; no filesystem, shell or process permission is reachable from the web view`);
+  note(
+    'unexposed-command-denied',
+    denies && exposed.length === 2,
+    `Packaged capability set grants ${JSON.stringify(capabilities.match(/"[a-z]+:[a-z-]+"/gu) ?? [])} and the native handler exposes only ${JSON.stringify(exposed)}; no filesystem, shell or process permission is reachable from the web view`,
+  );
 
   quitApp();
   event('app:quit');
@@ -605,15 +705,21 @@ try {
   await waitForWindow();
   event('window:reopened');
   const reopened = statusText();
-  note('reopen-without-stale-state', !/contained workspace fixture/u.test(reopened) || reopened.length > 0,
-    `A relaunched native process rendered a fresh window; status region read ${JSON.stringify(reopened.slice(0, 160))}`);
+  note(
+    'reopen-without-stale-state',
+    !/contained workspace fixture/u.test(reopened) || reopened.length > 0,
+    `A relaunched native process rendered a fresh window; status region read ${JSON.stringify(reopened.slice(0, 160))}`,
+  );
   event('window:closed');
   event('app:restarted');
   clickButton('Read workspace');
   await sleep(900);
   const restored = statusText();
-  note('restart-restores-canonical-state', !/ESCAPED WORKSPACE/u.test(restored),
-    `After a full native restart the read returned ${JSON.stringify(restored.slice(0, 160))}`);
+  note(
+    'restart-restores-canonical-state',
+    !/ESCAPED WORKSPACE/u.test(restored),
+    `After a full native restart the read returned ${JSON.stringify(restored.slice(0, 160))}`,
+  );
 
   quitApp();
   event('app:quit');

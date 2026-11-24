@@ -16,10 +16,10 @@ const mocks = vi.hoisted(() => ({
       toolName: string;
       action: string;
       description: string;
-       path?: string;
-       agentName?: string;
-       command?: string;
-       createdAt: number;
+      path?: string;
+      agentName?: string;
+      command?: string;
+      createdAt: number;
     }>,
     respondToPermission: vi.fn(),
   },
@@ -94,7 +94,11 @@ describe('PermissionDialog', () => {
       permission('permission-1'),
       permission('permission-2', 'read_file'),
       permission('permission-3', 'write_file'),
-      { ...permission('permission-4', 'bash'), agentName: 'Backend worker', command: 'bun test backend' },
+      {
+        ...permission('permission-4', 'bash'),
+        agentName: 'Backend worker',
+        command: 'bun test backend',
+      },
     ];
     const { container } = render(PermissionDialog);
 

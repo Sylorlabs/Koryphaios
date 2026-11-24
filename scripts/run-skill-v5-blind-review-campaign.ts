@@ -14,9 +14,17 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { canonicalizePath, findExecutableOnPath, looksLikePath } from '../backend/src/runtime/platform';
+import {
+  canonicalizePath,
+  findExecutableOnPath,
+  looksLikePath,
+} from '../backend/src/runtime/platform';
 import { createNativeArchiveDirectory } from './native-reviewer-archive';
-import { archiveNativeStageEvidence, verifyNativeStageEvidence, type NativeStageEvidence } from './native-reviewer-stage-evidence';
+import {
+  archiveNativeStageEvidence,
+  verifyNativeStageEvidence,
+  type NativeStageEvidence,
+} from './native-reviewer-stage-evidence';
 import { NATIVE_MAC_STAGE_MODE } from './native-reviewer-sandbox';
 import { strictJson, validateAdjudication } from './reviewer-json';
 
@@ -40,12 +48,16 @@ const reviewerAdapter =
   'chatgpt-web';
 // The adapter runs from a private review directory. Resolve explicit relative
 // paths against the project before changing cwd; bare commands still use PATH.
-const reviewerCommand = reviewerAdapter === 'chatgpt-web'
-  ? 'codex'
-  : looksLikePath(reviewerAdapter)
-    ? resolve(projectRoot, reviewerAdapter)
-    : reviewerAdapter;
-const nativeReviewerAdapter = ['kory-native-stateless-reviewer', 'kory-native-stateless-reviewer.ts'].includes(basename(reviewerAdapter));
+const reviewerCommand =
+  reviewerAdapter === 'chatgpt-web'
+    ? 'codex'
+    : looksLikePath(reviewerAdapter)
+      ? resolve(projectRoot, reviewerAdapter)
+      : reviewerAdapter;
+const nativeReviewerAdapter = [
+  'kory-native-stateless-reviewer',
+  'kory-native-stateless-reviewer.ts',
+].includes(basename(reviewerAdapter));
 const reviewerProvider =
   process.env.KORY_SKILL_BLIND_REVIEWER_PROVIDER?.trim() ||
   (reviewerAdapter === 'chatgpt-web' ? 'chatgpt-web' : 'independent-agent');
@@ -417,7 +429,9 @@ async function inspectReviewerAdapter(): Promise<{
   return inspectChatGptWebReviewer();
 }
 
-function canStageReviewerAttempt(status: Awaited<ReturnType<typeof inspectReviewerAdapter>>): boolean {
+function canStageReviewerAttempt(
+  status: Awaited<ReturnType<typeof inspectReviewerAdapter>>,
+): boolean {
   return status.canAttempt || status.stageOnlyAttemptAllowed === true;
 }
 
@@ -501,7 +515,10 @@ function sealAssignment(assignment: PreparedAssignment, runRoot: string): Sealed
   // Feed the reviewer these verified bytes. Preserve a protected local snapshot
   // so a failed attempt can be audited without relying on a mutable pending file.
   const snapshotPath = join(runRoot, 'review-task.prompt.txt');
-  writeFileSync(snapshotPath, promptBytes, { flag: 'wx', mode: nativeReviewerAdapter ? 0o600 : 0o400 });
+  writeFileSync(snapshotPath, promptBytes, {
+    flag: 'wx',
+    mode: nativeReviewerAdapter ? 0o600 : 0o400,
+  });
   return { prompt, privatePath, privateSha256: sha256(privateBytes), snapshotPath };
 }
 
@@ -601,7 +618,9 @@ interface GenericReviewerResponse {
 function verifiedGenericReviewer(stdout: string): GenericReviewerResponse {
   let response: GenericReviewerResponse;
   try {
-    response = (nativeReviewerAdapter ? strictJson(stdout) : JSON.parse(stdout)) as GenericReviewerResponse;
+    response = (
+      nativeReviewerAdapter ? strictJson(stdout) : JSON.parse(stdout)
+    ) as GenericReviewerResponse;
   } catch {
     throw new Error('Generic reviewer adapter returned invalid JSON');
   }
@@ -628,8 +647,7 @@ function verifiedGenericReviewer(stdout: string): GenericReviewerResponse {
         !event ||
         typeof event !== 'object' ||
         event.reviewerId !== response.reviewerId ||
-        (event.type === 'review.completed' &&
-          event.outputSha256 !== sha256(response.output)),
+        (event.type === 'review.completed' && event.outputSha256 !== sha256(response.output)),
     )
   ) {
     throw new Error(
@@ -787,14 +805,27 @@ function verifyNativeFinalization(result: ReviewResult): void {
     throw new Error('Native reviewer stage is missing fresh archived evidence');
   }
   const envelope = strictJson(readFileSync(result.envelopePath, 'utf8')) as {
-    nativeStageEvidence: unknown; reviews: Array<{ output: string }>; reviewer: { agentId: string; model: string };
+    nativeStageEvidence: unknown;
+    reviews: Array<{ output: string }>;
+    reviewer: { agentId: string; model: string };
   };
-  if (envelope.reviewer.agentId !== result.reviewerThread || envelope.reviewer.model !== reviewerModel ||
-    envelope.reviews.length !== 1 || JSON.stringify(envelope.nativeStageEvidence) !== JSON.stringify(result.nativeStageEvidence)) {
+  if (
+    envelope.reviewer.agentId !== result.reviewerThread ||
+    envelope.reviewer.model !== reviewerModel ||
+    envelope.reviews.length !== 1 ||
+    JSON.stringify(envelope.nativeStageEvidence) !== JSON.stringify(result.nativeStageEvidence)
+  ) {
     throw new Error('Native reviewer import envelope changed its completion binding');
   }
-  verifyNativeStageEvidence(envelope.nativeStageEvidence, dirname(result.nativeStageEvidence.rawEvents.path),
-    result.seal.prompt, reviewerModel, canonicalizePath(projectRoot), envelope.reviews[0]!.output, result.reviewerThread);
+  verifyNativeStageEvidence(
+    envelope.nativeStageEvidence,
+    dirname(result.nativeStageEvidence.rawEvents.path),
+    result.seal.prompt,
+    reviewerModel,
+    canonicalizePath(projectRoot),
+    envelope.reviews[0]!.output,
+    result.reviewerThread,
+  );
 }
 
 async function stageReviewOnly(result: ReviewResult): Promise<void> {
@@ -853,14 +884,18 @@ async function stageReviewOnly(result: ReviewResult): Promise<void> {
         scenarioId: result.assignment.scenarioId,
         pairId: result.assignment.pairId,
         reviewerThread,
-        reviewerIdentitySource:
-          nativeReviewerAdapter ? 'host-observed-native-cli-session-id' :
-          reviewerAdapter === 'chatgpt-web' ? 'codex-jsonl-thread.started' : 'external-reviewer-adapter-output',
+        reviewerIdentitySource: nativeReviewerAdapter
+          ? 'host-observed-native-cli-session-id'
+          : reviewerAdapter === 'chatgpt-web'
+            ? 'codex-jsonl-thread.started'
+            : 'external-reviewer-adapter-output',
         reviewerAdapter,
         reviewerModel,
-        reviewerModelSource:
-          nativeReviewerAdapter ? 'native-cli-empty-tool-init-model' :
-          reviewerAdapter === 'chatgpt-web' ? 'codex-cli-model-selection-and-matching-local-route' : 'configured-provider-model-metadata',
+        reviewerModelSource: nativeReviewerAdapter
+          ? 'native-cli-empty-tool-init-model'
+          : reviewerAdapter === 'chatgpt-web'
+            ? 'codex-cli-model-selection-and-matching-local-route'
+            : 'configured-provider-model-metadata',
         ...(result.nativeStageEvidence ? { nativeStageEvidence: result.nativeStageEvidence } : {}),
         reviewerBaseUrl,
         promptSha256: result.assignment.promptSha256,
@@ -937,7 +972,9 @@ async function assertAssignmentStillEligible(assignment: PreparedAssignment): Pr
 }
 
 async function reviewAssignment(assignment: PreparedAssignment): Promise<ReviewResult> {
-  const runRoot = canonicalizePath(mkdtempSync(join(canonicalizePath(tmpdir()), 'kory-v5-blind-review-')));
+  const runRoot = canonicalizePath(
+    mkdtempSync(join(canonicalizePath(tmpdir()), 'kory-v5-blind-review-')),
+  );
   let attempts = 0;
   let stopCampaign = false;
   try {
@@ -983,7 +1020,9 @@ async function reviewAssignment(assignment: PreparedAssignment): Promise<ReviewR
       const resultPath = join(runRoot, `result-${String(attempt)}.txt`);
       rmSync(resultPath, { force: true });
       const genericReviewer = reviewerAdapter !== 'chatgpt-web';
-      const archiveDirectory = nativeReviewerAdapter ? createNativeArchiveDirectory(runRoot) : undefined;
+      const archiveDirectory = nativeReviewerAdapter
+        ? createNativeArchiveDirectory(runRoot)
+        : undefined;
       const reviewer = await runCommand({
         command: reviewerCommand,
         args: genericReviewer
@@ -1011,18 +1050,23 @@ async function reviewAssignment(assignment: PreparedAssignment): Promise<ReviewR
         stdin: prompt,
         timeoutMs: reviewerWallClockMs,
         killProcessGroup: true,
-        ...(archiveDirectory ? { env: {
-          ...process.env,
-          KORY_NATIVE_REVIEW_ARCHIVE_DIR: archiveDirectory,
-          KORY_NATIVE_REVIEW_PENDING_ROOT: canonicalizePath(dirname(assignment.promptPath)),
-          KORY_NATIVE_REVIEW_STAGE_SANDBOX: NATIVE_MAC_STAGE_MODE,
-          KORY_NATIVE_REVIEW_MODEL: reviewerModel,
-          KORY_NATIVE_REVIEW_TIMEOUT_MS: String(Math.min(reviewerWallClockMs, 550_000)),
-        } } : {}),
+        ...(archiveDirectory
+          ? {
+              env: {
+                ...process.env,
+                KORY_NATIVE_REVIEW_ARCHIVE_DIR: archiveDirectory,
+                KORY_NATIVE_REVIEW_PENDING_ROOT: canonicalizePath(dirname(assignment.promptPath)),
+                KORY_NATIVE_REVIEW_STAGE_SANDBOX: NATIVE_MAC_STAGE_MODE,
+                KORY_NATIVE_REVIEW_MODEL: reviewerModel,
+                KORY_NATIVE_REVIEW_TIMEOUT_MS: String(Math.min(reviewerWallClockMs, 550_000)),
+              },
+            }
+          : {}),
       });
       if (reviewer.code !== 0) {
-        const detail = nativeReviewerAdapter ? 'Native reviewer diagnostics redacted; no completed archived stage.' :
-          `${reviewer.stderr}\n${reviewer.stdout}`.slice(-6000);
+        const detail = nativeReviewerAdapter
+          ? 'Native reviewer diagnostics redacted; no completed archived stage.'
+          : `${reviewer.stderr}\n${reviewer.stdout}`.slice(-6000);
         lastFailure = reviewer.timedOut
           ? `Reviewer exceeded ${String(reviewerWallClockMs)}ms wall-clock budget: ${detail}`
           : `Reviewer process failed: ${detail}`;
@@ -1049,8 +1093,13 @@ async function reviewAssignment(assignment: PreparedAssignment): Promise<ReviewR
       if (genericReviewer) {
         const genericResponse = verifiedGenericReviewer(reviewer.stdout.trim());
         if (archiveDirectory) {
-          nativeStageEvidence = archiveNativeStageEvidence(genericResponse, archiveDirectory, prompt,
-            reviewerModel, canonicalizePath(projectRoot));
+          nativeStageEvidence = archiveNativeStageEvidence(
+            genericResponse,
+            archiveDirectory,
+            prompt,
+            reviewerModel,
+            canonicalizePath(projectRoot),
+          );
         }
         writeFileSync(resultPath, genericResponse.output, { flag: 'wx', mode: 0o600 });
         reviewerThread = genericResponse.reviewerId;
@@ -1089,13 +1138,26 @@ async function reviewAssignment(assignment: PreparedAssignment): Promise<ReviewR
         if (nativeReviewerAdapter) validateAdjudication(attemptOutput);
         else validateReviewerAdjudication(attemptOutput);
         if (nativeStageEvidence) {
-          verifyNativeStageEvidence(nativeStageEvidence, archiveDirectory!, prompt, reviewerModel,
-            canonicalizePath(projectRoot), attemptOutput, reviewerThread);
+          verifyNativeStageEvidence(
+            nativeStageEvidence,
+            archiveDirectory!,
+            prompt,
+            reviewerModel,
+            canonicalizePath(projectRoot),
+            attemptOutput,
+            reviewerThread,
+          );
           reviewerEventsPath = nativeStageEvidence.hostReceipt.path;
         } else {
-          reviewerEventsPath = join(runRoot, genericReviewer ? 'reviewer-events.json' : 'reviewer-events.jsonl');
-          writeFileSync(reviewerEventsPath, genericReviewer ? `${genericReviewerEvidence}\n` : reviewer.stdout,
-            { flag: 'wx', mode: 0o600 });
+          reviewerEventsPath = join(
+            runRoot,
+            genericReviewer ? 'reviewer-events.json' : 'reviewer-events.jsonl',
+          );
+          writeFileSync(
+            reviewerEventsPath,
+            genericReviewer ? `${genericReviewerEvidence}\n` : reviewer.stdout,
+            { flag: 'wx', mode: 0o600 },
+          );
         }
         output = attemptOutput;
       } catch (error) {

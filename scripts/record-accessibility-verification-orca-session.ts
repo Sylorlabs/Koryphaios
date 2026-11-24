@@ -67,7 +67,9 @@ for step in ${STEPS.map((step) => step.name).join(' ')}; do
 ${STEPS.map((step) => {
   const commands = step.keys
     .map((key) =>
-      key.startsWith('sleep:') ? `      sleep ${key.slice('sleep:'.length)}` : `      xdotool key ${key}`,
+      key.startsWith('sleep:')
+        ? `      sleep ${key.slice('sleep:'.length)}`
+        : `      xdotool key ${key}`,
     )
     .join('\n');
   return `    ${step.name})\n${commands}\n      ;;`;
@@ -84,7 +86,18 @@ cat /tmp/spoken.txt
 
 const result = spawnSync(
   'docker',
-  ['run', '--rm', '-v', `${runtimeDir}:/work`, '-w', '/work', 'kory-at-linux', 'bash', '-lc', driver],
+  [
+    'run',
+    '--rm',
+    '-v',
+    `${runtimeDir}:/work`,
+    '-w',
+    '/work',
+    'kory-at-linux',
+    'bash',
+    '-lc',
+    driver,
+  ],
   { maxBuffer: 32 * 1024 * 1024 },
 );
 
@@ -120,9 +133,13 @@ for (let index = 1; index < sections.length; index += 2) {
   for (const line of lines) spoken.push({ step: name, utterance: line });
 }
 
-const version = spawnSync('docker', ['run', '--rm', 'kory-at-linux', 'bash', '-lc', 'orca --version'], {
-  encoding: 'utf8',
-});
+const version = spawnSync(
+  'docker',
+  ['run', '--rm', 'kory-at-linux', 'bash', '-lc', 'orca --version'],
+  {
+    encoding: 'utf8',
+  },
+);
 const orcaVersion = (version.stdout ?? '').trim().split('\n').at(-1) ?? 'unknown';
 
 const chromiumVersion = spawnSync(
@@ -144,11 +161,19 @@ const session = {
   steps: STEPS.map((step) => ({ name: step.name, keys: step.keys })),
 };
 
-mkdirSync(join(projectRoot, 'outputs/skill-library-finish-plan/at-runtime/captures'), { recursive: true });
+mkdirSync(join(projectRoot, 'outputs/skill-library-finish-plan/at-runtime/captures'), {
+  recursive: true,
+});
 writeFileSync(outputPath, `${JSON.stringify(session, null, 2)}\n`, { mode: 0o600 });
 writeFileSync(
   join(projectRoot, 'outputs/skill-library-finish-plan/at-runtime/captures/transcript.json'),
   `${JSON.stringify(session, null, 2)}\n`,
 );
-console.log(JSON.stringify({ screenReader: session.screenReader, steps: Object.keys(byStep).length, utterances: spoken.length }));
+console.log(
+  JSON.stringify({
+    screenReader: session.screenReader,
+    steps: Object.keys(byStep).length,
+    utterances: spoken.length,
+  }),
+);
 console.log(JSON.stringify(spoken.slice(0, 6), null, 1));

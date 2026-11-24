@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  buildCacheDiagnosticsNotice,
-  normalizeCacheDiagnostics,
-} from './cache-diagnostics';
+import { buildCacheDiagnosticsNotice, normalizeCacheDiagnostics } from './cache-diagnostics';
 
 describe('normalizeCacheDiagnostics', () => {
   it('rejects payloads that are not objects', () => {

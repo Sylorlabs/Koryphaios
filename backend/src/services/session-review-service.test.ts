@@ -15,7 +15,14 @@ const { renderPullRequestFeedbackMessage } = await import('./pull-request-status
 const { fenceFor, boundLines } = await import('./steering-message');
 const { parsePullRequestStatus } = await import('../kory/github-pull-request-status');
 const { readFileSync } = await import('node:fs');
-const FIXTURE = join(import.meta.dir, '..', 'kory', 'fixtures', 'github-pr-status', 'open-failing.json');
+const FIXTURE = join(
+  import.meta.dir,
+  '..',
+  'kory',
+  'fixtures',
+  'github-pr-status',
+  'open-failing.json',
+);
 
 const repo = join(root, 'repo');
 
@@ -77,7 +84,9 @@ describe('renderReviewCommentMessage', () => {
   });
 
   test('says when the commented line is no longer in the diff', async () => {
-    const message = await renderReviewCommentMessage(repo, 'b', [comment({ line: 200, hunkHeader: undefined })]);
+    const message = await renderReviewCommentMessage(repo, 'b', [
+      comment({ line: 200, hunkHeader: undefined }),
+    ]);
     expect(message).toContain('(hunk no longer in the diff)');
   });
 
@@ -102,10 +111,14 @@ describe('renderPullRequestFeedbackMessage', () => {
       batchId: 'pr-1',
       status,
       failing,
-      logs: new Map([['7710001', { text: 'FAIL src/x.test.ts\nexpected 1 got 2', truncated: true }]]),
+      logs: new Map([
+        ['7710001', { text: 'FAIL src/x.test.ts\nexpected 1 got 2', truncated: true }],
+      ]),
       reviews: status.reviews.filter((review) => review.state === 'changes_requested'),
     });
-    expect(message).toContain('Pull request #412 feedback (batch pr-1): 1 failing check, 1 review item');
+    expect(message).toContain(
+      'Pull request #412 feedback (batch pr-1): 1 failing check, 1 review item',
+    );
     expect(message).toContain('unit (CI): failure');
     expect(message).toContain('expected 1 got 2');
     expect(message).toContain('tail only; earlier output omitted');
@@ -115,7 +128,9 @@ describe('renderPullRequestFeedbackMessage', () => {
   });
 
   test('reports a log that could not be read and a check without a run', () => {
-    const failing = status.checks.filter((check) => check.state === 'error' || check.state === 'timed_out');
+    const failing = status.checks.filter(
+      (check) => check.state === 'error' || check.state === 'timed_out',
+    );
     const message = renderPullRequestFeedbackMessage({
       batchId: 'pr-2',
       status,

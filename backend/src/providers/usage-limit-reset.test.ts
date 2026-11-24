@@ -23,7 +23,9 @@ describe('reset text parsing', () => {
   });
 
   test('24-hour clock and meridiem edge cases', () => {
-    expect(parseResetFromText('resets at 15:40', NOW)).toBe(new Date(2026, 10, 24, 15, 40).getTime());
+    expect(parseResetFromText('resets at 15:40', NOW)).toBe(
+      new Date(2026, 10, 24, 15, 40).getTime(),
+    );
     expect(parseResetFromText('resets at 12:05 am', NOW)).toBe(
       new Date(2026, 10, 25, 0, 5).getTime(),
     );
@@ -33,9 +35,7 @@ describe('reset text parsing', () => {
   });
 
   test('relative durations are added to now', () => {
-    expect(parseResetFromText('Try again in 2 hours 15 minutes.', NOW)).toBe(
-      NOW + 135 * MINUTE,
-    );
+    expect(parseResetFromText('Try again in 2 hours 15 minutes.', NOW)).toBe(NOW + 135 * MINUTE);
     expect(parseResetFromText('retry in 45 minutes', NOW)).toBe(NOW + 45 * MINUTE);
   });
 

@@ -203,12 +203,25 @@ describe('shortcut store voice binding', () => {
     const { setPlatformForTesting } = await import('$lib/utils/platform');
     setPlatformForTesting(platform);
     try {
-      expect(store.matches('voice_mode', new KeyboardEvent('keydown', {
-        key: ' ', ctrlKey: true,
-      }))).toBe(true);
-      expect(store.matches('voice_mode', new KeyboardEvent('keydown', {
-        key: ' ', ctrlKey: false, metaKey: true,
-      }))).toBe(false);
+      expect(
+        store.matches(
+          'voice_mode',
+          new KeyboardEvent('keydown', {
+            key: ' ',
+            ctrlKey: true,
+          }),
+        ),
+      ).toBe(true);
+      expect(
+        store.matches(
+          'voice_mode',
+          new KeyboardEvent('keydown', {
+            key: ' ',
+            ctrlKey: false,
+            metaKey: true,
+          }),
+        ),
+      ).toBe(false);
     } finally {
       setPlatformForTesting(null);
     }
@@ -258,7 +271,9 @@ describe('voice conductor binding', () => {
 
   it('keeps a rebound conductor chord when the server copy, which does not know it, is applied', async () => {
     const store = await loadStore();
-    store.list = store.list.map((s) => (s.id === 'voice_conductor' ? { ...s, keys: ['Mod', 'Alt', 'J'] } : s));
+    store.list = store.list.map((s) =>
+      s.id === 'voice_conductor' ? { ...s, keys: ['Mod', 'Alt', 'J'] } : s,
+    );
     store.applyRemote([
       { id: 'send', keys: ['Mod', 'Enter'], action: 'Send message', description: 'Submit task' },
     ]);

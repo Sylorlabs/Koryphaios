@@ -303,9 +303,10 @@ describe('KoryManager Orchestration', () => {
     // The manager branches on the structured outcome rather than the summary
     // text, so the stub must target the method it actually calls. The expected
     // routed model is unchanged.
-    manager['workerPipeline']['runWorkerPipelineDetailed'] = mock(
-      async (...args: any[]) => ({ success: true, text: `worker:${args[2]}` }),
-    );
+    manager['workerPipeline']['runWorkerPipelineDetailed'] = mock(async (...args: any[]) => ({
+      success: true,
+      text: `worker:${args[2]}`,
+    }));
     const result = await manager.runWorkerPipeline(
       'session-independent',
       'Implement a material feature',
@@ -366,7 +367,9 @@ describe('KoryManager Orchestration', () => {
       model: 'controlled-manager',
       reasoningLevel: 'high',
     });
-    expect(sessionRows.get('session-controls')?.agentOverrides?.managerControls?.[managerId]).toMatchObject({
+    expect(
+      sessionRows.get('session-controls')?.agentOverrides?.managerControls?.[managerId],
+    ).toMatchObject({
       model: 'controlled-manager',
       provider: 'openai',
       reasoningLevel: 'high',
@@ -609,7 +612,9 @@ describe('KoryManager Orchestration', () => {
       taskContract,
       skillSelection: { pins: ['critic-auto-selection'] },
     });
-    expect(managerAuto.manifest.skills.map((skill) => skill.name)).toContain('critic-auto-selection');
+    expect(managerAuto.manifest.skills.map((skill) => skill.name)).toContain(
+      'critic-auto-selection',
+    );
     expect(managerAuto.manifest.skills.map((skill) => skill.name)).not.toContain('critic-review');
 
     const managerWithoutAuto = compilePrompt({
@@ -618,7 +623,9 @@ describe('KoryManager Orchestration', () => {
       workingDirectory: testWorkDir,
       taskContract,
     });
-    expect(managerWithoutAuto.manifest.skills.map((skill) => skill.name)).not.toContain('critic-auto-selection');
+    expect(managerWithoutAuto.manifest.skills.map((skill) => skill.name)).not.toContain(
+      'critic-auto-selection',
+    );
 
     const criticSkills = critic.manifest.skills.map((skill) => skill.name);
     expect(criticSkills).toContain('verification');
@@ -762,9 +769,7 @@ describe('worktree guidance in the delegation prompt', () => {
       ...base,
       delegation: { ...delegation, worktreeMode: 'always' },
     });
-    expect(always.systemPrompt).toContain(
-      'The user set Worktree to Always for this chat',
-    );
+    expect(always.systemPrompt).toContain('The user set Worktree to Always for this chat');
     const never = compilePrompt({
       ...base,
       delegation: { ...delegation, worktreeMode: 'never' },

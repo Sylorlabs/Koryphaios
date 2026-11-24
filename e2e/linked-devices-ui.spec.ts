@@ -89,35 +89,90 @@ test('new-chat folders fit desktop and mobile layouts and mobile pairing renders
 test('linked chats use the shared feed and composer and route send and stop to the chosen desktop', async ({
   authenticatedPage: page,
 }) => {
-  const remote = { id: 'b'.repeat(64), name: 'Target Linux', os: 'Linux', kind: 'desktop', online: true };
-  const chat = { id: 'target-chat', title: 'Remote project', deviceId: remote.id,
-    deviceName: remote.name, workspaceName: 'Target project' };
-  const session = { id: chat.id, title: chat.title, workingDirectory: '/srv/target/project',
-    createdAt: Date.now(), updatedAt: Date.now(), messageCount: 1, interactionMode: 'act' };
-  const messages = [{ id: 'remote-answer', role: 'assistant', content: 'Target-owned history in the shared feed.', createdAt: Date.now() }];
+  const remote = {
+    id: 'b'.repeat(64),
+    name: 'Target Linux',
+    os: 'Linux',
+    kind: 'desktop',
+    online: true,
+  };
+  const chat = {
+    id: 'target-chat',
+    title: 'Remote project',
+    deviceId: remote.id,
+    deviceName: remote.name,
+    workspaceName: 'Target project',
+  };
+  const session = {
+    id: chat.id,
+    title: chat.title,
+    workingDirectory: '/srv/target/project',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    messageCount: 1,
+    interactionMode: 'act',
+  };
+  const messages = [
+    {
+      id: 'remote-answer',
+      role: 'assistant',
+      content: 'Target-owned history in the shared feed.',
+      createdAt: Date.now(),
+    },
+  ];
   const operations: Array<{ operation: string; input: Record<string, unknown> }> = [];
   const localPosts: string[] = [];
   const errors: string[] = [];
   let pushEvent: ((event: unknown) => void) | undefined;
-  const providers = [{ name: 'custom:portable', label: 'Portable API', custom: true,
-    enabled: true, authenticated: true, configured: true, connected: true,
-    adapterAvailable: true, credentialDetected: true, configurationBlocked: false,
-    connectionState: 'verified', models: ['portable-model'],
-    allAvailableModels: [{ id: 'portable-model', name: 'Portable', provider: 'custom:portable',
-      contextWindow: 8192, maxOutputTokens: 1024, functionCall: true, tier: 'fast' }] }];
-  await page.route('**/api/providers', (route) => route.fulfill({ json: { ok: true, data: providers } }));
+  const providers = [
+    {
+      name: 'custom:portable',
+      label: 'Portable API',
+      custom: true,
+      enabled: true,
+      authenticated: true,
+      configured: true,
+      connected: true,
+      adapterAvailable: true,
+      credentialDetected: true,
+      configurationBlocked: false,
+      connectionState: 'verified',
+      models: ['portable-model'],
+      allAvailableModels: [
+        {
+          id: 'portable-model',
+          name: 'Portable',
+          provider: 'custom:portable',
+          contextWindow: 8192,
+          maxOutputTokens: 1024,
+          functionCall: true,
+          tier: 'fast',
+        },
+      ],
+    },
+  ];
+  await page.route('**/api/providers', (route) =>
+    route.fulfill({ json: { ok: true, data: providers } }),
+  );
   await page.routeWebSocket('**/ws*', (socket) => {
     pushEvent = (event) => socket.send(JSON.stringify(event));
     const server = socket.connectToServer();
     server.onMessage((message) => {
       const event = JSON.parse(String(message));
-      socket.send(event.type === 'provider.status'
-        ? JSON.stringify({ ...event, payload: { providers } }) : message);
+      socket.send(
+        event.type === 'provider.status'
+          ? JSON.stringify({ ...event, payload: { providers } })
+          : message,
+      );
     });
   });
-  page.on('pageerror', (error) => { errors.push(error.message); console.error(error.message); });
+  page.on('pageerror', (error) => {
+    errors.push(error.message);
+    console.error(error.message);
+  });
   page.on('request', (request) => {
-    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/messages') localPosts.push(request.url());
+    if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/messages')
+      localPosts.push(request.url());
   });
   await page.route('**/api/devices**', async (route) => {
     let data: unknown;
@@ -125,25 +180,59 @@ test('linked chats use the shared feed and composer and route send and stop to t
       const command = route.request().postDataJSON();
       operations.push(command);
       switch (command.operation) {
-        case 'workspaces': data = [{ id: 'target-workspace', name: 'Target project', displayPath: '/srv/target/project' }]; break;
-        case 'folders': case 'sessions': data = []; break;
-        case 'create_chat': data = chat; break;
-        case 'open_chat': case 'snapshot': data = { chat, session, messages, run: null, question: null, review: null }; break;
-        case 'events': data = []; break;
-        case 'prompt': data = { accepted: true, runId: 'target-run' }; break;
-        case 'cancel': data = { cancelled: true }; break;
+        case 'workspaces':
+          data = [
+            { id: 'target-workspace', name: 'Target project', displayPath: '/srv/target/project' },
+          ];
+          break;
+        case 'folders':
+        case 'sessions':
+          data = [];
+          break;
+        case 'create_chat':
+          data = chat;
+          break;
+        case 'open_chat':
+        case 'snapshot':
+          data = { chat, session, messages, run: null, question: null, review: null };
+          break;
+        case 'events':
+          data = [];
+          break;
+        case 'prompt':
+          data = { accepted: true, runId: 'target-run' };
+          break;
+        case 'cancel':
+          data = { cancelled: true };
+          break;
         case 'workbench': {
           const path = command.input.path;
-          const projected = path === `/api/messages/${chat.id}` ? messages
-            : path === `/api/sessions/${chat.id}` ? session
-            : path === `/api/agent/threads/${chat.id}` ? [] : {};
-          data = { status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, data: projected }) };
+          const projected =
+            path === `/api/messages/${chat.id}`
+              ? messages
+              : path === `/api/sessions/${chat.id}`
+                ? session
+                : path === `/api/agent/threads/${chat.id}`
+                  ? []
+                  : {};
+          data = {
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ ok: true, data: projected }),
+          };
           break;
         }
-        default: data = {};
+        default:
+          data = {};
       }
-    } else data = { local: { id: 'local', name: 'My Mac', os: 'macOS', kind: 'desktop' },
-      connected: true, relayUrl: 'https://relay.example.com', peers: [remote], requests: [] };
+    } else
+      data = {
+        local: { id: 'local', name: 'My Mac', os: 'macOS', kind: 'desktop' },
+        connected: true,
+        relayUrl: 'https://relay.example.com',
+        peers: [remote],
+        requests: [],
+      };
     await route.fulfill({ json: { ok: true, data } });
   });
   await page.goto('/');
@@ -154,7 +243,9 @@ test('linked chats use the shared feed and composer and route send and stop to t
   await dialog.getByRole('button', { name: /Target project/ }).click();
   await dialog.getByRole('button', { name: 'New chat in Target project', exact: true }).click();
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByText('Target-owned history in the shared feed.', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Target-owned history in the shared feed.', { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText('Micah’s agents', { exact: true }).first()).toBeVisible();
   const composer = page.getByTestId('composer-input');
   await expect(composer).toBeEnabled();
@@ -162,23 +253,56 @@ test('linked chats use the shared feed and composer and route send and stop to t
   await page.getByRole('button', { name: 'Portable', exact: true }).click();
   await composer.fill('Run this on the chosen target.');
   await composer.press('Enter');
-  await expect.poll(() => operations.find((command) => command.operation === 'prompt')).toMatchObject({
-    operation: 'prompt', input: { sessionId: chat.id, content: 'Run this on the chosen target.', useLocalProviders: true },
+  await expect
+    .poll(() => operations.find((command) => command.operation === 'prompt'))
+    .toMatchObject({
+      operation: 'prompt',
+      input: {
+        sessionId: chat.id,
+        content: 'Run this on the chosen target.',
+        useLocalProviders: true,
+      },
+    });
+  pushEvent!({
+    type: 'device.event',
+    timestamp: Date.now(),
+    payload: {
+      deviceId: remote.id,
+      sessionId: chat.id,
+      event: {
+        type: 'run.state',
+        sessionId: chat.id,
+        timestamp: Date.now(),
+        payload: {
+          snapshot: {
+            sessionId: chat.id,
+            runId: 'target-run',
+            revision: 1,
+            status: 'active',
+            phase: 'streaming',
+            activeAgentIds: ['kory-manager'],
+            startedAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+          transition: null,
+        },
+      },
+    },
   });
-  pushEvent!({ type: 'device.event', timestamp: Date.now(), payload: { deviceId: remote.id,
-    sessionId: chat.id, event: { type: 'run.state', sessionId: chat.id, timestamp: Date.now(),
-      payload: { snapshot: { sessionId: chat.id, runId: 'target-run', revision: 1,
-        status: 'active', phase: 'streaming', activeAgentIds: ['kory-manager'],
-        startedAt: Date.now(), updatedAt: Date.now() }, transition: null } } } });
   await page.getByRole('button', { name: 'Stop the running model', exact: true }).click();
-  await expect.poll(() => operations.find((command) => command.operation === 'cancel')).toMatchObject({
-    operation: 'cancel', input: { sessionId: chat.id },
-  });
+  await expect
+    .poll(() => operations.find((command) => command.operation === 'cancel'))
+    .toMatchObject({
+      operation: 'cancel',
+      input: { sessionId: chat.id },
+    });
   await page.getByRole('button', { name: 'Regenerate', exact: true }).click();
-  await expect.poll(() => operations.find((command) => command.input.path === '/api/messages/regenerate')).toMatchObject({
-    operation: 'workbench', input: { useLocalProviders: true,
-      body: { sessionId: chat.id } },
-  });
+  await expect
+    .poll(() => operations.find((command) => command.input.path === '/api/messages/regenerate'))
+    .toMatchObject({
+      operation: 'workbench',
+      input: { useLocalProviders: true, body: { sessionId: chat.id } },
+    });
   expect(localPosts).toEqual([]);
   expect(errors).toEqual([]);
 });

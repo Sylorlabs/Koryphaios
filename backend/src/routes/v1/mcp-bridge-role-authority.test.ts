@@ -21,7 +21,11 @@ import { KORY_TOOLS, toolsForRole } from '../../providers/kory-mcp-bridge';
 import type { ToolRegistry } from '../../tools/registry';
 import { saveNotesAgentPermissions } from '../../notes/notes-settings';
 import { mcpBridgeRoutes } from './mcp-bridge';
-import { createKoryBridgeGrantLease, signedBridgeHeadersFromFile, withBridgeWorkspace } from '../../providers/bridge-grant';
+import {
+  createKoryBridgeGrantLease,
+  signedBridgeHeadersFromFile,
+  withBridgeWorkspace,
+} from '../../providers/bridge-grant';
 
 const ROLES = ['manager', 'worker', 'critic', 'coder'] as const;
 type Role = (typeof ROLES)[number];
@@ -304,8 +308,8 @@ describe('MCP bridge role authority', () => {
           requestToolApproval: async () => 'Allow',
           hasActiveSessionExecution: () => true,
           tryAcquireSessionMutationBarrier: () => null,
-        isWorkspaceRebindPending: () => false,
-        markWorkspaceMutatedThisTurn: () => undefined,
+          isWorkspaceRebindPending: () => false,
+          markWorkspaceMutatedThisTurn: () => undefined,
         },
       } as never);
       const app = new Elysia()
@@ -369,7 +373,12 @@ describe('MCP bridge role authority', () => {
     const validLease = createKoryBridgeGrantLease(sessionId, 'manager');
     const outsideLease = createKoryBridgeGrantLease(sessionId, 'manager');
     const grantWithRoot = async (root: string, lease: typeof validLease) => {
-      for await (const grant of withBridgeWorkspace(root, (async function* () { yield lease.grant(['mcp:execute']); })())) {
+      for await (const grant of withBridgeWorkspace(
+        root,
+        (async function* () {
+          yield lease.grant(['mcp:execute']);
+        })(),
+      )) {
         return grant;
       }
       throw new Error('unreachable');
@@ -399,8 +408,8 @@ describe('MCP bridge role authority', () => {
           requestToolApproval: async () => 'Allow',
           hasActiveSessionExecution: () => true,
           tryAcquireSessionMutationBarrier: () => null,
-        isWorkspaceRebindPending: () => false,
-        markWorkspaceMutatedThisTurn: () => undefined,
+          isWorkspaceRebindPending: () => false,
+          markWorkspaceMutatedThisTurn: () => undefined,
         },
       } as never);
       const app = new Elysia()

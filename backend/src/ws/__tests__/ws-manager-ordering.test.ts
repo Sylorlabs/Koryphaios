@@ -43,21 +43,29 @@ describe('WSManager canonical ordering', () => {
     managers.push(manager);
     const sent: string[] = [];
     manager.add({
-      data: { id: 'sidebar-client' }, readyState: 1,
-      send: (value: string) => sent.push(value), close: () => {},
+      data: { id: 'sidebar-client' },
+      readyState: 1,
+      send: (value: string) => sent.push(value),
+      close: () => {},
     } as unknown as ServerWebSocket<WSClientData>);
     manager.broadcastToSession('unvisited-chat', {
-      type: 'stream.delta', timestamp: 1,
+      type: 'stream.delta',
+      timestamp: 1,
       payload: { agentId: 'kory-manager', content: 'private transcript' },
     });
     manager.broadcastToSession('unvisited-chat', {
-      type: 'run.state', timestamp: 2,
-      payload: { snapshot: { sessionId: 'unvisited-chat', revision: 2, phase: 'error' }, transition: { command: 'fail' } },
+      type: 'run.state',
+      timestamp: 2,
+      payload: {
+        snapshot: { sessionId: 'unvisited-chat', revision: 2, phase: 'error' },
+        transition: { command: 'fail' },
+      },
     });
     const delivered = sent.map((value) => JSON.parse(value));
     expect(delivered).toHaveLength(1);
     expect(delivered[0]).toMatchObject({
-      type: 'run.state', sessionId: 'unvisited-chat',
+      type: 'run.state',
+      sessionId: 'unvisited-chat',
       payload: { snapshot: { phase: 'error', revision: 2 }, transition: null },
     });
     expect(delivered[0].sequence).toBeUndefined();

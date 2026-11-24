@@ -11,9 +11,7 @@ import { redactSecretsInText } from '../security';
  * plus the untracked file list, bounded and secret-redacted. */
 const REVIEW_DIFF_CAPTURE_LIMIT = 400 * 1024;
 
-export type ReviewChangeSet =
-  | { ok: true; patch: string }
-  | { ok: false; reason: string };
+export type ReviewChangeSet = { ok: true; patch: string } | { ok: false; reason: string };
 
 export async function captureReviewChangeSet(directory: string): Promise<ReviewChangeSet> {
   try {
@@ -54,9 +52,10 @@ export async function createCriticWorkspace(source: string): Promise<string> {
       recursive: true,
       dereference: true,
       mode: constants.COPYFILE_FICLONE,
-      filter: (path) => !relative(source, path).split(/[\\/]/).some(
-        (part) => ['.git', '.trees', '.koryphaios', '.svelte-kit'].includes(part),
-      ),
+      filter: (path) =>
+        !relative(source, path)
+          .split(/[\\/]/)
+          .some((part) => ['.git', '.trees', '.koryphaios', '.svelte-kit'].includes(part)),
     });
     return directory;
   } catch (error) {

@@ -36,10 +36,15 @@ afterEach(async () => {
 
 // These doubles exercise only rejection/transport paths, never rendered evidence.
 function mockBrowserLaunch() {
-  const newContext = mock(() => { throw new Error('Unit test must not inspect a browser'); });
-  launchMocks.push(spyOn(chromium, 'launch').mockResolvedValue({
-    close: async () => {}, newContext,
-  } as unknown as Browser));
+  const newContext = mock(() => {
+    throw new Error('Unit test must not inspect a browser');
+  });
+  launchMocks.push(
+    spyOn(chromium, 'launch').mockResolvedValue({
+      close: async () => {},
+      newContext,
+    } as unknown as Browser),
+  );
   return newContext;
 }
 
@@ -271,77 +276,85 @@ test('stalled Chromium shutdown leaves an unfinished inspection unverified', asy
   }
 }, 30_000);
 
-browserTest('trusted Chromium actually renders React and returns DOM, focus, route, and blocked network observations', async () => {
-  const root = fixture();
-  brokers.push(await startReactBrowserBroker(root));
-  const result = await respond(root, {
-    requestId: 'rendered-1',
-    actions: [
-      { type: 'wait', selector: '#increment' },
-      { type: 'click', selector: '#increment' },
-      { type: 'text', selector: '#count' },
-      { type: 'fill', selector: '#draft', value: 'edited in Chromium' },
-      { type: 'value', selector: '#draft' },
-      { type: 'focused', selector: '#draft' },
-      { type: 'wait', selector: '#network' },
-      { type: 'pause', ms: 200 },
-      { type: 'text', selector: '#network' },
-      { type: 'navigate', path: '/?q=route' },
-      { type: 'url' },
-      { type: 'text', selector: '#rtc' },
-      { type: 'text', selector: '#transport' },
-      { type: 'layout' },
-      { type: 'metrics', source: 'search' },
-    ],
-  });
-  if (result.status !== 'ok') console.error(result.error);
-  expect(result.status).toBe('ok');
-  expect(result.browser).toMatch(/^Chromium \d/u);
-  expect(result.observations?.[2]?.value).toBe('1');
-  expect(result.observations?.[4]?.value).toBe('edited in Chromium');
-  expect(result.observations?.[5]?.value).toBe(true);
-  expect(result.observations?.[8]?.value).toBe('blocked');
-  expect(result.observations?.[10]?.value).toContain('/?q=route');
-  expect(result.observations?.[11]?.value).toBe('undefined');
-  expect(result.observations?.[12]?.value).toBe('undefined');
-  expect(result.observations?.[13]?.value).toMatchObject({ viewportWidth: 900 });
-  expect(result.observations?.[14]?.value).toBeNull();
-  expect(result.scoring).toContain('unscored');
-  expect(result.pageErrors).toEqual([]);
-}, 90_000);
+browserTest(
+  'trusted Chromium actually renders React and returns DOM, focus, route, and blocked network observations',
+  async () => {
+    const root = fixture();
+    brokers.push(await startReactBrowserBroker(root));
+    const result = await respond(root, {
+      requestId: 'rendered-1',
+      actions: [
+        { type: 'wait', selector: '#increment' },
+        { type: 'click', selector: '#increment' },
+        { type: 'text', selector: '#count' },
+        { type: 'fill', selector: '#draft', value: 'edited in Chromium' },
+        { type: 'value', selector: '#draft' },
+        { type: 'focused', selector: '#draft' },
+        { type: 'wait', selector: '#network' },
+        { type: 'pause', ms: 200 },
+        { type: 'text', selector: '#network' },
+        { type: 'navigate', path: '/?q=route' },
+        { type: 'url' },
+        { type: 'text', selector: '#rtc' },
+        { type: 'text', selector: '#transport' },
+        { type: 'layout' },
+        { type: 'metrics', source: 'search' },
+      ],
+    });
+    if (result.status !== 'ok') console.error(result.error);
+    expect(result.status).toBe('ok');
+    expect(result.browser).toMatch(/^Chromium \d/u);
+    expect(result.observations?.[2]?.value).toBe('1');
+    expect(result.observations?.[4]?.value).toBe('edited in Chromium');
+    expect(result.observations?.[5]?.value).toBe(true);
+    expect(result.observations?.[8]?.value).toBe('blocked');
+    expect(result.observations?.[10]?.value).toContain('/?q=route');
+    expect(result.observations?.[11]?.value).toBe('undefined');
+    expect(result.observations?.[12]?.value).toBe('undefined');
+    expect(result.observations?.[13]?.value).toMatchObject({ viewportWidth: 900 });
+    expect(result.observations?.[14]?.value).toBeNull();
+    expect(result.scoring).toContain('unscored');
+    expect(result.pageErrors).toEqual([]);
+  },
+  90_000,
+);
 
-browserTest('each request builds a fresh browser context from changed candidate App source', async () => {
-  const root = fixture(
-    [
-      "import React from 'react';",
-      "import { createRoot } from 'react-dom/client';",
-      "import App from './App.jsx';",
-      "createRoot(document.getElementById('root')).render(<App />);",
-    ].join('\n'),
-  );
-  writeFileSync(
-    join(root, 'src', 'App.jsx'),
-    "import React from 'react'; export default function App() { return <p id='candidate'>original</p> }",
-  );
-  brokers.push(await startReactBrowserBroker(root));
-  const first = await respond(root, {
-    requestId: 'candidate-before',
-    actions: [{ type: 'text', selector: '#candidate' }],
-  });
-  expect(first.status).toBe('ok');
-  expect(first.observations?.[0]?.value).toBe('original');
+browserTest(
+  'each request builds a fresh browser context from changed candidate App source',
+  async () => {
+    const root = fixture(
+      [
+        "import React from 'react';",
+        "import { createRoot } from 'react-dom/client';",
+        "import App from './App.jsx';",
+        "createRoot(document.getElementById('root')).render(<App />);",
+      ].join('\n'),
+    );
+    writeFileSync(
+      join(root, 'src', 'App.jsx'),
+      "import React from 'react'; export default function App() { return <p id='candidate'>original</p> }",
+    );
+    brokers.push(await startReactBrowserBroker(root));
+    const first = await respond(root, {
+      requestId: 'candidate-before',
+      actions: [{ type: 'text', selector: '#candidate' }],
+    });
+    expect(first.status).toBe('ok');
+    expect(first.observations?.[0]?.value).toBe('original');
 
-  writeFileSync(
-    join(root, 'src', 'App.jsx'),
-    "import React from 'react'; export default function App() { return <p id='candidate'>updated</p> }",
-  );
-  const second = await respond(root, {
-    requestId: 'candidate-after',
-    actions: [{ type: 'text', selector: '#candidate' }],
-  });
-  expect(second.status).toBe('ok');
-  expect(second.observations?.[0]?.value).toBe('updated');
-}, 90_000);
+    writeFileSync(
+      join(root, 'src', 'App.jsx'),
+      "import React from 'react'; export default function App() { return <p id='candidate'>updated</p> }",
+    );
+    const second = await respond(root, {
+      requestId: 'candidate-after',
+      actions: [{ type: 'text', selector: '#candidate' }],
+    });
+    expect(second.status).toBe('ok');
+    expect(second.observations?.[0]?.value).toBe('updated');
+  },
+  90_000,
+);
 
 test('broker rejects arbitrary scripts and external navigation without browser assets', async () => {
   const newContext = mockBrowserLaunch();
@@ -370,16 +383,20 @@ test('broker rejects arbitrary scripts and external navigation without browser a
   expect(newContext).not.toHaveBeenCalled();
 });
 
-browserTest('broker rejects unsafe source imports in the real build', async () => {
-  const badRoot = fixture("import x from '/etc/passwd'; document.body.textContent = x;");
-  brokers.push(await startReactBrowserBroker(badRoot));
-  const importResult = await respond(badRoot, {
-    requestId: 'unsafe-3',
-    actions: [{ type: 'text', selector: 'body' }],
-  });
-  expect(importResult.status).toBe('error');
-  expect(importResult.error).toContain('rejected import');
-}, 90_000);
+browserTest(
+  'broker rejects unsafe source imports in the real build',
+  async () => {
+    const badRoot = fixture("import x from '/etc/passwd'; document.body.textContent = x;");
+    brokers.push(await startReactBrowserBroker(badRoot));
+    const importResult = await respond(badRoot, {
+      requestId: 'unsafe-3',
+      actions: [{ type: 'text', selector: 'body' }],
+    });
+    expect(importResult.status).toBe('error');
+    expect(importResult.error).toContain('rejected import');
+  },
+  90_000,
+);
 
 test('broker refuses symlinks in candidate source', async () => {
   const newContext = mockBrowserLaunch();
@@ -395,56 +412,64 @@ test('broker refuses symlinks in candidate source', async () => {
   expect(newContext).not.toHaveBeenCalled();
 }, 90_000);
 
-test.skipIf(isWindows())('replacement of verification directory cannot redirect evaluator browser responses', async () => {
-  const newContext = mockBrowserLaunch();
-  const root = fixture();
-  const other = fixture();
-  brokers.push(await startReactBrowserBroker(root));
-  const original = join(root, 'verification');
-  const moved = join(root, 'verification-original');
-  renameSync(original, moved);
-  symlinkSync(join(other, 'verification'), original);
-  const externalResponse = join(other, 'verification', 'react-browser-response.json');
-  expect(existsSync(externalResponse)).toBe(false);
-  writeFileSync(
-    join(moved, 'react-browser-request.json'),
-    JSON.stringify({
-      requestId: 'pinned-fd',
-      actions: [{ type: 'evaluate', source: 'forbidden' }],
-    }),
-  );
-  const responsePath = join(moved, 'react-browser-response.json');
-  let result: Record<string, unknown> | undefined;
-  const deadline = Date.now() + 8_000;
-  while (Date.now() < deadline) {
-    try {
-      result = JSON.parse(readFileSync(responsePath, 'utf8'));
-      if (result?.requestId === 'pinned-fd') break;
-    } catch {
-      /* The response may still be in transit. */
+test.skipIf(isWindows())(
+  'replacement of verification directory cannot redirect evaluator browser responses',
+  async () => {
+    const newContext = mockBrowserLaunch();
+    const root = fixture();
+    const other = fixture();
+    brokers.push(await startReactBrowserBroker(root));
+    const original = join(root, 'verification');
+    const moved = join(root, 'verification-original');
+    renameSync(original, moved);
+    symlinkSync(join(other, 'verification'), original);
+    const externalResponse = join(other, 'verification', 'react-browser-response.json');
+    expect(existsSync(externalResponse)).toBe(false);
+    writeFileSync(
+      join(moved, 'react-browser-request.json'),
+      JSON.stringify({
+        requestId: 'pinned-fd',
+        actions: [{ type: 'evaluate', source: 'forbidden' }],
+      }),
+    );
+    const responsePath = join(moved, 'react-browser-response.json');
+    let result: Record<string, unknown> | undefined;
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline) {
+      try {
+        result = JSON.parse(readFileSync(responsePath, 'utf8'));
+        if (result?.requestId === 'pinned-fd') break;
+      } catch {
+        /* The response may still be in transit. */
+      }
+      await Bun.sleep(100);
     }
-    await Bun.sleep(100);
-  }
-  expect(result?.status).toBe('error');
-  expect(result?.error).toContain('does not permit');
-  expect(existsSync(externalResponse)).toBe(false);
-  expect(newContext).not.toHaveBeenCalled();
-}, 60_000);
+    expect(result?.status).toBe('error');
+    expect(result?.error).toContain('does not permit');
+    expect(existsSync(externalResponse)).toBe(false);
+    expect(newContext).not.toHaveBeenCalled();
+  },
+  60_000,
+);
 
-test.skipIf(isWindows())('broker refuses candidate hard links pointing outside the evaluator fixture', async () => {
-  const newContext = mockBrowserLaunch();
-  const root = fixture();
-  const other = fixture();
-  linkSync(join(other, 'src', 'main.jsx'), join(root, 'src', 'linked-source.jsx'));
-  brokers.push(await startReactBrowserBroker(root));
-  const blocked = await respond(root, {
-    requestId: 'hard-link-1',
-    actions: [{ type: 'text', selector: 'body' }],
-  });
-  expect(blocked.status).toBe('error');
-  expect(blocked.error).toContain('hard link');
-  expect(newContext).not.toHaveBeenCalled();
-}, 90_000);
+test.skipIf(isWindows())(
+  'broker refuses candidate hard links pointing outside the evaluator fixture',
+  async () => {
+    const newContext = mockBrowserLaunch();
+    const root = fixture();
+    const other = fixture();
+    linkSync(join(other, 'src', 'main.jsx'), join(root, 'src', 'linked-source.jsx'));
+    brokers.push(await startReactBrowserBroker(root));
+    const blocked = await respond(root, {
+      requestId: 'hard-link-1',
+      actions: [{ type: 'text', selector: 'body' }],
+    });
+    expect(blocked.status).toBe('error');
+    expect(blocked.error).toContain('hard link');
+    expect(newContext).not.toHaveBeenCalled();
+  },
+  90_000,
+);
 
 test('broker detects changed trusted React fixture before it can return browser observations', async () => {
   const newContext = mockBrowserLaunch();

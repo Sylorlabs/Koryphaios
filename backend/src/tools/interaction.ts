@@ -16,12 +16,18 @@ export class RequestCriticReviewTool implements Tool {
   readonly inputSchema = {
     type: 'object',
     properties: {
-      reason: { type: 'string', minLength: 1, maxLength: 500, description: 'Specific reason an independent review is valuable for this response.' },
+      reason: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 500,
+        description: 'Specific reason an independent review is valuable for this response.',
+      },
       compareGroupId: {
         type: 'string',
         minLength: 1,
         maxLength: 64,
-        description: 'Optional compare group (compare.groupId of delegate_to_worker) whose attempts the Critic should rank.',
+        description:
+          'Optional compare group (compare.groupId of delegate_to_worker) whose attempts the Critic should rank.',
       },
     },
     required: ['reason'],
@@ -31,17 +37,35 @@ export class RequestCriticReviewTool implements Tool {
   async run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> {
     const reason = typeof call.input.reason === 'string' ? call.input.reason.trim() : '';
     if (!reason || reason.length > 500) {
-      return { callId: call.id, name: this.name, output: 'Provide a concrete review reason of 1-500 characters.', isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Provide a concrete review reason of 1-500 characters.',
+        isError: true,
+        durationMs: 0,
+      };
     }
     let compareGroupId: string | undefined;
     if (call.input.compareGroupId !== undefined) {
       compareGroupId = normalizeCompareGroupId(call.input.compareGroupId);
       if (!compareGroupId) {
-        return { callId: call.id, name: this.name, output: 'compareGroupId must be a 1-64 character token such as "auth-models".', isError: true, durationMs: 0 };
+        return {
+          callId: call.id,
+          name: this.name,
+          output: 'compareGroupId must be a 1-64 character token such as "auth-models".',
+          isError: true,
+          durationMs: 0,
+        };
       }
     }
     if (!ctx.requestCriticReview) {
-      return { callId: call.id, name: this.name, output: 'Manager review selection is unavailable in this context.', isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Manager review selection is unavailable in this context.',
+        isError: true,
+        durationMs: 0,
+      };
     }
     ctx.requestCriticReview(reason, compareGroupId);
     return {
@@ -110,7 +134,8 @@ function askUserQuestionText(entry: unknown, keys: string[]): string | null {
  * shape so a CLI-native call still lands on the durable question UI.
  */
 export function normalizeAskUserInput(input: unknown): AskUserPrompt[] {
-  const record = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {};
+  const record =
+    typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {};
   if (Array.isArray(record.questions)) {
     const prompts: AskUserPrompt[] = [];
     for (const entry of record.questions) {
@@ -232,7 +257,7 @@ export class DelegateToWorkerTool implements Tool {
   readonly description =
     'Delegate a task to a specialist worker (sub-agent) only when you have explicitly decided that the task needs one. ' +
     'Pass model as provider:model to use any connected, chat-capable model; the host rejects an unconnected model and lists the closest connected ones. ' +
-    'Omit model and the host picks from the user\'s category pool for this domain, preferring an identity independent from the manager; if the pool holds only the manager model it reuses it and discloses the lack of independence. ' +
+    "Omit model and the host picks from the user's category pool for this domain, preferring an identity independent from the manager; if the pool holds only the manager model it reuses it and discloses the lack of independence. " +
     'wait defaults to true: the call returns the worker result. With wait:false the call returns at once with an agentId, you keep working, and the result arrives later as a host message; join early with wait_for_agents. ' +
     'compare.groupId runs the same task again under another model: send N calls with the same task, different models, worktree:true and one shared groupId; their results come back together, and request_critic_review with that compareGroupId ranks them. Offer a comparison to the user for a large or ambiguous task before starting one. ' +
     'Provide a clear, self-contained task description and the most accurate domain hint.';
@@ -276,7 +301,8 @@ export class DelegateToWorkerTool implements Tool {
             type: 'string',
             minLength: 1,
             maxLength: 64,
-            description: 'Short token shared by every attempt in one comparison, e.g. "auth-models".',
+            description:
+              'Short token shared by every attempt in one comparison, e.g. "auth-models".',
           },
         },
         required: ['groupId'],
@@ -291,7 +317,10 @@ export class DelegateToWorkerTool implements Tool {
           type: 'object',
           properties: {
             provider: { type: 'string', description: 'Provider name, e.g. anthropic or openai.' },
-            model: { type: 'string', description: 'Fallback model id. A legacy provider:model string is also accepted.' },
+            model: {
+              type: 'string',
+              description: 'Fallback model id. A legacy provider:model string is also accepted.',
+            },
             reasoningLevel: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh'] },
             label: { type: 'string', description: 'Optional display name for this step.' },
           },
@@ -432,7 +461,8 @@ export class WaitForAgentsTool implements Tool {
         type: 'array',
         maxItems: 50,
         items: { type: 'string' },
-        description: 'agentIds returned by delegate_to_worker. Omit to wait for all outstanding workers.',
+        description:
+          'agentIds returned by delegate_to_worker. Omit to wait for all outstanding workers.',
       },
       timeoutSec: {
         type: 'number',
@@ -456,10 +486,18 @@ export class WaitForAgentsTool implements Tool {
     }
     const rawIds = call.input.agentIds;
     if (rawIds !== undefined && !Array.isArray(rawIds)) {
-      return { callId: call.id, name: this.name, output: 'Error: agentIds must be an array of strings.', isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output: 'Error: agentIds must be an array of strings.',
+        isError: true,
+        durationMs: 0,
+      };
     }
     const agentIds = Array.isArray(rawIds)
-      ? rawIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0).map((id) => id.trim())
+      ? rawIds
+          .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+          .map((id) => id.trim())
       : undefined;
     const timeoutRaw = call.input.timeoutSec;
     const timeoutSec =
@@ -467,7 +505,10 @@ export class WaitForAgentsTool implements Tool {
         ? Math.min(1800, Math.max(1, timeoutRaw))
         : undefined;
     try {
-      const output = await ctx.waitForAgents({ ...(agentIds ? { agentIds } : {}), ...(timeoutSec ? { timeoutSec } : {}) });
+      const output = await ctx.waitForAgents({
+        ...(agentIds ? { agentIds } : {}),
+        ...(timeoutSec ? { timeoutSec } : {}),
+      });
       return { callId: call.id, name: this.name, output, isError: false, durationMs: 0 };
     } catch (err: unknown) {
       return {

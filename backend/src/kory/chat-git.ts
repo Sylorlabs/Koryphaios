@@ -298,23 +298,26 @@ export class ChatGit {
           throw new ConflictError('The PR head changed. Refresh PR details before switching.');
         const imported = `refs/kory/pr-import/${randomUUID()}`;
         try {
-           const fetched = await this.exec([
-            '-c',
-            'credential.helper=',
-            '-c',
-            'credential.helper=!gh auth git-credential',
-            '-c',
-            'protocol.file.allow=never',
-            '-c',
-            'protocol.ext.allow=never',
-            'fetch',
-            '--no-tags',
-            '--no-write-fetch-head',
-            '--no-recurse-submodules',
-            '--',
-            `https://github.com/${pullRequest.repository}.git`,
-            `refs/pull/${target.number}/head:${imported}`,
-           ], [this.sourceRoot]);
+          const fetched = await this.exec(
+            [
+              '-c',
+              'credential.helper=',
+              '-c',
+              'credential.helper=!gh auth git-credential',
+              '-c',
+              'protocol.file.allow=never',
+              '-c',
+              'protocol.ext.allow=never',
+              'fetch',
+              '--no-tags',
+              '--no-write-fetch-head',
+              '--no-recurse-submodules',
+              '--',
+              `https://github.com/${pullRequest.repository}.git`,
+              `refs/pull/${target.number}/head:${imported}`,
+            ],
+            [this.sourceRoot],
+          );
           if (!fetched.success)
             throw new ValidationError(
               'Could not fetch this PR into the chat. Check gh auth login and repository access.',
@@ -348,17 +351,20 @@ export class ChatGit {
           ]);
           if (!sourceRoot.success)
             throw new ValidationError('The source repository is unavailable.');
-           const imported = await this.exec([
-            '-c',
-            'uploadpack.packObjectsHook=',
-            'fetch',
-            '--no-tags',
-            '--no-write-fetch-head',
-            '--no-recurse-submodules',
-            '--',
-            sourceRoot.stdout.trim(),
-            commit,
-           ], [this.sourceRoot]);
+          const imported = await this.exec(
+            [
+              '-c',
+              'uploadpack.packObjectsHook=',
+              'fetch',
+              '--no-tags',
+              '--no-write-fetch-head',
+              '--no-recurse-submodules',
+              '--',
+              sourceRoot.stdout.trim(),
+              commit,
+            ],
+            [this.sourceRoot],
+          );
           if (!imported.success)
             throw new ValidationError(
               'Could not import the selected commit from the source project into this chat.',

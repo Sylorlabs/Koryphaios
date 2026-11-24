@@ -39,7 +39,8 @@ export function renderPartialOutput(parts: readonly TranscriptPart[] | undefined
     if (part.kind === 'text') {
       if (part.text.trim()) lines.push(part.text.trim());
     } else if (part.kind === 'tool') {
-      const status = part.output === undefined ? 'no result recorded' : part.isError ? 'error' : 'ok';
+      const status =
+        part.output === undefined ? 'no result recorded' : part.isError ? 'error' : 'ok';
       const output = part.output ? ` -> ${part.output.slice(0, 400)}` : '';
       lines.push(`[tool ${part.name}: ${status}]${output}`);
     }
@@ -50,7 +51,9 @@ export function renderPartialOutput(parts: readonly TranscriptPart[] | undefined
   return `…${joined.slice(joined.length - CONTINUATION_PARTIAL_OUTPUT_LIMIT)}`;
 }
 
-export function renderRestartContinuationPrompt(parts: readonly TranscriptPart[] | undefined): string {
+export function renderRestartContinuationPrompt(
+  parts: readonly TranscriptPart[] | undefined,
+): string {
   return [
     RESTART_CONTINUATION_LEAD,
     CONTINUATION_RULES,

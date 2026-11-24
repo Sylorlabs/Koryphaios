@@ -63,9 +63,7 @@ function readAll(): Record<string, ModelPreference> {
           ? {
               modelParameters: Object.fromEntries(
                 Object.entries(value.modelParameters as Record<string, unknown>).filter(
-                  ([, v]) =>
-                    (typeof v === 'number' && Number.isFinite(v)) ||
-                    typeof v === 'string',
+                  ([, v]) => (typeof v === 'number' && Number.isFinite(v)) || typeof v === 'string',
                 ),
               ),
             }

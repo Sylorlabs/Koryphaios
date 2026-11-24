@@ -15,7 +15,8 @@ vi.mock('$lib/stores/sessions.svelte', () => ({
 vi.mock('$lib/stores/agent-messages.svelte', () => ({
   agentMessagesFor: () => mocks.messages,
   agentMessageUnreadCount: () => mocks.messages.length,
-  hasPendingAgentApproval: () => mocks.messages.some((message) => message.status === 'pending_approval'),
+  hasPendingAgentApproval: () =>
+    mocks.messages.some((message) => message.status === 'pending_approval'),
   hydrateAgentMessages: mocks.hydrate,
   markAgentMessagesRead: mocks.markRead,
   decideAgentMessage: mocks.decide,
@@ -24,12 +25,22 @@ import AgentMessages from './AgentMessages.svelte';
 
 function message(): AgentMessage {
   return {
-    id: 'message-1', threadId: 'thread-1', fromSessionId: 'session-2',
-    fromAgentId: 'worker-1', fromRole: 'worker', fromLabel: 'Review',
-    toSessionId: 'session-1', toRole: 'manager', toLabel: 'Kory',
-    crossProject: false, isRelayRequest: false, subject: 'Check the change',
-    body: 'Review request\n'.repeat(100), reply: 'I will review it.',
-    status: 'pending_approval', createdAt: Date.now(),
+    id: 'message-1',
+    threadId: 'thread-1',
+    fromSessionId: 'session-2',
+    fromAgentId: 'worker-1',
+    fromRole: 'worker',
+    fromLabel: 'Review',
+    toSessionId: 'session-1',
+    toRole: 'manager',
+    toLabel: 'Kory',
+    crossProject: false,
+    isRelayRequest: false,
+    subject: 'Check the change',
+    body: 'Review request\n'.repeat(100),
+    reply: 'I will review it.',
+    status: 'pending_approval',
+    createdAt: Date.now(),
   };
 }
 
@@ -64,7 +75,10 @@ describe('AgentMessages transcript details', () => {
     expect(onAnchor).toHaveBeenCalledTimes(2);
   });
 
-  it.each([['Approve', true], ['Decline', false]] as const)('preserves the %s action', async (name, approved) => {
+  it.each([
+    ['Approve', true],
+    ['Decline', false],
+  ] as const)('preserves the %s action', async (name, approved) => {
     render(AgentMessages);
     await fireEvent.click(screen.getByRole('button', { name: /Agent messages/ }));
     await fireEvent.click(screen.getByRole('button', { name }));

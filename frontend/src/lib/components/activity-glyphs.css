@@ -50,13 +50,27 @@
   opacity: 0;
 }
 
-.activity-icon .agi-ink { opacity: 0.45; }
-.activity-icon .agi-note-page { opacity: 0.35; }
-.activity-icon .agi-fetch-fill { opacity: 0.45; }
-.activity-icon .agi-found { opacity: 0.6; }
-.activity-icon .agi-cell-cursor { opacity: 0.25; }
-.activity-icon .agi-meridian { opacity: 0.45; }
-.activity-icon .agi-attach-photo { opacity: 0.72; }
+.activity-icon .agi-ink {
+  opacity: 0.45;
+}
+.activity-icon .agi-note-page {
+  opacity: 0.35;
+}
+.activity-icon .agi-fetch-fill {
+  opacity: 0.45;
+}
+.activity-icon .agi-found {
+  opacity: 0.6;
+}
+.activity-icon .agi-cell-cursor {
+  opacity: 0.25;
+}
+.activity-icon .agi-meridian {
+  opacity: 0.45;
+}
+.activity-icon .agi-attach-photo {
+  opacity: 0.72;
+}
 
 /* Origins for the glyphs that scale or rotate. Explicit view-box boxes
    keep the pivot in SVG user units on every renderer. */
@@ -72,28 +86,61 @@
   transform-box: view-box;
   transform-origin: 12px 12px;
 }
-.activity-icon .agi-lid { transform-box: view-box; transform-origin: 4px 6.5px; }
-.activity-icon .agi-folder-front { transform-box: view-box; transform-origin: 12px 20px; }
-.activity-icon .agi-note-page { transform-box: view-box; transform-origin: 8.8px 12px; }
-.activity-icon .agi-create-fold { transform-origin: 13.5px 3px; }
-.activity-icon .agi-clip { transform-origin: 11px 11px; }
-.activity-icon .agi-tassel { transform-box: view-box; transform-origin: 19.6px 10.4px; }
+.activity-icon .agi-lid {
+  transform-box: view-box;
+  transform-origin: 4px 6.5px;
+}
+.activity-icon .agi-folder-front {
+  transform-box: view-box;
+  transform-origin: 12px 20px;
+}
+.activity-icon .agi-note-page {
+  transform-box: view-box;
+  transform-origin: 8.8px 12px;
+}
+.activity-icon .agi-create-fold {
+  transform-origin: 13.5px 3px;
+}
+.activity-icon .agi-clip {
+  transform-origin: 11px 11px;
+}
+.activity-icon .agi-tassel {
+  transform-box: view-box;
+  transform-origin: 19.6px 10.4px;
+}
 
 /* ── Read: pupil glides smoothly across a line, line scans in ───────── */
 .activity-icon.running .agi-pupil {
   animation: agi-pupil-read 2.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 @keyframes agi-pupil-read {
-  0%, 100% { transform: translateX(-1.8px); }
-  50% { transform: translateX(1.8px); }
+  0%,
+  100% {
+    transform: translateX(-1.8px);
+  }
+  50% {
+    transform: translateX(1.8px);
+  }
 }
 .activity-icon.running .agi-read-line {
   animation: agi-read-scan 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-read-scan {
-  0%, 6% { stroke-dashoffset: 100; opacity: 0.25; }
-  58%, 78% { stroke-dashoffset: 0; opacity: 0.75; }
-  92%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  6% {
+    stroke-dashoffset: 100;
+    opacity: 0.25;
+  }
+  58%,
+  78% {
+    stroke-dashoffset: 0;
+    opacity: 0.75;
+  }
+  92%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 
 /* ── Create: page draws, corner folds, plus stamps in ─────────────── */
@@ -101,27 +148,68 @@
   animation: agi-create-draw 2.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 @keyframes agi-create-draw {
-  0%, 5% { stroke-dashoffset: 100; opacity: 0; }
-  6% { opacity: 1; }
-  40%, 84% { stroke-dashoffset: 0; opacity: 1; }
-  96%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  5% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  40%,
+  84% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  96%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 .activity-icon.running .agi-create-fold {
   animation: agi-create-fold 2.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 @keyframes agi-create-fold {
-  0%, 26% { opacity: 0; transform: rotate(-32deg); }
-  42%, 86% { opacity: 1; transform: rotate(0deg); }
-  96%, 100% { opacity: 0; transform: rotate(0deg); }
+  0%,
+  26% {
+    opacity: 0;
+    transform: rotate(-32deg);
+  }
+  42%,
+  86% {
+    opacity: 1;
+    transform: rotate(0deg);
+  }
+  96%,
+  100% {
+    opacity: 0;
+    transform: rotate(0deg);
+  }
 }
 .activity-icon.running .agi-create-plus {
   animation: agi-create-plus 2.6s cubic-bezier(0.2, 1.35, 0.4, 1) infinite;
 }
 @keyframes agi-create-plus {
-  0%, 34% { opacity: 0; transform: scale(0.25) rotate(-35deg); }
-  50% { opacity: 1; transform: scale(1.12) rotate(0deg); }
-  60%, 86% { opacity: 1; transform: scale(1) rotate(0deg); }
-  96%, 100% { opacity: 0; transform: scale(0.75) rotate(0deg); }
+  0%,
+  34% {
+    opacity: 0;
+    transform: scale(0.25) rotate(-35deg);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12) rotate(0deg);
+  }
+  60%,
+  86% {
+    opacity: 1;
+    transform: scale(1) rotate(0deg);
+  }
+  96%,
+  100% {
+    opacity: 0;
+    transform: scale(0.75) rotate(0deg);
+  }
 }
 
 /* ── Edit: rapid scribing pencil with a single clean baseline ─────── */
@@ -129,20 +217,44 @@
   animation: agi-pencil-scribe 1.5s cubic-bezier(0.42, 0, 0.58, 1) infinite;
 }
 @keyframes agi-pencil-scribe {
-  0% { transform: translate(-2.4px, 0.3px) rotate(-6deg); }
-  18% { transform: translate(-0.8px, -0.7px) rotate(1deg); }
-  36% { transform: translate(0.8px, 0.3px) rotate(-4deg); }
-  54% { transform: translate(2.4px, -0.6px) rotate(3deg); }
-  72% { transform: translate(3.6px, 0.2px) rotate(-2deg); }
-  100% { transform: translate(-2.4px, 0.3px) rotate(-6deg); }
+  0% {
+    transform: translate(-2.4px, 0.3px) rotate(-6deg);
+  }
+  18% {
+    transform: translate(-0.8px, -0.7px) rotate(1deg);
+  }
+  36% {
+    transform: translate(0.8px, 0.3px) rotate(-4deg);
+  }
+  54% {
+    transform: translate(2.4px, -0.6px) rotate(3deg);
+  }
+  72% {
+    transform: translate(3.6px, 0.2px) rotate(-2deg);
+  }
+  100% {
+    transform: translate(-2.4px, 0.3px) rotate(-6deg);
+  }
 }
 .activity-icon.running .agi-ink {
   animation: agi-ink-life 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-ink-life {
-  0%, 4% { stroke-dashoffset: 100; opacity: 0.25; }
-  68%, 84% { stroke-dashoffset: 0; opacity: 0.85; }
-  96%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  4% {
+    stroke-dashoffset: 100;
+    opacity: 0.25;
+  }
+  68%,
+  84% {
+    stroke-dashoffset: 0;
+    opacity: 0.85;
+  }
+  96%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 
 /* ── Delete: lid lifts, scrap falls in, lid closes ─────────────────── */
@@ -150,17 +262,39 @@
   animation: agi-lid-lift 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-lid-lift {
-  0%, 12%, 74%, 100% { transform: rotate(0deg); }
-  32%, 56% { transform: rotate(-13deg) translateY(-1px); }
+  0%,
+  12%,
+  74%,
+  100% {
+    transform: rotate(0deg);
+  }
+  32%,
+  56% {
+    transform: rotate(-13deg) translateY(-1px);
+  }
 }
 .activity-icon.running .agi-scrap {
   animation: agi-scrap-drop 2.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 @keyframes agi-scrap-drop {
-  0%, 24% { opacity: 0; transform: translate(0, 0) rotate(0deg); }
-  30% { opacity: 1; transform: translate(0, 0) rotate(0deg); }
-  62% { opacity: 1; transform: translate(0.5px, 9.5px) rotate(24deg); }
-  70%, 100% { opacity: 0; transform: translate(0.8px, 12px) rotate(34deg); }
+  0%,
+  24% {
+    opacity: 0;
+    transform: translate(0, 0) rotate(0deg);
+  }
+  30% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg);
+  }
+  62% {
+    opacity: 1;
+    transform: translate(0.5px, 9.5px) rotate(24deg);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: translate(0.8px, 12px) rotate(34deg);
+  }
 }
 
 /* ── Move: both arrows nudge in their pointed direction, stop, loop ── */
@@ -171,14 +305,32 @@
   animation: agi-move-left 2.1s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 @keyframes agi-move-right {
-  0%, 12% { transform: translateX(0); }
-  44%, 72% { transform: translateX(2.4px); }
-  92%, 100% { transform: translateX(0); }
+  0%,
+  12% {
+    transform: translateX(0);
+  }
+  44%,
+  72% {
+    transform: translateX(2.4px);
+  }
+  92%,
+  100% {
+    transform: translateX(0);
+  }
 }
 @keyframes agi-move-left {
-  0%, 12% { transform: translateX(0); }
-  44%, 72% { transform: translateX(-2.4px); }
-  92%, 100% { transform: translateX(0); }
+  0%,
+  12% {
+    transform: translateX(0);
+  }
+  44%,
+  72% {
+    transform: translateX(-2.4px);
+  }
+  92%,
+  100% {
+    transform: translateX(0);
+  }
 }
 
 /* ── Terminal: a line types itself, the caret follows, line clears ─── */
@@ -186,34 +338,79 @@
   animation: agi-cmd-type 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-cmd-type {
-  0%, 6% { stroke-dashoffset: 100; opacity: 1; }
-  46%, 78% { stroke-dashoffset: 0; opacity: 1; }
-  92%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  6% {
+    stroke-dashoffset: 100;
+    opacity: 1;
+  }
+  46%,
+  78% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  92%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 .activity-icon.running .agi-cmd-caret {
-  animation: agi-cmd-caret 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite, agi-caret-blink 0.9s ease-in-out infinite;
+  animation:
+    agi-cmd-caret 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite,
+    agi-caret-blink 0.9s ease-in-out infinite;
 }
 @keyframes agi-cmd-caret {
-  0%, 6% { transform: translateX(0); }
-  46%, 100% { transform: translateX(6.8px); }
+  0%,
+  6% {
+    transform: translateX(0);
+  }
+  46%,
+  100% {
+    transform: translateX(6.8px);
+  }
 }
-@keyframes agi-caret-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
+@keyframes agi-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
 
 /* ── Search: lens sweeps smoothly, then ticks the match ────────────── */
 .activity-icon.running .agi-mag {
   animation: agi-mag-sweep 2.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 @keyframes agi-mag-sweep {
-  0%, 100% { transform: translateX(-2px) rotate(-4deg); }
-  50% { transform: translateX(2px) rotate(4deg); }
+  0%,
+  100% {
+    transform: translateX(-2px) rotate(-4deg);
+  }
+  50% {
+    transform: translateX(2px) rotate(4deg);
+  }
 }
 .activity-icon.running .agi-found {
   animation: agi-found 2.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 @keyframes agi-found {
-  0%, 34% { stroke-dashoffset: 100; opacity: 0; }
-  52%, 74% { stroke-dashoffset: 0; opacity: 1; }
-  90%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  34% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  52%,
+  74% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  90%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 
 /* ── Folder: opens from the top along its bottom hinge as one unit ─── */
@@ -221,8 +418,16 @@
   animation: agi-folder-open 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-folder-open {
-  0%, 16%, 84%, 100% { transform: translateY(0) scaleY(1) skewX(0deg); }
-  45%, 58% { transform: translateY(1.2px) scaleY(0.84) skewX(-5deg); }
+  0%,
+  16%,
+  84%,
+  100% {
+    transform: translateY(0) scaleY(1) skewX(0deg);
+  }
+  45%,
+  58% {
+    transform: translateY(1.2px) scaleY(0.84) skewX(-5deg);
+  }
 }
 
 /* ── Web: clean meridian arcs rotate smoothly across the globe ─────── */
@@ -231,8 +436,15 @@
   animation-delay: var(--agi-d, 0s);
 }
 @keyframes agi-meridian {
-  0%, 100% { transform: scaleX(1); opacity: 0.35; }
-  50% { transform: scaleX(0.08); opacity: 0.85; }
+  0%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scaleX(0.08);
+    opacity: 0.85;
+  }
 }
 
 /* ── Fetch: arrow leads the growing stream line downward into tray ─── */
@@ -240,28 +452,69 @@
   animation: agi-fetch-stream 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-fetch-stream {
-  0%, 6% { stroke-dashoffset: 100; opacity: 0; }
-  10% { opacity: 1; }
-  52%, 74% { stroke-dashoffset: 0; opacity: 1; }
-  88%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  6% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  52%,
+  74% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  88%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 .activity-icon.running .agi-incoming {
   animation: agi-fetch-lead 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-fetch-lead {
-  0%, 6% { transform: translateY(-10.5px); opacity: 0; }
-  12% { opacity: 1; }
-  52%, 74% { transform: translateY(0); opacity: 1; }
-  88%, 100% { transform: translateY(0.8px); opacity: 0; }
+  0%,
+  6% {
+    transform: translateY(-10.5px);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  52%,
+  74% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  88%,
+  100% {
+    transform: translateY(0.8px);
+    opacity: 0;
+  }
 }
 .activity-icon.running .agi-fetch-fill {
   animation: agi-fetch-fill 2.2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 @keyframes agi-fetch-fill {
-  0%, 48% { stroke-dashoffset: 100; opacity: 0; }
-  54% { opacity: 0.9; }
-  82% { stroke-dashoffset: 0; opacity: 0.9; }
-  94%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  48% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  54% {
+    opacity: 0.9;
+  }
+  82% {
+    stroke-dashoffset: 0;
+    opacity: 0.9;
+  }
+  94%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 
 /* ── Checklist: checks tick off top to bottom ──────────────────────── */
@@ -270,10 +523,24 @@
   animation-delay: var(--agi-d, 0s);
 }
 @keyframes agi-check-tick {
-  0%, 4% { stroke-dashoffset: 100; opacity: 0; }
-  6% { opacity: 1; }
-  30%, 70% { stroke-dashoffset: 0; opacity: 1; }
-  86%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  4% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  6% {
+    opacity: 1;
+  }
+  30%,
+  70% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  86%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 
 /* ── Notes: write lines, turn the page smoothly, write again ───────── */
@@ -282,21 +549,54 @@
   animation-delay: var(--agi-d, 0s);
 }
 @keyframes agi-note-write {
-  0%, 46% { stroke-dashoffset: 0; opacity: 0.85; }
-  56% { stroke-dashoffset: 0; opacity: 0; }
-  60% { stroke-dashoffset: 100; opacity: 0; }
-  64% { opacity: 0.85; }
-  92%, 100% { stroke-dashoffset: 0; opacity: 0.85; }
+  0%,
+  46% {
+    stroke-dashoffset: 0;
+    opacity: 0.85;
+  }
+  56% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+  60% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  64% {
+    opacity: 0.85;
+  }
+  92%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0.85;
+  }
 }
 .activity-icon.running .agi-note-page {
   animation: agi-note-flip 3.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 @keyframes agi-note-flip {
-  0%, 48% { transform: scaleX(1); opacity: 0.3; }
-  56% { transform: scaleX(0.55) skewY(-3deg); opacity: 0.65; }
-  62% { transform: scaleX(0.04); opacity: 0.9; }
-  68% { transform: scaleX(0.55) skewY(3deg); opacity: 0.65; }
-  76%, 100% { transform: scaleX(1); opacity: 0.3; }
+  0%,
+  48% {
+    transform: scaleX(1);
+    opacity: 0.3;
+  }
+  56% {
+    transform: scaleX(0.55) skewY(-3deg);
+    opacity: 0.65;
+  }
+  62% {
+    transform: scaleX(0.04);
+    opacity: 0.9;
+  }
+  68% {
+    transform: scaleX(0.55) skewY(3deg);
+    opacity: 0.65;
+  }
+  76%,
+  100% {
+    transform: scaleX(1);
+    opacity: 0.3;
+  }
 }
 
 /* ── Bases: a cell cursor glides smoothly through the grid ─────────── */
@@ -304,12 +604,25 @@
   animation: agi-cell-scan 3.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 @keyframes agi-cell-scan {
-  0%, 100% { transform: translate(0, 0); }
-  20% { transform: translate(7px, 0); }
-  40% { transform: translate(7px, 5.2px); }
-  60% { transform: translate(0, 5.2px); }
-  80% { transform: translate(0, 10.4px); }
-  92% { transform: translate(7px, 10.4px); }
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(7px, 0);
+  }
+  40% {
+    transform: translate(7px, 5.2px);
+  }
+  60% {
+    transform: translate(0, 5.2px);
+  }
+  80% {
+    transform: translate(0, 10.4px);
+  }
+  92% {
+    transform: translate(7px, 10.4px);
+  }
 }
 
 /* ── Network: a packet visits each node smoothly ───────────────────── */
@@ -317,11 +630,24 @@
   animation: agi-net-route 2.8s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 @keyframes agi-net-route {
-  0%, 8% { transform: translate(0, -5.4px); }
-  26%, 34% { transform: translate(-6.8px, 7.6px); }
-  50% { transform: translate(0, -5.4px); }
-  74%, 82% { transform: translate(6.8px, 7.6px); }
-  100% { transform: translate(0, -5.4px); }
+  0%,
+  8% {
+    transform: translate(0, -5.4px);
+  }
+  26%,
+  34% {
+    transform: translate(-6.8px, 7.6px);
+  }
+  50% {
+    transform: translate(0, -5.4px);
+  }
+  74%,
+  82% {
+    transform: translate(6.8px, 7.6px);
+  }
+  100% {
+    transform: translate(0, -5.4px);
+  }
 }
 
 /* ── Canvas: dragging a split-pane divider ─────────────────────────── */
@@ -329,39 +655,98 @@
   animation: agi-split-drag 2.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 @keyframes agi-split-drag {
-  0%, 100% { transform: translateX(-1.5px); }
-  50% { transform: translateX(2.6px); }
+  0%,
+  100% {
+    transform: translateX(-1.5px);
+  }
+  50% {
+    transform: translateX(2.6px);
+  }
 }
 
 /* ── Properties: three independent sliders being adjusted ──────────── */
-.activity-icon.running .agi-k1 { animation: agi-knob-1 2.4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite; }
-.activity-icon.running .agi-k2 { animation: agi-knob-2 2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite; }
-.activity-icon.running .agi-k3 { animation: agi-knob-3 2.8s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite; }
-@keyframes agi-knob-1 { 0%, 100% { transform: translateX(-2.8px); } 50% { transform: translateX(3.8px); } }
-@keyframes agi-knob-2 { 0%, 100% { transform: translateX(2.8px); } 50% { transform: translateX(-3.8px); } }
-@keyframes agi-knob-3 { 0%, 100% { transform: translateX(-2px); } 50% { transform: translateX(3.4px); } }
+.activity-icon.running .agi-k1 {
+  animation: agi-knob-1 2.4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+.activity-icon.running .agi-k2 {
+  animation: agi-knob-2 2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+.activity-icon.running .agi-k3 {
+  animation: agi-knob-3 2.8s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+@keyframes agi-knob-1 {
+  0%,
+  100% {
+    transform: translateX(-2.8px);
+  }
+  50% {
+    transform: translateX(3.8px);
+  }
+}
+@keyframes agi-knob-2 {
+  0%,
+  100% {
+    transform: translateX(2.8px);
+  }
+  50% {
+    transform: translateX(-3.8px);
+  }
+}
+@keyframes agi-knob-3 {
+  0%,
+  100% {
+    transform: translateX(-2px);
+  }
+  50% {
+    transform: translateX(3.4px);
+  }
+}
 
 /* ── History: clock hand sweeps smoothly backwards ─────────────────── */
 .activity-icon.running .agi-clock-hand {
   animation: agi-rewind 2.8s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
-@keyframes agi-rewind { to { transform: rotate(-360deg); } }
+@keyframes agi-rewind {
+  to {
+    transform: rotate(-360deg);
+  }
+}
 
 /* ── Draft: composing a line with a caret ──────────────────────────── */
 .activity-icon.running .agi-draft-line {
   animation: agi-draft-type 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-draft-type {
-  0%, 6% { stroke-dashoffset: 100; opacity: 1; }
-  46%, 78% { stroke-dashoffset: 0; opacity: 1; }
-  92%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  6% {
+    stroke-dashoffset: 100;
+    opacity: 1;
+  }
+  46%,
+  78% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  92%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 .activity-icon.running .agi-draft-caret {
-  animation: agi-draft-caret 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite, agi-caret-blink 0.9s ease-in-out infinite;
+  animation:
+    agi-draft-caret 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite,
+    agi-caret-blink 0.9s ease-in-out infinite;
 }
 @keyframes agi-draft-caret {
-  0%, 6% { transform: translateX(0); }
-  46%, 100% { transform: translateX(6px); }
+  0%,
+  6% {
+    transform: translateX(0);
+  }
+  46%,
+  100% {
+    transform: translateX(6px);
+  }
 }
 
 /* ── Attachment: photo card slides into the paperclip ──────────────── */
@@ -369,16 +754,36 @@
   animation: agi-attach-in 2.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 @keyframes agi-attach-in {
-  0%, 10% { opacity: 0.4; transform: translate(2.2px, 1.5px); }
-  38%, 76% { opacity: 0.95; transform: translate(0, 0); }
-  92%, 100% { opacity: 0.4; transform: translate(2.2px, 1.5px); }
+  0%,
+  10% {
+    opacity: 0.4;
+    transform: translate(2.2px, 1.5px);
+  }
+  38%,
+  76% {
+    opacity: 0.95;
+    transform: translate(0, 0);
+  }
+  92%,
+  100% {
+    opacity: 0.4;
+    transform: translate(2.2px, 1.5px);
+  }
 }
 .activity-icon.running .agi-clip {
   animation: agi-clip-catch 2.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 @keyframes agi-clip-catch {
-  0%, 24%, 90%, 100% { transform: rotate(0deg); }
-  44%, 72% { transform: rotate(-6deg); }
+  0%,
+  24%,
+  90%,
+  100% {
+    transform: rotate(0deg);
+  }
+  44%,
+  72% {
+    transform: rotate(-6deg);
+  }
 }
 
 /* ── Critic: verdict checked off smoothly ──────────────────────────── */
@@ -386,10 +791,24 @@
   animation: agi-verdict 2.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 @keyframes agi-verdict {
-  0%, 6% { stroke-dashoffset: 100; opacity: 0; }
-  8% { opacity: 1; }
-  36%, 76% { stroke-dashoffset: 0; opacity: 1; }
-  90%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  6% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  36%,
+  76% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  90%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 
 /* ── Agent: eyes glide smoothly across work, antenna transmits ─────── */
@@ -397,20 +816,42 @@
   animation: agi-bot-scan 2.4s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 @keyframes agi-bot-scan {
-  0%, 100% { transform: translate(-1.3px, 0); }
-  25% { transform: translate(0, -0.35px); }
-  50% { transform: translate(1.3px, 0); }
-  75% { transform: translate(0, 0.25px); }
+  0%,
+  100% {
+    transform: translate(-1.3px, 0);
+  }
+  25% {
+    transform: translate(0, -0.35px);
+  }
+  50% {
+    transform: translate(1.3px, 0);
+  }
+  75% {
+    transform: translate(0, 0.25px);
+  }
 }
 .activity-icon.running .agi-bot-wave {
   animation: agi-bot-transmit 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite both;
   animation-delay: var(--agi-d, 0s);
 }
 @keyframes agi-bot-transmit {
-  0% { stroke-dashoffset: 100; opacity: 0; }
-  12% { opacity: 0.85; }
-  48%, 70% { stroke-dashoffset: 0; opacity: 0.85; }
-  88%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.85;
+  }
+  48%,
+  70% {
+    stroke-dashoffset: 0;
+    opacity: 0.85;
+  }
+  88%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 
 /* ── Session: balanced typing dots wave smoothly in sequence ───────── */
@@ -419,9 +860,19 @@
   animation-delay: var(--agi-d, 0s);
 }
 @keyframes agi-typing {
-  0%, 100% { transform: translateY(0); opacity: 0.45; }
-  35% { transform: translateY(-1.8px); opacity: 1; }
-  70% { transform: translateY(0); opacity: 0.45; }
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  35% {
+    transform: translateY(-1.8px);
+    opacity: 1;
+  }
+  70% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
 }
 
 /* ── Git: smooth curve flow and commit gliding along the branch ────── */
@@ -429,23 +880,63 @@
   animation: agi-git-flow 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-git-flow {
-  0%, 8% { stroke-dashoffset: 100; opacity: 0; }
-  14% { opacity: 0.95; }
-  58%, 80% { stroke-dashoffset: 0; opacity: 0.95; }
-  92%, 100% { stroke-dashoffset: 0; opacity: 0; }
+  0%,
+  8% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  14% {
+    opacity: 0.95;
+  }
+  58%,
+  80% {
+    stroke-dashoffset: 0;
+    opacity: 0.95;
+  }
+  92%,
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
 }
 .activity-icon.running .agi-commit {
   animation: agi-commit-travel 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-commit-travel {
-  0% { transform: translate(0, 0); opacity: 0; }
-  10%, 18% { transform: translate(0, 0); opacity: 1; }
-  34% { transform: translate(0, 4px); opacity: 1; }
-  48% { transform: translate(-1.5px, 6.8px); opacity: 1; }
-  62% { transform: translate(-4.5px, 8.2px); opacity: 1; }
-  76% { transform: translate(-11px, 8.2px); opacity: 1; }
-  88% { transform: translate(-11px, 12px); opacity: 1; }
-  96%, 100% { transform: translate(-11px, 12px); opacity: 0; }
+  0% {
+    transform: translate(0, 0);
+    opacity: 0;
+  }
+  10%,
+  18% {
+    transform: translate(0, 0);
+    opacity: 1;
+  }
+  34% {
+    transform: translate(0, 4px);
+    opacity: 1;
+  }
+  48% {
+    transform: translate(-1.5px, 6.8px);
+    opacity: 1;
+  }
+  62% {
+    transform: translate(-4.5px, 8.2px);
+    opacity: 1;
+  }
+  76% {
+    transform: translate(-11px, 8.2px);
+    opacity: 1;
+  }
+  88% {
+    transform: translate(-11px, 12px);
+    opacity: 1;
+  }
+  96%,
+  100% {
+    transform: translate(-11px, 12px);
+    opacity: 0;
+  }
 }
 
 /* ── Context: a sheet glides smoothly out of the stack ─────────────── */
@@ -453,10 +944,25 @@
   animation: agi-context-pull 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes agi-context-pull {
-  0%, 10% { opacity: 0; transform: translateX(-3.5px); }
-  28% { opacity: 0.7; transform: translateX(-1.5px); }
-  58%, 74% { opacity: 0.7; transform: translateX(2px); }
-  92%, 100% { opacity: 0; transform: translateX(4.5px); }
+  0%,
+  10% {
+    opacity: 0;
+    transform: translateX(-3.5px);
+  }
+  28% {
+    opacity: 0.7;
+    transform: translateX(-1.5px);
+  }
+  58%,
+  74% {
+    opacity: 0.7;
+    transform: translateX(2px);
+  }
+  92%,
+  100% {
+    opacity: 0;
+    transform: translateX(4.5px);
+  }
 }
 
 /* ── Skill: the cap's tassel swings and settles ─────────────────────── */
@@ -464,8 +970,13 @@
   animation: agi-tassel-swing 2.6s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
 }
 @keyframes agi-tassel-swing {
-  0%, 100% { transform: rotate(-10deg); }
-  50% { transform: rotate(12deg); }
+  0%,
+  100% {
+    transform: rotate(-10deg);
+  }
+  50% {
+    transform: rotate(12deg);
+  }
 }
 
 /* ── Tool: a cog turns steadily while an unknown tool runs ─────────── */
@@ -473,8 +984,12 @@
   animation: agi-cog-turn 3.2s linear infinite;
 }
 @keyframes agi-cog-turn {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(45deg); }
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(45deg);
+  }
 }
 
 /* Reduced motion: drop every animation; the base state above is already a

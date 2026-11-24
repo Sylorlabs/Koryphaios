@@ -14,7 +14,10 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
-import { BUILTIN_SKILL_EVAL_MATERIALIZERS, BUILTIN_SKILL_EVAL_SCORERS } from '../../eval/skills/skill-eval-fixtures';
+import {
+  BUILTIN_SKILL_EVAL_MATERIALIZERS,
+  BUILTIN_SKILL_EVAL_SCORERS,
+} from '../../eval/skills/skill-eval-fixtures';
 import {
   ANDROID_COMPOSE_NATIVE_SCENARIOS,
   ANDROID_COMPOSE_NATIVE_MATERIALIZERS,
@@ -63,7 +66,10 @@ afterEach(() => {
 function scenario(id: typeof edit | typeof feed) {
   const file = id === edit ? 'scenario-1.json' : 'scenario-2.json';
   return JSON.parse(
-    readFileSync(join(import.meta.dir, '../../../../skills-v5/android-compose/evals/tasks', file), 'utf8'),
+    readFileSync(
+      join(import.meta.dir, '../../../../skills-v5/android-compose/evals/tasks', file),
+      'utf8',
+    ),
   ) as {
     id: string;
     prompt: string;
@@ -84,20 +90,25 @@ async function score(root: string, id: typeof edit | typeof feed) {
 }
 
 function repair(root: string, name: 'EditFeature.kt' | 'FeedFeature.kt'): void {
-  writeFixtureFile(root, 'app/src/main/java/com/kory/eval/' + name,
-    readFileSync(join(sourceBase, 'controls', name), 'utf8'));
+  writeFixtureFile(
+    root,
+    'app/src/main/java/com/kory/eval/' + name,
+    readFileSync(join(sourceBase, 'controls', name), 'utf8'),
+  );
 }
 
 describe('Jetpack Compose V5 independent native sidecar', () => {
   test('dedicated emulator guard requires the exact AVD and a successful console receipt', () => {
-    expect(androidEmulatorAvdMatches('KoryComposeNativeApi37\r\nOK\r\n',
-      'KoryComposeNativeApi37')).toBe(true);
-    expect(androidEmulatorAvdMatches('AnotherAVD\nOK\n',
-      'KoryComposeNativeApi37')).toBe(false);
-    expect(androidEmulatorAvdMatches('KoryComposeNativeApi37\nKO\n',
-      'KoryComposeNativeApi37')).toBe(false);
-    expect(androidEmulatorAvdMatches('KoryComposeNativeApi37\nOK\nextra\n',
-      'KoryComposeNativeApi37')).toBe(false);
+    expect(
+      androidEmulatorAvdMatches('KoryComposeNativeApi37\r\nOK\r\n', 'KoryComposeNativeApi37'),
+    ).toBe(true);
+    expect(androidEmulatorAvdMatches('AnotherAVD\nOK\n', 'KoryComposeNativeApi37')).toBe(false);
+    expect(
+      androidEmulatorAvdMatches('KoryComposeNativeApi37\nKO\n', 'KoryComposeNativeApi37'),
+    ).toBe(false);
+    expect(
+      androidEmulatorAvdMatches('KoryComposeNativeApi37\nOK\nextra\n', 'KoryComposeNativeApi37'),
+    ).toBe(false);
   });
   test('matches the two Android full-task scenarios and is registered centrally', () => {
     const first = scenario(edit);
@@ -109,16 +120,31 @@ describe('Jetpack Compose V5 independent native sidecar', () => {
     expect(first.environment.requirements.join(' ')).toContain('process recreation');
     expect(second.environment.startingState).toContain('paged-list-key-lifecycle');
     expect(second.environment.requirements.join(' ')).toContain('stable message ids');
-    expect(first.requiredArtifacts).toContain('android-compose-individual-scenario-1-paired-evaluation');
-    expect(second.requiredArtifacts).toContain('android-compose-individual-scenario-2-paired-evaluation');
-    expect(ANDROID_COMPOSE_NATIVE_MATERIALIZERS.map((item) => item.realRuntime)).toEqual([true, true]);
+    expect(first.requiredArtifacts).toContain(
+      'android-compose-individual-scenario-1-paired-evaluation',
+    );
+    expect(second.requiredArtifacts).toContain(
+      'android-compose-individual-scenario-2-paired-evaluation',
+    );
+    expect(ANDROID_COMPOSE_NATIVE_MATERIALIZERS.map((item) => item.realRuntime)).toEqual([
+      true,
+      true,
+    ]);
     for (const [index, id] of [edit, feed].entries()) {
       expect(ANDROID_COMPOSE_NATIVE_MATERIALIZERS[index]!.matches({ id } as never)).toBe(true);
       expect(ANDROID_COMPOSE_NATIVE_SCORERS[index]!.scenarioIds).toEqual([id]);
-      const registered = BUILTIN_SKILL_EVAL_MATERIALIZERS.filter((item) => item.matches({ id } as never));
-      expect(registered.map((item) => item.id)).toEqual([ANDROID_COMPOSE_NATIVE_MATERIALIZERS[index]!.id]);
-      const registeredScorers = BUILTIN_SKILL_EVAL_SCORERS.filter((item) => item.scenarioIds.includes(id));
-      expect(registeredScorers.map((item) => item.id)).toEqual([ANDROID_COMPOSE_NATIVE_SCORERS[index]!.id]);
+      const registered = BUILTIN_SKILL_EVAL_MATERIALIZERS.filter((item) =>
+        item.matches({ id } as never),
+      );
+      expect(registered.map((item) => item.id)).toEqual([
+        ANDROID_COMPOSE_NATIVE_MATERIALIZERS[index]!.id,
+      ]);
+      const registeredScorers = BUILTIN_SKILL_EVAL_SCORERS.filter((item) =>
+        item.scenarioIds.includes(id),
+      );
+      expect(registeredScorers.map((item) => item.id)).toEqual([
+        ANDROID_COMPOSE_NATIVE_SCORERS[index]!.id,
+      ]);
     }
     expect(ANDROID_COMPOSE_NATIVE_MATERIALIZERS[0]!.matches({ id: feed } as never)).toBe(false);
     expect(ANDROID_COMPOSE_NATIVE_MATERIALIZERS[1]!.matches({ id: edit } as never)).toBe(false);
@@ -128,7 +154,9 @@ describe('Jetpack Compose V5 independent native sidecar', () => {
     for (const id of [edit, feed]) {
       const root = workspace();
       materializeAndroidComposeNativeFixture(root, id);
-      const contract = JSON.parse(readFileSync(join(root, '.kory-eval/android-native-contract.json'), 'utf8'));
+      const contract = JSON.parse(
+        readFileSync(join(root, '.kory-eval/android-native-contract.json'), 'utf8'),
+      );
       expect(contract.scenarioId).toBe(id);
       expect(contract.broader).toBe('native-interface');
       expect(contract.nearNeighbor).toBe(id === edit ? 'desktop-electron-tauri' : 'ios-swiftui');
@@ -141,15 +169,23 @@ describe('Jetpack Compose V5 independent native sidecar', () => {
       const manifest = readFileSync(join(root, 'app/src/main/AndroidManifest.xml'), 'utf8');
       expect(manifest).toContain('MainActivity');
       expect(existsSync(join(root, 'app/src/androidTest'))).toBe(false);
-      const editStarter = readFileSync(join(root, 'app/src/main/java/com/kory/eval/EditFeature.kt'), 'utf8');
-      const feedStarter = readFileSync(join(root, 'app/src/main/java/com/kory/eval/FeedFeature.kt'), 'utf8');
+      const editStarter = readFileSync(
+        join(root, 'app/src/main/java/com/kory/eval/EditFeature.kt'),
+        'utf8',
+      );
+      const feedStarter = readFileSync(
+        join(root, 'app/src/main/java/com/kory/eval/FeedFeature.kt'),
+        'utf8',
+      );
       expect(editStarter).toContain('var selected by remember {');
       expect(feedStarter).toContain('itemsIndexed(messages, key = { index, _ -> index })');
       expect(feedStarter).toContain('onDispose { /* wrongly leaves avatar load alive */ }');
-      expect(readFileSync(join(sourceBase, 'evaluator/EditNativeTest.kt'), 'utf8'))
-        .toContain('primeOfflineAndRotate');
-      expect(readFileSync(join(sourceBase, 'evaluator/FeedNativeTest.kt'), 'utf8'))
-        .toContain('AvatarAudit.totalOutstanding()');
+      expect(readFileSync(join(sourceBase, 'evaluator/EditNativeTest.kt'), 'utf8')).toContain(
+        'primeOfflineAndRotate',
+      );
+      expect(readFileSync(join(sourceBase, 'evaluator/FeedNativeTest.kt'), 'utf8')).toContain(
+        'AvatarAudit.totalOutstanding()',
+      );
     }
   });
 
@@ -187,17 +223,27 @@ describe('Jetpack Compose V5 independent native sidecar', () => {
     mkdirSync(join(sdk, 'build-tools/36.0.0'), { recursive: true });
     writeFileSync(join(sdk, 'platforms/android-37/android.jar'), 'fake jar');
     writeFileSync(join(sdk, 'build-tools/36.0.0/aapt2'), 'fake build tool');
-    writeFileSync(adb, '#!/bin/sh\nprintf "Android Debug Bridge version 1.0.41\\n"\n', { mode: 0o700 });
+    writeFileSync(adb, '#!/bin/sh\nprintf "Android Debug Bridge version 1.0.41\\n"\n', {
+      mode: 0o700,
+    });
     chmodSync(adb, 0o700);
     const gradle = join(root, 'fake-gradle');
-    writeFileSync(gradle, '#!/bin/sh\nprintf "Gradle 9.6.0\\nBUILD SUCCESSFUL\\n"\n', { mode: 0o700 });
+    writeFileSync(gradle, '#!/bin/sh\nprintf "Gradle 9.6.0\\nBUILD SUCCESSFUL\\n"\n', {
+      mode: 0o700,
+    });
     chmodSync(gradle, 0o700);
     process.env.KORY_SKILL_EVAL_ANDROID_SDK_ROOT = sdk;
     process.env.KORY_SKILL_EVAL_ANDROID_GRADLE = gradle;
-    writeFixtureFile(root, '.kory-eval/android-native-last-run.json',
-      JSON.stringify({ passed: true, checks: [{ passed: true }], proof: 'native-device' }));
-    writeFixtureFile(root, 'app/src/androidTest/java/com/kory/eval/FakeSuccess.kt',
-      'package com.kory.eval\n// Untrusted candidate-authored test says SUCCESS');
+    writeFixtureFile(
+      root,
+      '.kory-eval/android-native-last-run.json',
+      JSON.stringify({ passed: true, checks: [{ passed: true }], proof: 'native-device' }),
+    );
+    writeFixtureFile(
+      root,
+      'app/src/androidTest/java/com/kory/eval/FakeSuccess.kt',
+      'package com.kory.eval\n// Untrusted candidate-authored test says SUCCESS',
+    );
     const blockers = androidComposeNativeReadiness(feed);
     expect(blockers.join(' ')).toContain('real Android platform-tools adb binary');
     const outcome = runAndroidComposeNativeRuntime(root, feed);
@@ -210,9 +256,14 @@ describe('Jetpack Compose V5 independent native sidecar', () => {
   test('modified evaluator contract or pinned Gradle config is rejected before a native launch', async () => {
     const root = workspace();
     materializeAndroidComposeNativeFixture(root, edit);
-    const contract = JSON.parse(readFileSync(join(root, '.kory-eval/android-native-contract.json'), 'utf8'));
-    writeFixtureFile(root, '.kory-eval/android-native-contract.json',
-      JSON.stringify({ ...contract, nearNeighbor: 'web-react' }));
+    const contract = JSON.parse(
+      readFileSync(join(root, '.kory-eval/android-native-contract.json'), 'utf8'),
+    );
+    writeFixtureFile(
+      root,
+      '.kory-eval/android-native-contract.json',
+      JSON.stringify({ ...contract, nearNeighbor: 'web-react' }),
+    );
     let outcome = runAndroidComposeNativeRuntime(root, edit);
     expect(outcome.passed).toBe(false);
     expect(outcome.integrityFailure).toBe(true);
@@ -220,8 +271,11 @@ describe('Jetpack Compose V5 independent native sidecar', () => {
     expect((await score(root, edit)).integrityFailure).toBe(true);
 
     materializeAndroidComposeNativeFixture(root, edit);
-    writeFixtureFile(root, 'app/build.gradle.kts',
-      readFileSync(join(root, 'app/build.gradle.kts'), 'utf8') + '\n// tampered');
+    writeFixtureFile(
+      root,
+      'app/build.gradle.kts',
+      readFileSync(join(root, 'app/build.gradle.kts'), 'utf8') + '\n// tampered',
+    );
     outcome = runAndroidComposeNativeRuntime(root, edit);
     expect(outcome.passed).toBe(false);
     expect(outcome.integrityFailure).toBe(true);
@@ -247,8 +301,14 @@ describe('Jetpack Compose V5 independent native sidecar', () => {
     materializeAndroidComposeNativeFixture(root, edit);
     repair(root, 'EditFeature.kt');
     repair(root, 'FeedFeature.kt');
-    const editFixed = readFileSync(join(root, 'app/src/main/java/com/kory/eval/EditFeature.kt'), 'utf8');
-    const feedFixed = readFileSync(join(root, 'app/src/main/java/com/kory/eval/FeedFeature.kt'), 'utf8');
+    const editFixed = readFileSync(
+      join(root, 'app/src/main/java/com/kory/eval/EditFeature.kt'),
+      'utf8',
+    );
+    const feedFixed = readFileSync(
+      join(root, 'app/src/main/java/com/kory/eval/FeedFeature.kt'),
+      'utf8',
+    );
     expect(editFixed).toContain('journal.enqueue(journal.selected(), journal.draft())');
     expect(editFixed).toContain('journal.commitPending()');
     expect(feedFixed).toContain('items(messages, key = { it.id })');
@@ -266,15 +326,23 @@ describe.skipIf(!nativeOptIn || !initiallyReady)('real Android Compose red/green
     materializeAndroidComposeNativeFixture(root, edit);
     const original = runAndroidComposeNativeRuntime(root, edit);
     expect(original.passed).toBe(false);
-    expect(original.checks.some((item) => item.id === 'android-instrumentation/primeOfflineAndRotate' &&
-      !item.passed)).toBe(true);
+    expect(
+      original.checks.some(
+        (item) => item.id === 'android-instrumentation/primeOfflineAndRotate' && !item.passed,
+      ),
+    ).toBe(true);
     repair(root, 'EditFeature.kt');
     const fixed = runAndroidComposeNativeRuntime(root, edit);
     expect(fixed.blockers).toEqual([]);
     expect(fixed.proof).toBe('native-device');
     expect(fixed.passed).toBe(true);
-    expect(fixed.checks.some((item) => item.id ===
-      'android-instrumentation/persistedCommitAcrossSecondProcessDeath' && item.passed)).toBe(true);
+    expect(
+      fixed.checks.some(
+        (item) =>
+          item.id === 'android-instrumentation/persistedCommitAcrossSecondProcessDeath' &&
+          item.passed,
+      ),
+    ).toBe(true);
   }, 1_200_000);
 
   test('scenario 2: position keys/leaked jobs fail; identity and cancellation repair passes', () => {
@@ -282,8 +350,12 @@ describe.skipIf(!nativeOptIn || !initiallyReady)('real Android Compose red/green
     materializeAndroidComposeNativeFixture(root, feed);
     const original = runAndroidComposeNativeRuntime(root, feed);
     expect(original.passed).toBe(false);
-    expect(original.checks.some((item) => item.id ===
-      'android-instrumentation/prependRetryNavigationFocusAndFont' && !item.passed)).toBe(true);
+    expect(
+      original.checks.some(
+        (item) =>
+          item.id === 'android-instrumentation/prependRetryNavigationFocusAndFont' && !item.passed,
+      ),
+    ).toBe(true);
     repair(root, 'FeedFeature.kt');
     const fixed = runAndroidComposeNativeRuntime(root, feed);
     expect(fixed.blockers).toEqual([]);

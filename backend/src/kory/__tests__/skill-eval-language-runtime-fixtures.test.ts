@@ -284,7 +284,9 @@ describe('language runtime skill fixtures', () => {
     writeFixtureFile(root, '.kory-eval/node-reload.json', JSON.stringify(report));
     const passing = await scorer.score(input);
     if (!passing.passed) {
-      throw new Error(`Native Node reload verification unexpectedly failed:\n${passing.evidence.join('\n')}`);
+      throw new Error(
+        `Native Node reload verification unexpectedly failed:\n${passing.evidence.join('\n')}`,
+      );
     }
     expect(passing.passed).toBe(true);
     expect(passing.quality).toBe(1);

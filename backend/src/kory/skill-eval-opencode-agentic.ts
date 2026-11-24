@@ -111,8 +111,7 @@ export function readLogfareProviderFromOperatorConfig(
   // key exported does not also have to duplicate it into the CLI's config file.
   const envKey = process.env[`${providerKey.toUpperCase()}_API_KEY`]?.trim();
   const apiKey = logfare?.options?.apiKey?.trim() || envKey;
-  const baseUrl = logfare?.options?.baseURL?.trim() ||
-    OPENCODE_DEFAULT_BASE_URL[providerKey];
+  const baseUrl = logfare?.options?.baseURL?.trim() || OPENCODE_DEFAULT_BASE_URL[providerKey];
   if (!apiKey || !baseUrl) return null;
   const declared = Object.keys(logfare?.models ?? {});
   // Resolution order is deliberate. A caller override and the environment variable win,
@@ -121,13 +120,13 @@ export function readLogfareProviderFromOperatorConfig(
   // could silently ask for a model that is no longer declared and fail auth-style.
   // Only the Logfare block carries the shared routing alias, so a provider whose catalog is
   // known only to the operator must be named explicitly rather than defaulted to `auto`.
-  const requested = modelName?.trim() ||
-    process.env.KORY_SKILL_EVAL_LOGFARE_MODEL?.trim();
-  const model = requested && (declared.includes(requested) || declared.length === 0)
-    ? requested
-    : declared.includes('auto')
-      ? 'auto'
-      : declared[0] || requested || 'auto';
+  const requested = modelName?.trim() || process.env.KORY_SKILL_EVAL_LOGFARE_MODEL?.trim();
+  const model =
+    requested && (declared.includes(requested) || declared.length === 0)
+      ? requested
+      : declared.includes('auto')
+        ? 'auto'
+        : declared[0] || requested || 'auto';
   if (!model) return null;
   return {
     model,
@@ -407,11 +406,12 @@ export function createOpenCodeLogfareAgenticExecutor(
   options: OpenCodeLogfareAgenticOptions = {},
 ): SkillEvalExecutor {
   const providerKey = operatorProviderKey();
-  const model = options.model ??
-    readProviderFromOperatorConfig(undefined, options.modelName, providerKey);
+  const model =
+    options.model ?? readProviderFromOperatorConfig(undefined, options.modelName, providerKey);
   if (!model) {
     throw new Error(
-      'OpenCode agentic executor is unavailable: no ' + providerKey +
+      'OpenCode agentic executor is unavailable: no ' +
+        providerKey +
         ' provider is configured for the OpenCode CLI.',
     );
   }
@@ -432,9 +432,10 @@ export function createOpenCodeLogfareAgenticExecutor(
     budget: { wallClockMs },
     execute: async (input) => {
       const started = Date.now();
-      const preflight = options.preflight === null
-        ? null
-        : await (options.preflight ?? preflightProviderAccess)(model);
+      const preflight =
+        options.preflight === null
+          ? null
+          : await (options.preflight ?? preflightProviderAccess)(model);
       if (preflight) {
         const infrastructureFailure: SkillInfrastructureFailure = {
           kind: 'provider',
@@ -442,7 +443,13 @@ export function createOpenCodeLogfareAgenticExecutor(
           evidence: [preflight.detail],
           detail: preflight.detail,
         };
-        return { output: '', evidence: [...infrastructureFailure.evidence], artifacts: [], durationMs: 0, infrastructureFailure };
+        return {
+          output: '',
+          evidence: [...infrastructureFailure.evidence],
+          artifacts: [],
+          durationMs: 0,
+          infrastructureFailure,
+        };
       }
       const binary = options.binary ?? opencodeBinary();
       if (!binary) {
@@ -452,7 +459,13 @@ export function createOpenCodeLogfareAgenticExecutor(
           evidence: ['OpenCode CLI binary could not be resolved on PATH'],
           detail: 'OpenCode CLI binary could not be resolved on PATH',
         };
-        return { output: '', evidence: [...infrastructureFailure.evidence], artifacts: [], durationMs: 0, infrastructureFailure };
+        return {
+          output: '',
+          evidence: [...infrastructureFailure.evidence],
+          artifacts: [],
+          durationMs: 0,
+          infrastructureFailure,
+        };
       }
       const before = fingerprintWorkspace(input.workingDirectory);
       const jail = buildSoftJail(process.env as Record<string, string>, []);
@@ -475,7 +488,13 @@ export function createOpenCodeLogfareAgenticExecutor(
           evidence: [`Jail preparation failed: ${detail}`],
           detail: 'Jail preparation failed',
         };
-        return { output: '', evidence: [...infrastructureFailure.evidence], artifacts: [], durationMs: 0, infrastructureFailure };
+        return {
+          output: '',
+          evidence: [...infrastructureFailure.evidence],
+          artifacts: [],
+          durationMs: 0,
+          infrastructureFailure,
+        };
       }
       const promptPath = join(promptDirectory, PROMPT_FILE_NAME);
       const allowedRoots = [input.workingDirectory, jailHome, promptDirectory];
@@ -589,7 +608,11 @@ export function createOpenCodeLogfareAgenticExecutor(
           };
           const watchForProviderAbort = (chunk: string): void => {
             if (abortReason) return;
-            if (!/429|rate limit|free model request limit|provider became unavailable|no provider is available|quota/iu.test(chunk))
+            if (
+              !/429|rate limit|free model request limit|provider became unavailable|no provider is available|quota/iu.test(
+                chunk,
+              )
+            )
               return;
             killAndSettle(chunk.trim().slice(-300) || 'provider limit reached', false);
           };
@@ -647,7 +670,13 @@ export function createOpenCodeLogfareAgenticExecutor(
           evidence: [`OS sandbox unavailable for the candidate: ${detail}`],
           detail: 'The candidate could not be confined, so the run was refused',
         };
-        return { output: '', evidence: [...infrastructureFailure.evidence], artifacts: [], durationMs: 0, infrastructureFailure };
+        return {
+          output: '',
+          evidence: [...infrastructureFailure.evidence],
+          artifacts: [],
+          durationMs: 0,
+          infrastructureFailure,
+        };
       }
       jail.cleanup();
       if (promptDirectory) rmSync(promptDirectory, { recursive: true, force: true });
@@ -685,7 +714,11 @@ export function createOpenCodeLogfareAgenticExecutor(
       // The CLI's own runtime failed before it could do candidate work. A Unix socket path over the
       // macOS limit, a port already bound by another instance and a missing module are all harness
       // conditions: they read as "the candidate changed nothing" if they are not named.
-      if (/Unix socket path exceeds|address already in use|EADDRINUSE|Cannot find module/u.test(diagnostic)) {
+      if (
+        /Unix socket path exceeds|address already in use|EADDRINUSE|Cannot find module/u.test(
+          diagnostic,
+        )
+      ) {
         const infrastructureFailure: SkillInfrastructureFailure = {
           kind: 'environment-drift',
           retryable: true,
@@ -697,7 +730,11 @@ export function createOpenCodeLogfareAgenticExecutor(
       // A provider that goes away mid-turn is an outage, not a candidate that did nothing. OpenCode
       // reports it as "Error: provider became unavailable" and exits 1 with no file writes, which the
       // task-failure branch below would have recorded as a zero-quality candidate result.
-      if (/not logged in|log in|unauthori[sz]ed|invalid api key|401|provider (?:became |is )?unavailable|no provider is available|model (?:is )?not available|rate limit|quota|429/u.test(diagnostic)) {
+      if (
+        /not logged in|log in|unauthori[sz]ed|invalid api key|401|provider (?:became |is )?unavailable|no provider is available|model (?:is )?not available|rate limit|quota|429/u.test(
+          diagnostic,
+        )
+      ) {
         const infrastructureFailure: SkillInfrastructureFailure = {
           kind: 'provider',
           retryable: false,

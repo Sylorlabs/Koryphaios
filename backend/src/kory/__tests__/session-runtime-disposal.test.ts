@@ -29,29 +29,51 @@ async function fixture(rounds: ProviderEvent[][]) {
   const sessions = new SessionStore();
   const messages = new MessageStore();
   const session = await sessions.create('local-user', 'Runtime disposal', undefined, root);
-  await sessions.update(session.id, { agentOverrides: { criticMode: 'off', agentExecutionMode: 'single' } });
+  await sessions.update(session.id, {
+    agentOverrides: { criticMode: 'off', agentExecutionMode: 'single' },
+  });
   const provider = { name: 'openai', config: {} } as Provider;
   const providers = {
     resolveProvider: async () => provider,
-    getAvailable: () => [provider], getStatus: () => [], getConfigs: () => ({}),
-    get: () => undefined, isQuotaError: () => false,
+    getAvailable: () => [provider],
+    getStatus: () => [],
+    getConfigs: () => ({}),
+    get: () => undefined,
+    isQuotaError: () => false,
     executeWithRetry: async function* (_request: StreamRequest): AsyncGenerator<ProviderEvent> {
       yield* rounds.shift() ?? [];
     },
   } as unknown as ProviderRegistry;
   const tools = new ToolRegistry();
-  const manager = new KoryManager(providers, tools, root, {} as KoryphaiosConfig, sessions, messages);
+  const manager = new KoryManager(
+    providers,
+    tools,
+    root,
+    {} as KoryphaiosConfig,
+    sessions,
+    messages,
+  );
   const internal = manager as any;
   manager.resolveActiveRouting = () => ({ model: 'gpt-4o', provider: 'openai' });
   internal.resolveSessionWorkingDirectory = async () => root;
-  tools.execute = mock(async () => ({ callId: 'x', name: 'read_file', output: '', isError: false, durationMs: 0 }));
+  tools.execute = mock(async () => ({
+    callId: 'x',
+    name: 'read_file',
+    output: '',
+    isError: false,
+    durationMs: 0,
+  }));
   fixtures.push({ manager, root });
   return { manager, internal, session };
 }
 
 async function runTurn(f: Awaited<ReturnType<typeof fixture>>, userMessage: string) {
   const admission = await f.manager.reserveSessionTurn(f.session.id, 'user_turn');
-  await f.manager.dispatchAdmittedTask(admission!, { userMessage, preferredModel: 'openai:gpt-4o', interactionMode: 'act' });
+  await f.manager.dispatchAdmittedTask(admission!, {
+    userMessage,
+    preferredModel: 'openai:gpt-4o',
+    interactionMode: 'act',
+  });
 }
 
 describe('KoryManager session runtime disposal', () => {

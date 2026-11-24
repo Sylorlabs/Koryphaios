@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  generateKeyPairSync,
-  createHash,
-  sign as cryptoSign,
-  type KeyObject,
-} from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { generateKeyPairSync, createHash, sign as cryptoSign, type KeyObject } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,12 +11,12 @@ import {
   parseCliArguments,
   publicKeyId,
   REQUIRED_UPDATER_PLATFORMS,
+  runCli as runVerifyCli,
   verifyMinisignature,
   verifyUpdaterManifest,
 } from './verify-updater-manifest';
 
 const REPO_ROOT = join(import.meta.dir, '..');
-const SCRIPT = join(import.meta.dir, 'verify-updater-manifest.ts');
 const TAURI_CONF = join(REPO_ROOT, 'desktop/src-tauri/tauri.conf.json');
 
 // Public material from the published v0.1.0 release: the updater public key
@@ -278,7 +272,10 @@ describe('verifyUpdaterManifest', () => {
 
   test('warns, without failing, about an unknown platform key', () => {
     const copy = manifest();
-    copy.platforms['freebsd-x86_64'] = { url: url('Koryphaios-0.5.0.tar.xz'), signature: REAL_SIGNATURE };
+    copy.platforms['freebsd-x86_64'] = {
+      url: url('Koryphaios-0.5.0.tar.xz'),
+      signature: REAL_SIGNATURE,
+    };
     const result = verifyUpdaterManifest(copy, { ...FULL_OPTIONS, assetNames: undefined });
     expect(result.errors).toEqual([]);
     expect(result.warnings).toEqual(['platform freebsd-x86_64 is not a known updater target']);
@@ -319,24 +316,38 @@ describe('parseCliArguments', () => {
 });
 
 describe('verify-updater-manifest CLI', () => {
-  function runCli(body: unknown, extraArgs: string[]): { status: number; stdout: string; stderr: string } {
+  function runCli(
+    body: unknown,
+    extraArgs: string[],
+  ): { status: number; stdout: string; stderr: string } {
     const dir = mkdtempSync(join(tmpdir(), 'kory-updater-manifest-'));
     try {
       const file = join(dir, 'latest.json');
       writeFileSync(file, JSON.stringify(body));
       const assets = join(dir, 'assets.json');
       writeFileSync(assets, JSON.stringify({ assets: RELEASE_ASSETS.map((name) => ({ name })) }));
-      try {
-        const stdout = execFileSync(
-          process.execPath,
-          [SCRIPT, file, '--expect-version', '0.5.0', '--repo', REPO, '--assets', assets, '--tauri-conf', TAURI_CONF, ...extraArgs],
-          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
-        );
-        return { status: 0, stdout, stderr: '' };
-      } catch (error) {
-        const failed = error as { status: number; stdout: string; stderr: string };
-        return { status: failed.status, stdout: failed.stdout, stderr: failed.stderr };
-      }
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      const status = runVerifyCli(
+        [
+          file,
+          '--expect-version',
+          '0.5.0',
+          '--repo',
+          REPO,
+          '--assets',
+          assets,
+          '--tauri-conf',
+          TAURI_CONF,
+          ...extraArgs,
+        ],
+        {
+          out: (line) => stdout.push(line),
+          err: (line) => stderr.push(line),
+          warn: (line) => stderr.push(line),
+        },
+      );
+      return { status, stdout: stdout.join('\n'), stderr: stderr.join('\n') };
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -358,10 +369,13 @@ describe('verify-updater-manifest CLI', () => {
   });
 
   test('exits 2 when the file is missing', () => {
-    expect(() =>
-      execFileSync(process.execPath, [SCRIPT, join(tmpdir(), 'kory-does-not-exist.json')], {
-        stdio: 'ignore',
-      }),
-    ).toThrow();
+    const stderr: string[] = [];
+    const status = runVerifyCli([join(tmpdir(), 'kory-does-not-exist.json')], {
+      out: () => {},
+      err: (line) => stderr.push(line),
+      warn: (line) => stderr.push(line),
+    });
+    expect(status).toBe(2);
+    expect(stderr.join('\n')).toContain('does not exist');
   });
 });

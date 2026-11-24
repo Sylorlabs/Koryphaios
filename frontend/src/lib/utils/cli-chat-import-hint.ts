@@ -26,7 +26,9 @@ function defaultStorage(): StorageLike | undefined {
 }
 
 /** Read the dismissal flag. A blocked or unreadable store means "not dismissed". */
-export function isImportHintDismissed(storage: StorageLike | undefined = defaultStorage()): boolean {
+export function isImportHintDismissed(
+  storage: StorageLike | undefined = defaultStorage(),
+): boolean {
   try {
     return storage?.getItem(IMPORT_HINT_DISMISSED_KEY) === '1';
   } catch {
@@ -54,11 +56,15 @@ export function summarizeImportable(body: unknown): ImportableSummary {
   const providerNames: string[] = [];
   for (const project of projects) {
     const chats = Array.isArray((project as { chats?: unknown })?.chats)
-      ? ((project as { chats: unknown[] }).chats)
+      ? (project as { chats: unknown[] }).chats
       : [];
     for (const chat of chats) {
       if (!chat || typeof chat !== 'object') continue;
-      const entry = chat as { alreadyImported?: unknown; providerDisplayName?: unknown; provider?: unknown };
+      const entry = chat as {
+        alreadyImported?: unknown;
+        providerDisplayName?: unknown;
+        provider?: unknown;
+      };
       if (entry.alreadyImported === true) continue;
       count += 1;
       const name =
@@ -76,7 +82,8 @@ export function summarizeImportable(body: unknown): ImportableSummary {
 /** The line shown on the welcome view, e.g. "Import 3 chats from Claude Code / Codex". */
 export function importHintText(summary: ImportableSummary): string {
   const chats = `${summary.count} ${summary.count === 1 ? 'chat' : 'chats'}`;
-  const sources = summary.providerNames.length > 0 ? summary.providerNames.join(' / ') : 'local CLIs';
+  const sources =
+    summary.providerNames.length > 0 ? summary.providerNames.join(' / ') : 'local CLIs';
   return `Import ${chats} from ${sources}`;
 }
 

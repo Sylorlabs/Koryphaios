@@ -14,7 +14,12 @@ import { tmpdir } from 'node:os';
 import { basename, extname, join, resolve } from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright';
 import { hasHardLinks, isContainedBy } from '../../runtime/platform';
-import { chromiumBlockers, chromiumLaunchOptions, pinnedBrowserPackage, pinnedPackageBlockers } from './skill-eval-real-web-runtime';
+import {
+  chromiumBlockers,
+  chromiumLaunchOptions,
+  pinnedBrowserPackage,
+  pinnedPackageBlockers,
+} from './skill-eval-real-web-runtime';
 import type {
   SkillEvalDeterministicScore,
   SkillEvalDeterministicScorer,
@@ -425,14 +430,18 @@ export const REACT_BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMa
   {
     id: 'react-engineering/search-real-react-chromium@3',
     realRuntime: true,
-    get readinessBlockers() { return reactBrowserReadiness(); },
+    get readinessBlockers() {
+      return reactBrowserReadiness();
+    },
     matches: (scenario) => scenario.id === SEARCH,
     materialize: (root) => materialize(root, 1),
   },
   {
     id: 'react-engineering/keyed-window-real-react-chromium@3',
     realRuntime: true,
-    get readinessBlockers() { return reactBrowserReadiness(); },
+    get readinessBlockers() {
+      return reactBrowserReadiness();
+    },
     matches: (scenario) => scenario.id === LIST,
     materialize: (root) => materialize(root, 2),
   },
@@ -629,10 +638,12 @@ async function withBrowser<T>(run: (browser: Browser) => Promise<T>): Promise<T>
   // a separate browser context for every score (see runBrowser below).
   if (!sharedBrowser?.isConnected()) {
     if (!launchingBrowser) {
-      launchingBrowser = chromium.launch({ ...chromiumLaunchOptions(), timeout: 30_000 }).then((browser) => {
-        sharedBrowser = browser;
-        return browser;
-      });
+      launchingBrowser = chromium
+        .launch({ ...chromiumLaunchOptions(), timeout: 30_000 })
+        .then((browser) => {
+          sharedBrowser = browser;
+          return browser;
+        });
     }
     try {
       await launchingBrowser;

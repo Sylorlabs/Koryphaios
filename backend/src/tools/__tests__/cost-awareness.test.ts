@@ -8,7 +8,11 @@ import { initCreditDb, getCreditDb, recordUsage } from '../../credit-accountant/
 import { SessionStore } from '../../stores/session-store';
 import { roleIncludesTool } from '../tool-roles';
 import { GetModelPricingTool, GetUsageSummaryTool } from '../cost-awareness';
-import { READ_ONLY_TOOLS, decideToolPermission, resolveToolPermissionPolicy } from '../permission-policy';
+import {
+  READ_ONLY_TOOLS,
+  decideToolPermission,
+  resolveToolPermissionPolicy,
+} from '../permission-policy';
 import { DEFAULT_AGENT_SETTINGS } from '../../agent-settings';
 import { screenToolCall } from '../../security/banned-names';
 import { KORY_TOOLS, toolsForRole } from '../../providers/kory-mcp-bridge';
@@ -74,7 +78,9 @@ const noSpendCap = async (sessionId: string | undefined): Promise<SpendCapStatus
   paused: false,
 });
 
-function budgetWith(snapshot: Partial<ResourceBudgetSnapshot>): () => Promise<ResourceBudgetSnapshot> {
+function budgetWith(
+  snapshot: Partial<ResourceBudgetSnapshot>,
+): () => Promise<ResourceBudgetSnapshot> {
   return async () => ({
     generatedAt: 0,
     entries: [],
@@ -102,17 +108,35 @@ describe('get_model_pricing', () => {
     },
     {
       name: 'custom:my-endpoint',
-      models: [catalogModel({ id: 'llama3', provider: 'custom:my-endpoint', isGeneric: true, costPerMInputTokens: 0, costPerMOutputTokens: 0 })],
+      models: [
+        catalogModel({
+          id: 'llama3',
+          provider: 'custom:my-endpoint',
+          isGeneric: true,
+          costPerMInputTokens: 0,
+          costPerMOutputTokens: 0,
+        }),
+      ],
     },
     {
       name: 'codex',
-      models: [catalogModel({ id: 'gpt-5', provider: 'codex', costPerMInputTokens: 0, costPerMOutputTokens: 0 })],
+      models: [
+        catalogModel({
+          id: 'gpt-5',
+          provider: 'codex',
+          costPerMInputTokens: 0,
+          costPerMOutputTokens: 0,
+        }),
+      ],
     },
   ];
 
   test('reports catalog prices with their source and the verified context window', async () => {
     const tool = new GetModelPricingTool(registryOf(providers), { resolvePricing: () => null });
-    const result = await tool.run(ctxFor('s'), callFor('get_model_pricing', { models: ['openrouter:openai/gpt-4.1'] }));
+    const result = await tool.run(
+      ctxFor('s'),
+      callFor('get_model_pricing', { models: ['openrouter:openai/gpt-4.1'] }),
+    );
     expect(result.isError).toBe(false);
     const [model] = parse(result.output).models;
     expect(model).toMatchObject({
@@ -132,39 +156,75 @@ describe('get_model_pricing', () => {
     const tool = new GetModelPricingTool(registryOf(providers), { resolvePricing: () => null });
     const result = await tool.run(
       ctxFor('s'),
-      callFor('get_model_pricing', { models: ['openrouter:no-price/model', 'openrouter:never/listed', 'custom:my-endpoint:llama3'] }),
+      callFor('get_model_pricing', {
+        models: [
+          'openrouter:no-price/model',
+          'openrouter:never/listed',
+          'custom:my-endpoint:llama3',
+        ],
+      }),
     );
     const [unpriced, unlisted, generic] = parse(result.output).models;
-    expect(unpriced).toMatchObject({ inCatalog: true, inputPerMTok: null, outputPerMTok: null, priceSource: 'unknown', contextWindow: null, contextSource: 'unknown' });
-    expect(unlisted).toMatchObject({ inCatalog: false, inputPerMTok: null, priceSource: 'unknown' });
+    expect(unpriced).toMatchObject({
+      inCatalog: true,
+      inputPerMTok: null,
+      outputPerMTok: null,
+      priceSource: 'unknown',
+      contextWindow: null,
+      contextSource: 'unknown',
+    });
+    expect(unlisted).toMatchObject({
+      inCatalog: false,
+      inputPerMTok: null,
+      priceSource: 'unknown',
+    });
     expect(unlisted.note).toContain('unknown, not zero');
     // A generic placeholder carries zero costs; those are not a price.
-    expect(generic).toMatchObject({ provider: 'custom:my-endpoint', model: 'llama3', inputPerMTok: null, priceSource: 'unknown' });
+    expect(generic).toMatchObject({
+      provider: 'custom:my-endpoint',
+      model: 'llama3',
+      inputPerMTok: null,
+      priceSource: 'unknown',
+    });
   });
 
   test('falls back to models.dev and provider-reported registries in that order', async () => {
     const calls: string[] = [];
     const tool = new GetModelPricingTool(
-      fakeRegistry({ openrouter: [catalogModel({ id: 'vendor/a' }), catalogModel({ id: 'vendor/b' })] }),
+      fakeRegistry({
+        openrouter: [catalogModel({ id: 'vendor/a' }), catalogModel({ id: 'vendor/b' })],
+      }),
       {
         resolvePricing: (provider, model) => {
           calls.push(`${provider}:${model}`);
           if (model === 'vendor/a') return { inPerM: 1, outPerM: 3, source: 'models.dev' };
-          if (model === 'vendor/b') return { inPerM: 0.4, outPerM: 1.6, cacheReadPerM: 0.1, source: 'provider-rate' };
+          if (model === 'vendor/b')
+            return { inPerM: 0.4, outPerM: 1.6, cacheReadPerM: 0.1, source: 'provider-rate' };
           return null;
         },
       },
     );
-    const result = await tool.run(ctxFor('s'), callFor('get_model_pricing', { models: ['openrouter:vendor/a', 'openrouter:vendor/b'] }));
+    const result = await tool.run(
+      ctxFor('s'),
+      callFor('get_model_pricing', { models: ['openrouter:vendor/a', 'openrouter:vendor/b'] }),
+    );
     const [a, b] = parse(result.output).models;
     expect(a).toMatchObject({ priceSource: 'models.dev', inputPerMTok: 1, outputPerMTok: 3 });
-    expect(b).toMatchObject({ priceSource: 'provider-reported', inputPerMTok: 0.4, cacheReadPerMTok: 0.1, cacheWritePerMTok: null });
+    expect(b).toMatchObject({
+      priceSource: 'provider-reported',
+      inputPerMTok: 0.4,
+      cacheReadPerMTok: 0.1,
+      cacheWritePerMTok: null,
+    });
     expect(calls).toEqual(['openrouter:vendor/a', 'openrouter:vendor/b']);
   });
 
   test('parses custom provider names that contain a colon and lists a provider catalog', async () => {
     const tool = new GetModelPricingTool(registryOf(providers), { resolvePricing: () => null });
-    const listed = await tool.run(ctxFor('s'), callFor('get_model_pricing', { provider: 'openrouter' }));
+    const listed = await tool.run(
+      ctxFor('s'),
+      callFor('get_model_pricing', { provider: 'openrouter' }),
+    );
     const models = parse(listed.output).models.map((m: { model: string }) => m.model);
     expect(models).toEqual(['openai/gpt-4.1', 'no-price/model']);
 
@@ -207,23 +267,43 @@ describe('get_usage_summary', () => {
     distant = (await sessions.create('local-user', 'Cost distant')).id;
     await sessions.update(distant, { workingDirectory: folderB });
 
-    recordUsage('priced-model', 'openrouter', 1_000, 500, 0.25, { sessionId: own }, { costKnown: true });
-    recordUsage('priced-model', 'openrouter', 2_000, 100, 0.5, { sessionId: sibling }, { costKnown: true });
-    recordUsage('priced-model', 'openrouter', 9_000, 900, 9, { sessionId: distant }, { costKnown: true });
+    recordUsage(
+      'priced-model',
+      'openrouter',
+      1_000,
+      500,
+      0.25,
+      { sessionId: own },
+      { costKnown: true },
+    );
+    recordUsage(
+      'priced-model',
+      'openrouter',
+      2_000,
+      100,
+      0.5,
+      { sessionId: sibling },
+      { costKnown: true },
+    );
+    recordUsage(
+      'priced-model',
+      'openrouter',
+      9_000,
+      900,
+      9,
+      { sessionId: distant },
+      { costKnown: true },
+    );
     recordUsage('mystery-model', 'mystery', 300, 30, 0, { sessionId: own }, { costKnown: false });
     recordUsage('sub-model', 'codex', 700, 70, 0, { sessionId: own }, { costKnown: true });
   });
 
   function tool(overrides: Partial<UsageSummaryDependencies> = {}) {
-    return new GetUsageSummaryTool(
-      fakeRegistry({}),
-      sessions,
-      {
-        spendCap: noSpendCap,
-        budget: budgetWith({}),
-        ...overrides,
-      },
-    );
+    return new GetUsageSummaryTool(fakeRegistry({}), sessions, {
+      spendCap: noSpendCap,
+      budget: budgetWith({}),
+      ...overrides,
+    });
   }
 
   test('session scope counts only this chat, and unknown spend is not zero', async () => {
@@ -237,24 +317,35 @@ describe('get_usage_summary', () => {
     expect(report.spend.pricingIncomplete).toBe(true);
     expect(report.spend.totalUsd).toBeCloseTo(0.25, 6);
     // Subscription tokens are listed separately, never as dollars.
-    expect(report.subscriptionProviders).toEqual([{ provider: 'codex', tokensIn: 700, tokensOut: 70 }]);
+    expect(report.subscriptionProviders).toEqual([
+      { provider: 'codex', tokensIn: 700, tokensOut: 70 },
+    ]);
     expect(report.byProvider.map((p: { provider: string }) => p.provider)).not.toContain('codex');
-    expect(report.byModel.find((m: { model: string }) => m.model === 'mystery-model')).toMatchObject({ spendUsd: null, pricingIncomplete: true });
+    expect(
+      report.byModel.find((m: { model: string }) => m.model === 'mystery-model'),
+    ).toMatchObject({ spendUsd: null, pricingIncomplete: true });
   });
 
   test('session scope for another chat requires its id and does not leak the caller chat', async () => {
-    const other = parse((await tool().run(ctxFor(own), callFor('get_usage_summary', { sessionId: distant }))).output);
+    const other = parse(
+      (await tool().run(ctxFor(own), callFor('get_usage_summary', { sessionId: distant }))).output,
+    );
     expect(other.sessionId).toBe(distant);
     expect(other.tokens.input).toBe(9_000);
     expect(other.spend.totalUsd).toBeCloseTo(9, 6);
 
-    const missing = await tool().run(ctxFor(own), callFor('get_usage_summary', { sessionId: 'no-such-chat' }));
+    const missing = await tool().run(
+      ctxFor(own),
+      callFor('get_usage_summary', { sessionId: 'no-such-chat' }),
+    );
     expect(missing.isError).toBe(true);
     expect(missing.output).toContain('list_sessions');
   });
 
   test('project scope includes chats in the same folder only', async () => {
-    const report = parse((await tool().run(ctxFor(own), callFor('get_usage_summary', { scope: 'project' }))).output);
+    const report = parse(
+      (await tool().run(ctxFor(own), callFor('get_usage_summary', { scope: 'project' }))).output,
+    );
     expect(report.scope).toBe('project');
     expect(report.tokens.input).toBe(1_000 + 2_000 + 300 + 700);
     expect(report.spend.totalUsd).toBeCloseTo(0.75, 6);
@@ -265,8 +356,12 @@ describe('get_usage_summary', () => {
       'INSERT INTO credit_usage (ts, model, provider, session_id, tokens_in, tokens_out, cost_usd, cost_known) VALUES (?, ?, ?, ?, ?, ?, ?, 1)',
       [Date.now() - 400 * 24 * 60 * 60 * 1000, 'old-model', 'openrouter', own, 77_000, 0, 77],
     );
-    const today = parse((await tool().run(ctxFor(own), callFor('get_usage_summary', { scope: 'today' }))).output);
-    const month = parse((await tool().run(ctxFor(own), callFor('get_usage_summary', { scope: 'month' }))).output);
+    const today = parse(
+      (await tool().run(ctxFor(own), callFor('get_usage_summary', { scope: 'today' }))).output,
+    );
+    const month = parse(
+      (await tool().run(ctxFor(own), callFor('get_usage_summary', { scope: 'month' }))).output,
+    );
     // Every row above was written today; the 400-day-old row (77k input) is outside both windows.
     expect(today.window.from).not.toBeNull();
     expect(today.tokens.input).toBe(1_000 + 2_000 + 9_000 + 300 + 700);
@@ -296,7 +391,12 @@ describe('get_usage_summary', () => {
           spendCap: async (sessionId: string | undefined) => ({
             enabled: true,
             action: 'pause',
-            limitsUsd: { sessionHourly: 5, sessionDaily: null, globalHourly: null, globalDaily: 50 },
+            limitsUsd: {
+              sessionHourly: 5,
+              sessionDaily: null,
+              globalHourly: null,
+              globalDaily: 50,
+            },
             spentUsd: { sessionHour: 1.2, sessionDay: 1.5, globalHour: 3, globalDay: 4 },
             sessionId,
             paused: false,
@@ -325,10 +425,14 @@ describe('get_usage_summary', () => {
             ],
             limitations: ['Missing providers are unknown, not zero.'],
           }),
-        }).run(ctxFor(own), callFor('get_usage_summary', {})),
+        }).run(ctxFor(own), callFor('get_usage_summary', {}))
       ).output,
     );
-    expect(report.spendCap).toMatchObject({ enabled: true, action: 'pause', limitsUsd: { sessionHourly: 5, globalDaily: 50 } });
+    expect(report.spendCap).toMatchObject({
+      enabled: true,
+      action: 'pause',
+      limitsUsd: { sessionHourly: 5, globalDaily: 50 },
+    });
     expect(report.quotas).toHaveLength(2);
     expect(report.quotas[0]).toMatchObject({ provider: 'devin', usedPercent: 93, state: 'low' });
     expect(report.quotas[0].observedAgeSeconds).toBeGreaterThanOrEqual(119);

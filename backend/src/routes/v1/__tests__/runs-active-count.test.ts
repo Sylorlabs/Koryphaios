@@ -36,12 +36,12 @@ const runs: SessionRunSnapshot[] = [
   snapshot('e', 'terminal', ['kory-manager']),
 ];
 
-const routes = createRunRoutes(() => ({ listActive: () => runs.filter((r) => r.status === 'active') }));
+const routes = createRunRoutes(() => ({
+  listActive: () => runs.filter((r) => r.status === 'active'),
+}));
 
 function get(headers: Record<string, string> = {}) {
-  return routes.handle(
-    new Request('http://localhost/api/runs/active-count', { headers }),
-  );
+  return routes.handle(new Request('http://localhost/api/runs/active-count', { headers }));
 }
 
 describe('GET /api/runs/active-count', () => {

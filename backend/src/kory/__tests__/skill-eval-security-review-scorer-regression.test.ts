@@ -33,10 +33,14 @@ async function scoreArtifact(artifact: unknown) {
 
 const contradictoryArtifact = {
   analysisMode: 'static review',
-  finding: 'Archive entry crosses queue into filesystem extraction without traversal containment. Prerequisites: uploader; severity: high.',
+  finding:
+    'Archive entry crosses queue into filesystem extraction without traversal containment. Prerequisites: uploader; severity: high.',
   decoys: 'Framework escaping; webhook allowlist and private-IP denial.',
   handoff: { owner: 'security-verification', cases: ['symlink'] },
-  execution: { status: 'executed', result: 'Traversal exploit succeeded; all containment tests passed.' },
+  execution: {
+    status: 'executed',
+    result: 'Traversal exploit succeeded; all containment tests passed.',
+  },
 };
 
 test('import review rejects the original contradictory execution and incomplete handoff artifact', async () => {

@@ -267,7 +267,8 @@ function runtimeReadinessBlockers(scenarioId: string): readonly string[] {
   const materializer = EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS.find((item) =>
     item.matches({ id: scenarioId } as never),
   );
-  if (!materializer) throw new Error(`Real runtime materializer is not registered for ${scenarioId}`);
+  if (!materializer)
+    throw new Error(`Real runtime materializer is not registered for ${scenarioId}`);
   return materializer.readinessBlockers ?? [];
 }
 
@@ -290,75 +291,132 @@ const nextActionRuntimeTest = browserControlTest(
 
 function realFixture(skill: string, scenarioId: string) {
   const pkg = loadV5SkillPackages().packages.find((candidate) => candidate.sidecar.name === skill)!;
-  const scenario = buildSkillEvalSuiteV3(pkg).scenarios.find((candidate) => candidate.id === scenarioId)!;
-  const materializer = EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS.find((item) => item.matches(scenario))!;
-  const scorer = EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS.find((item) => item.scenarioIds.includes(scenarioId))!;
+  const scenario = buildSkillEvalSuiteV3(pkg).scenarios.find(
+    (candidate) => candidate.id === scenarioId,
+  )!;
+  const materializer = EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS.find((item) =>
+    item.matches(scenario),
+  )!;
+  const scorer = EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS.find((item) =>
+    item.scenarioIds.includes(scenarioId),
+  )!;
   const root = mkdtempSync(join(tmpdir(), 'kory-vue-next-eval-test-'));
   tmpRoots.push(root);
   materializer.materialize(root, scenario);
-  const score = () => scorer.score({ scenario, experiment: {} as never, workingDirectory: root,
-    observation: { output: '', evidence: [], artifacts: [], durationMs: 0 } });
+  const score = () =>
+    scorer.score({
+      scenario,
+      experiment: {} as never,
+      workingDirectory: root,
+      observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
+    });
   return { root, materializer, scorer, score };
 }
 
 function evidence(root: string, skill: 'vue-engineering' | 'nextjs-engineering', number: 1 | 2) {
   const isVue = skill === 'vue-engineering';
-  writeFixtureFile(root, 'verification/result.json', JSON.stringify({
-    status: 'verified',
-    ...(isVue
-      ? { vueVersion: VUE_BROWSER_EVAL_CONSTANTS.version, broaderSkill: 'frontend-engineering',
-          nearNeighbor: number === 1 ? 'angular-engineering' : 'react-engineering' }
-      : { nextVersion: NEXTJS_RUNTIME_EVAL_CONSTANTS.nextVersion, router: 'app', deployment: 'production',
-          broaderSkill: 'web-interface', nearNeighbor: number === 1 ? 'android-compose' : 'angular-engineering' }),
-    recovery: 'Verified a real runtime recovery after delayed data, navigation, authentication or reset.',
-  }));
+  writeFixtureFile(
+    root,
+    'verification/result.json',
+    JSON.stringify({
+      status: 'verified',
+      ...(isVue
+        ? {
+            vueVersion: VUE_BROWSER_EVAL_CONSTANTS.version,
+            broaderSkill: 'frontend-engineering',
+            nearNeighbor: number === 1 ? 'angular-engineering' : 'react-engineering',
+          }
+        : {
+            nextVersion: NEXTJS_RUNTIME_EVAL_CONSTANTS.nextVersion,
+            router: 'app',
+            deployment: 'production',
+            broaderSkill: 'web-interface',
+            nearNeighbor: number === 1 ? 'android-compose' : 'angular-engineering',
+          }),
+      recovery:
+        'Verified a real runtime recovery after delayed data, navigation, authentication or reset.',
+    }),
+  );
 }
 
 describe('Vue and Next full-task real runtime qualification', () => {
-  vueRouteRuntimeTest('real Vue 3 browser watcher race fails red and succeeds with cleanup, history and recovery', async () => {
-    const fixture = realFixture('vue-engineering', 'vue-engineering-full-task-1-individual');
-    expect(fixture.materializer.realRuntime).toBe(true);
-    evidence(fixture.root, 'vue-engineering', 1);
-    const red = await fixture.score();
-    expect(red.passed, red.evidence.join('\n')).toBe(false);
-    writeFixtureFile(fixture.root, 'src/App.js', VUE_SEARCH_GREEN);
-    const green = await fixture.score();
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    expect(green.verification).toBe(1);
-  }, 65_000);
+  vueRouteRuntimeTest(
+    'real Vue 3 browser watcher race fails red and succeeds with cleanup, history and recovery',
+    async () => {
+      const fixture = realFixture('vue-engineering', 'vue-engineering-full-task-1-individual');
+      expect(fixture.materializer.realRuntime).toBe(true);
+      evidence(fixture.root, 'vue-engineering', 1);
+      const red = await fixture.score();
+      expect(red.passed, red.evidence.join('\n')).toBe(false);
+      writeFixtureFile(fixture.root, 'src/App.js', VUE_SEARCH_GREEN);
+      const green = await fixture.score();
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      expect(green.verification).toBe(1);
+    },
+    65_000,
+  );
 
-  vueFormRuntimeTest('real Vue 3 form rejects watcher feedback and verifies single commit', async () => {
-    const fixture = realFixture('vue-engineering', 'vue-engineering-full-task-2-individual');
-    evidence(fixture.root, 'vue-engineering', 2);
-    const red = await fixture.score();
-    expect(red.passed, red.evidence.join('\n')).toBe(false);
-    writeFixtureFile(fixture.root, 'src/App.js', VUE_FORM_GREEN);
-    const green = await fixture.score();
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    writeFixtureFile(fixture.root, 'src/Harness.js', 'export default {}');
-    const tampered = await fixture.score();
-    expect(tampered.integrityFailure).toBe(true);
-  }, 65_000);
+  vueFormRuntimeTest(
+    'real Vue 3 form rejects watcher feedback and verifies single commit',
+    async () => {
+      const fixture = realFixture('vue-engineering', 'vue-engineering-full-task-2-individual');
+      evidence(fixture.root, 'vue-engineering', 2);
+      const red = await fixture.score();
+      expect(red.passed, red.evidence.join('\n')).toBe(false);
+      writeFixtureFile(fixture.root, 'src/App.js', VUE_FORM_GREEN);
+      const green = await fixture.score();
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      writeFixtureFile(fixture.root, 'src/Harness.js', 'export default {}');
+      const tampered = await fixture.score();
+      expect(tampered.integrityFailure).toBe(true);
+    },
+    65_000,
+  );
 
-  nextCacheRuntimeTest('actual production Next App Router isolates SSR/client cache across sessions', async () => {
-    const fixture = realFixture('nextjs-engineering', 'nextjs-engineering-full-task-1-individual');
-    evidence(fixture.root, 'nextjs-engineering', 1);
-    writeFixtureFile(fixture.root, 'app/PriceView.jsx', NEXT_CACHE_GREEN);
-    const green = await fixture.score();
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    writeFixtureFile(fixture.root, 'app/PriceView.jsx', readFileSync(join(fixture.root, 'app/PriceView.jsx'), 'utf8').replace('getPrice(viewer)', 'getPrice(\'anonymous\')'));
-    const red = await fixture.score();
-    expect(red.passed).toBe(false);
-  }, 290_000);
+  nextCacheRuntimeTest(
+    'actual production Next App Router isolates SSR/client cache across sessions',
+    async () => {
+      const fixture = realFixture(
+        'nextjs-engineering',
+        'nextjs-engineering-full-task-1-individual',
+      );
+      evidence(fixture.root, 'nextjs-engineering', 1);
+      writeFixtureFile(fixture.root, 'app/PriceView.jsx', NEXT_CACHE_GREEN);
+      const green = await fixture.score();
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      writeFixtureFile(
+        fixture.root,
+        'app/PriceView.jsx',
+        readFileSync(join(fixture.root, 'app/PriceView.jsx'), 'utf8').replace(
+          'getPrice(viewer)',
+          "getPrice('anonymous')",
+        ),
+      );
+      const red = await fixture.score();
+      expect(red.passed).toBe(false);
+    },
+    290_000,
+  );
 
-  nextActionRuntimeTest('actual production Next Server Action deduplicates concurrent requests and rejects invalid sessions', async () => {
-    const fixture = realFixture('nextjs-engineering', 'nextjs-engineering-full-task-2-individual');
-    evidence(fixture.root, 'nextjs-engineering', 2);
-    writeFixtureFile(fixture.root, 'app/actions.js', NEXT_ACTION_GREEN);
-    const green = await fixture.score();
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    writeFixtureFile(fixture.root, 'app/actions.js', `'use server';\nimport { insertUnsafe } from '../lib/store.js';\nexport async function submitOrder(_p, data) { const o = await insertUnsafe('alice', String(data.get('requestId'))); return { status: 'success', orderId: o.id }; }\n`);
-    const red = await fixture.score();
-    expect(red.passed).toBe(false);
-  }, 290_000);
+  nextActionRuntimeTest(
+    'actual production Next Server Action deduplicates concurrent requests and rejects invalid sessions',
+    async () => {
+      const fixture = realFixture(
+        'nextjs-engineering',
+        'nextjs-engineering-full-task-2-individual',
+      );
+      evidence(fixture.root, 'nextjs-engineering', 2);
+      writeFixtureFile(fixture.root, 'app/actions.js', NEXT_ACTION_GREEN);
+      const green = await fixture.score();
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      writeFixtureFile(
+        fixture.root,
+        'app/actions.js',
+        `'use server';\nimport { insertUnsafe } from '../lib/store.js';\nexport async function submitOrder(_p, data) { const o = await insertUnsafe('alice', String(data.get('requestId'))); return { status: 'success', orderId: o.id }; }\n`,
+      );
+      const red = await fixture.score();
+      expect(red.passed).toBe(false);
+    },
+    290_000,
+  );
 });

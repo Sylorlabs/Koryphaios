@@ -26,7 +26,10 @@ function createManager(): { manager: KoryManager; sessionId: string } {
   const sessionId = `auto-claim-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
   const messageStore = {
     getContextMessages: async () => [],
-    commitCompaction: async (_input: CompactionCommit) => ({ sourceRevision: 0, targetRevision: 1 }),
+    commitCompaction: async (_input: CompactionCommit) => ({
+      sourceRevision: 0,
+      targetRevision: 1,
+    }),
   } as unknown as IMessageStore;
   const registry = {
     getStatus: () => [],
@@ -53,11 +56,7 @@ function releaseRunClaim(manager: KoryManager, sessionId: string): void {
   (manager as unknown as { endSessionRun(id: string): void }).endSessionRun(sessionId);
 }
 
-function schedule(
-  manager: KoryManager,
-  sessionId: string,
-  deps: Record<string, unknown>,
-): void {
+function schedule(manager: KoryManager, sessionId: string, deps: Record<string, unknown>): void {
   (
     manager as unknown as {
       scheduleAutoCompaction(
@@ -72,7 +71,9 @@ function schedule(
 
 function failureCooldown(manager: KoryManager, sessionId: string): number | undefined {
   return (
-    manager as unknown as { runtimes: { peek(id: string): { lastAutoCompactFailureAt?: number } | undefined } }
+    manager as unknown as {
+      runtimes: { peek(id: string): { lastAutoCompactFailureAt?: number } | undefined };
+    }
   ).runtimes.peek(sessionId)?.lastAutoCompactFailureAt;
 }
 
@@ -96,11 +97,12 @@ describe('automatic compaction run-claim handoff', () => {
         manager as unknown as { compactSession: (input: unknown) => Promise<unknown> }
       ).compactSession.bind(manager);
       let attempts = 0;
-      (manager as unknown as { compactSession: (input: unknown) => Promise<unknown> }).compactSession =
-        async (input: unknown) => {
-          attempts++;
-          return compactSession(input);
-        };
+      (
+        manager as unknown as { compactSession: (input: unknown) => Promise<unknown> }
+      ).compactSession = async (input: unknown) => {
+        attempts++;
+        return compactSession(input);
+      };
 
       // Reproduce the exact production ordering: the turn's claim is still
       // held when the trigger evaluates.
@@ -126,13 +128,18 @@ describe('automatic compaction run-claim handoff', () => {
       // Observe the claim WITHOUT mutating it, so the real attempt sees the
       // same state the probe saw.
       const claimHeld = () =>
-        (manager as unknown as { runtimes: { peek(id: string): { runClaimed?: boolean } | undefined } }).runtimes.peek(sessionId)?.runClaimed === true;
+        (
+          manager as unknown as {
+            runtimes: { peek(id: string): { runClaimed?: boolean } | undefined };
+          }
+        ).runtimes.peek(sessionId)?.runClaimed === true;
       const seenClaimHeld: boolean[] = [];
-      (manager as unknown as { compactSession: (input: unknown) => Promise<unknown> }).compactSession =
-        async (input: unknown) => {
-          seenClaimHeld.push(claimHeld());
-          return compactSession(input);
-        };
+      (
+        manager as unknown as { compactSession: (input: unknown) => Promise<unknown> }
+      ).compactSession = async (input: unknown) => {
+        seenClaimHeld.push(claimHeld());
+        return compactSession(input);
+      };
 
       holdRunClaim(manager, sessionId);
       // Default scheduling (deferred), as the production trigger uses.
@@ -172,11 +179,12 @@ describe('automatic compaction run-claim handoff', () => {
     try {
       (manager as unknown as { erasedSessions: Set<string> }).erasedSessions.add(sessionId);
       let attempts = 0;
-      (manager as unknown as { compactSession: (input: unknown) => Promise<unknown> }).compactSession =
-        async () => {
-          attempts++;
-          return undefined;
-        };
+      (
+        manager as unknown as { compactSession: (input: unknown) => Promise<unknown> }
+      ).compactSession = async () => {
+        attempts++;
+        return undefined;
+      };
 
       schedule(manager, sessionId, { sleep: async () => {} });
       await tick(8);

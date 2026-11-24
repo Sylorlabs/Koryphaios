@@ -1,6 +1,18 @@
 import { NOTE_TOOL_DEFINITIONS } from '@koryphaios/shared';
 
-export type ToolIntent = 'read' | 'list' | 'search' | 'create' | 'edit' | 'delete' | 'restore' | 'link' | 'unlink' | 'review' | 'refresh' | 'use';
+export type ToolIntent =
+  | 'read'
+  | 'list'
+  | 'search'
+  | 'create'
+  | 'edit'
+  | 'delete'
+  | 'restore'
+  | 'link'
+  | 'unlink'
+  | 'review'
+  | 'refresh'
+  | 'use';
 export type WorkspaceSurface = 'note' | 'base' | 'network' | 'canvas';
 export type WorkspaceIcon = WorkspaceSurface | 'properties' | 'history' | 'draft' | 'attachment';
 
@@ -38,7 +50,7 @@ function text(value: unknown): string {
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : {};
 }
 
@@ -55,7 +67,11 @@ export function noteToolPresentation(
   let icon: WorkspaceIcon = 'note';
   let result: Record<string, unknown> = {};
   if (complete && output.trim().startsWith('{')) {
-    try { result = record(JSON.parse(output)); } catch { /* A clipped preview is still readable text. */ }
+    try {
+      result = record(JSON.parse(output));
+    } catch {
+      /* A clipped preview is still readable text. */
+    }
   }
   const title = text(input.newTitle ?? input.title ?? result.title);
   const noteId = text(input.noteId ?? input.id ?? result.noteId ?? result.id);
@@ -68,18 +84,29 @@ export function noteToolPresentation(
     target = name === 'list_note_bases' ? 'Bases' : base ? `Base ${base}` : 'Base';
   } else if (/note_canva/.test(name)) {
     surface = icon = 'canvas';
-    const canvas = text(input.name ?? record(input.document).name ?? record(result.document).name ?? note);
+    const canvas = text(
+      input.name ?? record(input.document).name ?? record(result.document).name ?? note,
+    );
     target = name === 'list_note_canvases' ? 'canvases' : canvas ? `canvas ${canvas}` : 'canvas';
-  } else if (/note_relationship|^link_notes$|^unlink_notes$|note_backlinks|note_graph|retrieve_note_context/.test(name)) {
+  } else if (
+    /note_relationship|^link_notes$|^unlink_notes$|note_backlinks|note_graph|retrieve_note_context/.test(
+      name,
+    )
+  ) {
     surface = icon = 'network';
     const from = text(input.fromTitle ?? input.fromId);
     const to = text(input.toTitle ?? input.toId);
     const pair = from && to ? `${from} → ${to}` : '';
-    target = name === 'get_note_graph_summary' ? 'note network'
-      : name === 'get_note_backlinks' ? `backlinks${note ? ` for ${note}` : ''}`
-      : name === 'retrieve_note_context' ? `note context${text(input.query) ? ` · ${text(input.query)}` : ''}`
-      : /relationship/.test(name) ? `note relationships${pair ? ` · ${pair}` : note ? ` for ${note}` : ''}`
-      : `notes${pair ? ` · ${pair}` : ''}`;
+    target =
+      name === 'get_note_graph_summary'
+        ? 'note network'
+        : name === 'get_note_backlinks'
+          ? `backlinks${note ? ` for ${note}` : ''}`
+          : name === 'retrieve_note_context'
+            ? `note context${text(input.query) ? ` · ${text(input.query)}` : ''}`
+            : /relationship/.test(name)
+              ? `note relationships${pair ? ` · ${pair}` : note ? ` for ${note}` : ''}`
+              : `notes${pair ? ` · ${pair}` : ''}`;
   } else if (/note_propert/.test(name)) {
     icon = 'properties';
     target = `${text(input.key) ? `property ${text(input.key)}` : 'note properties'}${note ? ` · ${note}` : ''}`;
@@ -88,7 +115,10 @@ export function noteToolPresentation(
     target = `${name === 'list_note_revisions' ? 'note history' : 'note revision'}${input.revision ? ` ${input.revision}` : ''}${note ? ` · ${note}` : ''}`;
   } else if (/note_draft/.test(name)) {
     icon = 'draft';
-    target = name === 'list_note_drafts' ? 'note drafts' : `note draft${text(input.draftId) ? ` ${text(input.draftId)}` : ''}`;
+    target =
+      name === 'list_note_drafts'
+        ? 'note drafts'
+        : `note draft${text(input.draftId) ? ` ${text(input.draftId)}` : ''}`;
   } else if (/note_attachment/.test(name)) {
     icon = 'attachment';
     const attachment = text(input.filename ?? result.filename ?? input.attachmentId);
@@ -98,10 +128,18 @@ export function noteToolPresentation(
   } else if (name === 'record_work_note') {
     target = title ? `work note ${title}` : 'work note';
   } else if (name === 'search_notes' || name === 'recall_notes' || name === 'list_notes') {
-    const titles = Array.isArray(input.titles) ? input.titles.filter((title) => typeof title === 'string').join(', ') : '';
+    const titles = Array.isArray(input.titles)
+      ? input.titles.filter((title) => typeof title === 'string').join(', ')
+      : '';
     const scope = text(input.query ?? input.folderPath) || titles;
     target = `notes${scope ? ` · ${scope}` : ''}`;
   }
 
-  return { surface, icon, intent: verb.intent, action: complete ? verb.complete : verb.running, target };
+  return {
+    surface,
+    icon,
+    intent: verb.intent,
+    action: complete ? verb.complete : verb.running,
+    target,
+  };
 }

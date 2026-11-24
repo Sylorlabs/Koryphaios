@@ -23,22 +23,40 @@ afterEach(() => {
 });
 
 function callOf(message: WSMessage) {
-  return (message.payload as { toolCall: { id: string; nativeRef?: string; name: string } }).toolCall;
+  return (message.payload as { toolCall: { id: string; nativeRef?: string; name: string } })
+    .toolCall;
 }
 function resultOf(message: WSMessage) {
-  return (message.payload as { toolResult: { callId: string; nativeRef?: string; name: string } }).toolResult;
+  return (message.payload as { toolResult: { callId: string; nativeRef?: string; name: string } })
+    .toolResult;
 }
 
-function emitCall(emitter: EventEmitterService, agentId: string, id: string | undefined, name = 'read_file') {
+function emitCall(
+  emitter: EventEmitterService,
+  agentId: string,
+  id: string | undefined,
+  name = 'read_file',
+) {
   emitter.emit(SESSION, 'stream.tool_call', {
     agentId,
     toolCall: { ...(id === undefined ? {} : { id }), name, input: {} },
   } as never);
 }
-function emitResult(emitter: EventEmitterService, agentId: string, callId: string | undefined, output = 'ok') {
+function emitResult(
+  emitter: EventEmitterService,
+  agentId: string,
+  callId: string | undefined,
+  output = 'ok',
+) {
   emitter.emit(SESSION, 'stream.tool_result', {
     agentId,
-    toolResult: { ...(callId === undefined ? {} : { callId }), name: 'read_file', output, isError: false, durationMs: 0 },
+    toolResult: {
+      ...(callId === undefined ? {} : { callId }),
+      name: 'read_file',
+      output,
+      isError: false,
+      durationMs: 0,
+    },
   } as never);
 }
 
@@ -141,7 +159,11 @@ describe('EventEmitterService tool call identity', () => {
 
     const parts = emitter.transcript.snapshotParts(SESSION);
     expect(parts).toHaveLength(1);
-    expect(parts[0]).toMatchObject({ kind: 'tool', callId: callOf(published[0]).id, output: 'contents' });
+    expect(parts[0]).toMatchObject({
+      kind: 'tool',
+      callId: callOf(published[0]).id,
+      output: 'contents',
+    });
     expect(parts[0]).not.toMatchObject({ callId: 'read' });
   });
 });

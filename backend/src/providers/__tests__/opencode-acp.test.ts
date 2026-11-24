@@ -166,7 +166,10 @@ describe('OpenCode ACP client', () => {
     expect(session.sessionId).toBe('ses_fake');
     expect(readState().cwd).toBe(dir);
     // ACP env is a list of {name, value} pairs.
-    const servers = readState().mcpServers as Array<{ name: string; env: Array<{ name: string; value: string }> }>;
+    const servers = readState().mcpServers as Array<{
+      name: string;
+      env: Array<{ name: string; value: string }>;
+    }>;
     expect(servers).toHaveLength(1);
     expect(servers![0]!.name).toBe('kory');
     expect(servers![0]!.env).toContainEqual({ name: 'KORY_BRIDGE_AUTH_FILE', value: '/tmp/grant' });
@@ -203,10 +206,8 @@ describe('OpenCode ACP client', () => {
     await client.newSession({ cwd: dir });
 
     const events: AcpSessionEvent[] = [];
-    const result = await client.prompt(
-      'ses_fake',
-      [{ type: 'text', text: 'say hello' }],
-      (event) => events.push(event),
+    const result = await client.prompt('ses_fake', [{ type: 'text', text: 'say hello' }], (event) =>
+      events.push(event),
     );
     expect(result.stopReason).toBe('end_turn');
     expect(result.usage).toMatchObject({ inputTokens: 100, outputTokens: 23, totalTokens: 123 });
@@ -273,16 +274,25 @@ describe('ACP permission decisions', () => {
 describe('mapSessionUpdate', () => {
   it('maps message and thought chunks', () => {
     expect(
-      mapSessionUpdate({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'hi' } }),
+      mapSessionUpdate({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'hi' },
+      }),
     ).toEqual({ type: 'agent_message_chunk', text: 'hi' });
     expect(
-      mapSessionUpdate({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'hmm' } }),
+      mapSessionUpdate({
+        sessionUpdate: 'agent_thought_chunk',
+        content: { type: 'text', text: 'hmm' },
+      }),
     ).toEqual({ type: 'agent_thought_chunk', text: 'hmm' });
   });
 
   it('drops empty chunks', () => {
     expect(
-      mapSessionUpdate({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: '' } }),
+      mapSessionUpdate({
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: '' },
+      }),
     ).toBeNull();
   });
 
@@ -295,7 +305,12 @@ describe('mapSessionUpdate', () => {
       status: 'pending',
       locations: [{ path: '/tmp/x' }, 'junk'],
     });
-    expect(call).toMatchObject({ type: 'tool_call', toolCallId: 'tc', name: 'write', kind: 'edit' });
+    expect(call).toMatchObject({
+      type: 'tool_call',
+      toolCallId: 'tc',
+      name: 'write',
+      kind: 'edit',
+    });
 
     const update = mapSessionUpdate({
       sessionUpdate: 'tool_call_update',
@@ -304,12 +319,21 @@ describe('mapSessionUpdate', () => {
       rawOutput: { exit: 0 },
       content: [{ type: 'content', content: { type: 'text', text: 'done' } }],
     });
-    expect(update).toMatchObject({ type: 'tool_call_update', toolCallId: 'tc', status: 'completed' });
+    expect(update).toMatchObject({
+      type: 'tool_call_update',
+      toolCallId: 'tc',
+      status: 'completed',
+    });
   });
 
   it('maps usage updates and unknown kinds without throwing', () => {
     expect(
-      mapSessionUpdate({ sessionUpdate: 'usage_update', used: 10, size: 100, cost: { amount: 0, currency: 'USD' } }),
+      mapSessionUpdate({
+        sessionUpdate: 'usage_update',
+        used: 10,
+        size: 100,
+        cost: { amount: 0, currency: 'USD' },
+      }),
     ).toEqual({ type: 'usage_update', used: 10, size: 100, cost: { amount: 0, currency: 'USD' } });
     expect(mapSessionUpdate({ sessionUpdate: 'plan' })).toEqual({
       type: 'unknown',

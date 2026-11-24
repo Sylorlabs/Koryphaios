@@ -385,17 +385,18 @@ export class WSManager {
       if (events.length === 0) break;
       for (const event of events) {
         if (client.ws.readyState !== 1) return;
-        const replayed: WSMessage = !replayFilter || replayFilter(event)
-          ? { ...event, replayed: true }
-          : {
-              type: 'session.replay_skipped',
-              sessionId,
-              epoch: event.epoch,
-              sequence: event.sequence,
-              timestamp: event.timestamp,
-              payload: null,
-              replayed: true,
-            };
+        const replayed: WSMessage =
+          !replayFilter || replayFilter(event)
+            ? { ...event, replayed: true }
+            : {
+                type: 'session.replay_skipped',
+                sessionId,
+                epoch: event.epoch,
+                sequence: event.sequence,
+                timestamp: event.timestamp,
+                payload: null,
+                replayed: true,
+              };
         this.deliverToClient(client, replayed, JSON.stringify(replayed));
         after = event.sequence ?? after;
         // Same overload guard as the live path: stop flooding a slow client.
@@ -672,7 +673,9 @@ export class WSManager {
         // A later real subscription still replays its durable history normally.
         const payload = ordered.payload as { snapshot: unknown };
         const projection = {
-          type: 'run.state', sessionId, timestamp: ordered.timestamp,
+          type: 'run.state',
+          sessionId,
+          timestamp: ordered.timestamp,
           payload: { snapshot: payload.snapshot, transition: null },
         } as WSMessage;
         this.deliverToClient(client, projection, JSON.stringify(projection));
@@ -712,7 +715,9 @@ export class WSManager {
   /** True when this socket has subscribed to the session and it is not erased. */
   isClientSubscribedTo(clientId: string, sessionId: string): boolean {
     const client = this.clients.get(clientId);
-    return !!client && client.subscribedSessions.has(sessionId) && !this.erasedSessions.has(sessionId);
+    return (
+      !!client && client.subscribedSessions.has(sessionId) && !this.erasedSessions.has(sessionId)
+    );
   }
 
   /** Drop subscriptions and queued payloads, then reject stale post-delete events. */

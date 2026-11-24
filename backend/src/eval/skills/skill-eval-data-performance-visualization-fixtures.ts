@@ -69,7 +69,10 @@ function collectLinePathNodes(
 const capacityValueFields = new Set(['medianms', 'p95ms', 'throughputrps']);
 const capacityDatumField = String.raw`datum(?:\.(?:medianMs|p95Ms|throughputRps)|\[\s*['"](?:medianMs|p95Ms|throughputRps)['"]\s*\])`;
 
-function combineGapPredicates(results: Array<boolean | null>, operator: 'and' | 'or'): boolean | null {
+function combineGapPredicates(
+  results: Array<boolean | null>,
+  operator: 'and' | 'or',
+): boolean | null {
   const decisive = operator === 'or';
   if (results.includes(decisive)) return decisive;
   return results.every((result) => result === !decisive) ? !decisive : null;
@@ -100,7 +103,10 @@ function predicateAtCapacityGap(value: unknown): boolean | null {
     const expression = value.trim();
     if (expression === 'true') return true;
     if (expression === 'false') return false;
-    for (const [symbol, operator] of [['||', 'or'], ['&&', 'and']] as const) {
+    for (const [symbol, operator] of [
+      ['||', 'or'],
+      ['&&', 'and'],
+    ] as const) {
       const clauses = splitGapPredicate(expression, symbol);
       if (clauses) return combineGapPredicates(clauses.map(predicateAtCapacityGap), operator);
     }
@@ -110,7 +116,10 @@ function predicateAtCapacityGap(value: unknown): boolean | null {
       for (let index = 0; index < expression.length - 1; index += 1) {
         if (expression[index] === '(') depth += 1;
         if (expression[index] === ')') depth -= 1;
-        if (depth === 0) { wrapsExpression = false; break; }
+        if (depth === 0) {
+          wrapsExpression = false;
+          break;
+        }
       }
       if (wrapsExpression) return predicateAtCapacityGap(expression.slice(1, -1));
     }
@@ -118,9 +127,15 @@ function predicateAtCapacityGap(value: unknown): boolean | null {
       const result = predicateAtCapacityGap(expression.slice(1));
       return result === null ? null : !result;
     }
-    const validity = new RegExp(`^(!\\s*)?(?:isvalid|isfinite)\\s*\\(\\s*${capacityDatumField}\\s*\\)$`, 'iu').exec(expression);
+    const validity = new RegExp(
+      `^(!\\s*)?(?:isvalid|isfinite)\\s*\\(\\s*${capacityDatumField}\\s*\\)$`,
+      'iu',
+    ).exec(expression);
     if (validity) return Boolean(validity[1]);
-    const comparison = new RegExp(`^(?:${capacityDatumField}\\s*(===|==|!==|!=)\\s*null|null\\s*(===|==|!==|!=)\\s*${capacityDatumField})$`, 'iu').exec(expression);
+    const comparison = new RegExp(
+      `^(?:${capacityDatumField}\\s*(===|==|!==|!=)\\s*null|null\\s*(===|==|!==|!=)\\s*${capacityDatumField})$`,
+      'iu',
+    ).exec(expression);
     if (comparison) return ['===', '=='].includes(comparison[1] ?? comparison[2]!);
     if (new RegExp(`^${capacityDatumField}$`, 'iu').test(expression)) return false;
     return null;
@@ -136,7 +151,10 @@ function predicateAtCapacityGap(value: unknown): boolean | null {
     if (!Array.isArray(clauses)) continue;
     return combineGapPredicates(clauses.map(predicateAtCapacityGap), operator);
   }
-  if (typeof predicate.field !== 'string' || !capacityValueFields.has(predicate.field.toLowerCase())) {
+  if (
+    typeof predicate.field !== 'string' ||
+    !capacityValueFields.has(predicate.field.toLowerCase())
+  ) {
     return null;
   }
   if (typeof predicate.valid === 'boolean') return !predicate.valid;
@@ -148,8 +166,8 @@ function predicateAtCapacityGap(value: unknown): boolean | null {
 function transformDropsMissingRows(transforms: unknown[]): boolean {
   return transforms.some((transform) => {
     const record = asRecord(transform);
-    const imputesTelemetry = typeof record?.impute === 'string' &&
-      capacityValueFields.has(record.impute.toLowerCase());
+    const imputesTelemetry =
+      typeof record?.impute === 'string' && capacityValueFields.has(record.impute.toLowerCase());
     return imputesTelemetry || predicateAtCapacityGap(record?.filter) === false;
   });
 }
@@ -159,11 +177,15 @@ function linePathBreaksOnMissing(node: Record<string, unknown>): boolean {
   // Vega-Lite breaks paths at null-valued quantitative points by default.
   // `break-path` and `defined` are not supported Vega-Lite mark properties.
   const invalidMode = mark?.invalid;
-  if (invalidMode === undefined || [
-    'break-paths-filter-domains',
-    'break-paths-show-domains',
-    'break-paths-show-path-domains',
-  ].includes(invalidMode as string)) return true;
+  if (
+    invalidMode === undefined ||
+    [
+      'break-paths-filter-domains',
+      'break-paths-show-domains',
+      'break-paths-show-path-domains',
+    ].includes(invalidMode as string)
+  )
+    return true;
   return false;
 }
 
@@ -183,7 +205,8 @@ function inspectExecutableGapSemantics(value: unknown): {
     executable: true,
     preservesGaps: relevant.every(
       ({ node, transforms }) =>
-        !hasInvalidOutput && !transformDropsMissingRows(transforms) &&
+        !hasInvalidOutput &&
+        !transformDropsMissingRows(transforms) &&
         asRecord(asRecord(node.config)?.scale)?.invalid === undefined &&
         linePathBreaksOnMissing(node),
     ),
@@ -498,13 +521,19 @@ function inspectDeclaredGapPolicy(value: unknown): {
   if (typeof value === 'string') {
     const clauses = value.split(/[.;\n]+|\b(?:but|however)\b/iu).map((clause) => {
       const forbidsLineBreak =
-        /\b(?:do not|must not|never)\s+(?:break\b[^.;]*line|(?:draw|insert|show)\b[^.;]*line[^.;]*break)|\bno\s+line\s+break/iu.test(clause);
+        /\b(?:do not|must not|never)\s+(?:break\b[^.;]*line|(?:draw|insert|show)\b[^.;]*line[^.;]*break)|\bno\s+line\s+break/iu.test(
+          clause,
+        );
       const prohibition =
-        /no interpolation|not interpolat|(?:do not|must not|never) (?:interpolat|(?:draw|connect|reconnect)[^.;]*across[^.;]*(?:gap|missing|null))/iu.test(clause) ||
+        /no interpolation|not interpolat|(?:do not|must not|never) (?:interpolat|(?:draw|connect|reconnect)[^.;]*across[^.;]*(?:gap|missing|null))/iu.test(
+          clause,
+        ) ||
         // A refusal to drop or impute nulls preserves the gap just as directly as
         // a refusal to interpolate, and candidates write it that way ("never
         // filter nulls before connecting lines").
-        /\b(?:never|do not|must not|no)\s+(?:filter|filtering|drop|dropping|remove|removing|discard|discarding|impute|imputing)[^.;]*(?:null|missing|nan)/iu.test(clause) ||
+        /\b(?:never|do not|must not|no)\s+(?:filter|filtering|drop|dropping|remove|removing|discard|discarding|impute|imputing)[^.;]*(?:null|missing|nan)/iu.test(
+          clause,
+        ) ||
         // "No smoothing, interpolation, aggregation, or derived metrics" is one list,
         // not the contiguous phrase the first alternative needs.
         /\bno\s+(?:smoothing,?\s*)?interpolation/iu.test(clause) ||
@@ -514,12 +543,18 @@ function inspectDeclaredGapPolicy(value: unknown): {
         /\b(?:do not|does not|must not|never|no)\b[^.;]*\b(?:interpolat\w*|reconnect\w*|connect(?:s|ed|ing)?\s+across|draw\w*[^.;]*\bacross)\b/iu.test(
           clause,
         ) ||
-        /\b(?:no|without)\s+(?:line|path|points?)\s+(?:is\s+|are\s+)?(?:drawn|connected|interpolated)\s+across\s+(?:the\s+)?(?:gap|missing|null)/iu.test(clause);
+        /\b(?:no|without)\s+(?:line|path|points?)\s+(?:is\s+|are\s+)?(?:drawn|connected|interpolated)\s+across\s+(?:the\s+)?(?:gap|missing|null)/iu.test(
+          clause,
+        );
       return {
-        prohibitsInterpolation: prohibition ||
-          (!forbidsLineBreak && /break[^.;]*line|line[^.;]*break/iu.test(clause)),
-        enablesInterpolation: forbidsLineBreak || (!prohibition &&
-          /(?:interpolat[^.;]*(?:gap|missing|null)|(?:draw|connect|reconnect)[^.;]*across[^.;]*(?:gap|missing|null))/iu.test(clause)),
+        prohibitsInterpolation:
+          prohibition || (!forbidsLineBreak && /break[^.;]*line|line[^.;]*break/iu.test(clause)),
+        enablesInterpolation:
+          forbidsLineBreak ||
+          (!prohibition &&
+            /(?:interpolat[^.;]*(?:gap|missing|null)|(?:draw|connect|reconnect)[^.;]*across[^.;]*(?:gap|missing|null))/iu.test(
+              clause,
+            )),
       };
     });
     return {
@@ -531,16 +566,21 @@ function inspectDeclaredGapPolicy(value: unknown): {
   const children = Array.isArray(value) ? value : Object.values(record ?? {});
   const policies = children.map(inspectDeclaredGapPolicy);
   const interpolation = record?.interpolation;
-  const disabled = interpolation === false || (typeof interpolation === 'string' &&
-    // "None. Null metrics remain explicit gaps; no smoothing." is a prohibition in
-    // prose. Only the leading verdict matters here; the clause scan above already
-    // decides whether the rest of the sentence enables anything.
-    (/^(?:none|disabled)\b|^(?:no interpolation)/iu.test(interpolation.trim()) ||
-      /^(?:none|disabled|none[- ]across[- ](?:null|missing)[- ]values)$/iu.test(interpolation.trim()) ||
-      inspectDeclaredGapPolicy(interpolation).prohibitsInterpolation));
+  const disabled =
+    interpolation === false ||
+    (typeof interpolation === 'string' &&
+      // "None. Null metrics remain explicit gaps; no smoothing." is a prohibition in
+      // prose. Only the leading verdict matters here; the clause scan above already
+      // decides whether the rest of the sentence enables anything.
+      (/^(?:none|disabled)\b|^(?:no interpolation)/iu.test(interpolation.trim()) ||
+        /^(?:none|disabled|none[- ]across[- ](?:null|missing)[- ]values)$/iu.test(
+          interpolation.trim(),
+        ) ||
+        inspectDeclaredGapPolicy(interpolation).prohibitsInterpolation));
   return {
     prohibitsInterpolation: disabled || policies.some((policy) => policy.prohibitsInterpolation),
-    enablesInterpolation: interpolation === true ||
+    enablesInterpolation:
+      interpolation === true ||
       (typeof interpolation === 'string' && !disabled) ||
       policies.some((policy) => policy.enablesInterpolation),
   };
@@ -574,7 +614,9 @@ function inspectCapacityArtifact(artifact: unknown) {
     /description|text[ _-]?alternative|textalternative|accessib/u.test(body);
   const access =
     hasFallback &&
-    /dash|marker|shape|pattern|line[ _-]?style|line style|non-?colou?r|noncolou?r|stroke|hatch/u.test(body);
+    /dash|marker|shape|pattern|line[ _-]?style|line style|non-?colou?r|noncolou?r|stroke|hatch/u.test(
+      body,
+    );
   const scales =
     hasIndependentYScale(artifact) ||
     /separate.*axis|separate.*panel|secondary.*axis|distinct.*scale|independent.*scale|scale.*independent/u.test(
@@ -902,8 +944,7 @@ function wilson95(conversions: number, eligibleSessions: number): [number, numbe
   const scale = 1 + z2 / eligibleSessions;
   const center = (rate + z2 / (2 * eligibleSessions)) / scale;
   const halfWidth =
-    (z * Math.sqrt((rate * (1 - rate) + z2 / (4 * eligibleSessions)) / eligibleSessions)) /
-    scale;
+    (z * Math.sqrt((rate * (1 - rate) + z2 / (4 * eligibleSessions)) / eligibleSessions)) / scale;
   return [center - halfWidth, center + halfWidth];
 }
 
@@ -924,18 +965,23 @@ function conversionChartIsEncoded(
     field.split('.').reduce<unknown>((current, key) => asRecord(current)?.[key], row);
   const encodedBounds = rows.every((row) => {
     const canonical = intervalFrom(row);
-    if (!canonical || typeof axis?.field !== 'string' ||
-        typeof fieldValue(row, axis.field) !== 'number') return false;
+    if (
+      !canonical ||
+      typeof axis?.field !== 'string' ||
+      typeof fieldValue(row, axis.field) !== 'number'
+    )
+      return false;
     if (interval?.field === 'interval95') {
       const value = fieldValue(row, 'interval95');
-      if (Array.isArray(value)) return value.length === 2 &&
-        value[0] === canonical[0] && value[1] === canonical[1];
+      if (Array.isArray(value))
+        return value.length === 2 && value[0] === canonical[0] && value[1] === canonical[1];
       const nested = asRecord(value);
       return nested?.lower === canonical[0] && nested?.upper === canonical[1];
     }
     if (typeof lowerField !== 'string' || typeof upperField !== 'string') return false;
-    return fieldValue(row, lowerField) === canonical[0] &&
-      fieldValue(row, upperField) === canonical[1];
+    return (
+      fieldValue(row, lowerField) === canonical[0] && fieldValue(row, upperField) === canonical[1]
+    );
   });
   return (
     /dot|point/u.test(type) &&
@@ -985,7 +1031,10 @@ function inspectConversionArtifact(artifact: unknown) {
       const lower = interval?.[0] ?? null;
       const upper = interval?.[1] ?? null;
       const expectedRate = expected.conversions / expected.eligibleSessions;
-      const [expectedLower, expectedUpper] = wilson95(expected.conversions, expected.eligibleSessions);
+      const [expectedLower, expectedUpper] = wilson95(
+        expected.conversions,
+        expected.eligibleSessions,
+      );
       return (
         sessions === expected.eligibleSessions &&
         conversions === expected.conversions &&
@@ -1008,7 +1057,11 @@ function inspectConversionArtifact(artifact: unknown) {
     if (!row) return false;
     const flag = row.lowSample ?? row.low_sample;
     const detail = exactTextFrom(row, [
-      'status', 'lowSampleFlag', 'low_sample_flag', 'lowSampleLabel', 'low_sample_label',
+      'status',
+      'lowSampleFlag',
+      'low_sample_flag',
+      'lowSampleLabel',
+      'low_sample_label',
     ]).join(' ');
     // The task asks for "a visible per-row low-sample flag". A per-row boolean is
     // that flag, so a row that sets it and a row that carries a matching label both
@@ -1019,10 +1072,20 @@ function inspectConversionArtifact(artifact: unknown) {
       : flag !== true;
   });
   const unknownRow = rows.find((row) => matchesConversionRow(row, conversionData[7]!));
-  const missingLabel = Boolean(unknownRow) && exactTextFrom(unknownRow!, [
-    'region', 'label', 'displayLabel', 'display_label', 'displayRegion', 'regionLabel', 'region_label', 'name',
-  ]).some((label) => /unknown|unresolved/u.test(label));
-  const encoding = conversionChartIsEncoded(artifact, rows) &&
+  const missingLabel =
+    Boolean(unknownRow) &&
+    exactTextFrom(unknownRow!, [
+      'region',
+      'label',
+      'displayLabel',
+      'display_label',
+      'displayRegion',
+      'regionLabel',
+      'region_label',
+      'name',
+    ]).some((label) => /unknown|unresolved/u.test(label));
+  const encoding =
+    conversionChartIsEncoded(artifact, rows) &&
     !/pie chart|map encoding|geographic map/u.test(body);
   const access =
     /table/u.test(body) &&

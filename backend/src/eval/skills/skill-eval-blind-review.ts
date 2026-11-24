@@ -59,7 +59,9 @@ export function completePairForScenario(
     .sort((left, right) => {
       const leftTime = [left.withSkill.recordedAt, left.withoutSkill.recordedAt].sort().at(-1)!;
       const rightTime = [right.withSkill.recordedAt, right.withoutSkill.recordedAt].sort().at(-1)!;
-      return rightTime.localeCompare(leftTime) || right.comparisonId.localeCompare(left.comparisonId);
+      return (
+        rightTime.localeCompare(leftTime) || right.comparisonId.localeCompare(left.comparisonId)
+      );
     });
   return pairs[0] ?? null;
 }
@@ -709,13 +711,18 @@ export function selectBlindReviewQueue(
   const judgedPairs = new Set<string>();
   for (const adjudication of adjudications) {
     if (!adjudication.comparisonId) continue;
-    judgedPairs.add(`${adjudication.skill}\0${adjudication.scenarioId}\0${adjudication.comparisonId}`);
+    judgedPairs.add(
+      `${adjudication.skill}\0${adjudication.scenarioId}\0${adjudication.comparisonId}`,
+    );
     const key = `${adjudication.skill}\0${adjudication.scenarioId}`;
     const current = newestByCase.get(key);
-    if (!current || adjudication.recordedAt > current.recordedAt) newestByCase.set(key, adjudication);
+    if (!current || adjudication.recordedAt > current.recordedAt)
+      newestByCase.set(key, adjudication);
   }
   const needsAdjudication = candidates.filter((candidate) => {
-    if (!judgedPairs.has(`${candidate.skill}\0${candidate.scenarioId}\0${candidate.comparisonId}`)) {
+    if (
+      !judgedPairs.has(`${candidate.skill}\0${candidate.scenarioId}\0${candidate.comparisonId}`)
+    ) {
       return true;
     }
     return false;

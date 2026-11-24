@@ -14,7 +14,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelDef, ProviderConfig } from '@koryphaios/shared';
-import { buildSoftJail, inferenceSandboxPolicy, wrapCommand } from '../../collaboration/sandbox-runner';
+import {
+  buildSoftJail,
+  inferenceSandboxPolicy,
+  wrapCommand,
+} from '../../collaboration/sandbox-runner';
 import { findExecutableOnPath } from '../../runtime/platform';
 import {
   type LifecycleCapabilities,
@@ -27,7 +31,11 @@ import {
 } from '../types';
 import { providerLog } from '../../logger';
 import { createKoryBridgeGrantLease } from '../bridge-grant';
-import { buildKoryCliMcpConfig, koryBridgeUnavailableError, resolveKoryBridgeScript } from '../kory-cli-mcp-config';
+import {
+  buildKoryCliMcpConfig,
+  koryBridgeUnavailableError,
+  resolveKoryBridgeScript,
+} from '../kory-cli-mcp-config';
 import { KORY_HARNESS_NOTE } from '../cli-bridges';
 import { recordedToolName, recordedToolOutput } from '../recorded-tool';
 import { safeProviderDiagnostic, safeProviderFailureMessage } from '../provider-diagnostics';
@@ -226,7 +234,10 @@ export class AcpAgentProvider implements Provider {
         await client.setConfigOption(sessionId, modelOption.id, requestedModel);
       }
       const modeOption = offered.find((o) => o.id === 'mode' || o.category === 'mode');
-      if ((researchOnly || nativeToolsDisabled) && modeOption?.options?.some((o) => o.value === 'plan')) {
+      if (
+        (researchOnly || nativeToolsDisabled) &&
+        modeOption?.options?.some((o) => o.value === 'plan')
+      ) {
         await client.setConfigOption(sessionId, modeOption.id, 'plan');
       }
     } catch (err) {
@@ -308,7 +319,11 @@ export class AcpAgentProvider implements Provider {
       .catch((err) => {
         promptError = safeProviderFailureMessage(
           this.name,
-          safeProviderDiagnostic(this.name, 'stream', err instanceof Error ? err.message : String(err)),
+          safeProviderDiagnostic(
+            this.name,
+            'stream',
+            err instanceof Error ? err.message : String(err),
+          ),
         );
       })
       .finally(() => {
@@ -401,9 +416,12 @@ function flattenContent(content: string | ProviderContentBlock[]): string {
   for (const block of content) {
     if (block.type === 'text' && block.text) parts.push(block.text);
     else if (block.type === 'tool_use')
-      parts.push(`[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`);
+      parts.push(
+        `[tool call: ${block.toolName ?? 'tool'} ${JSON.stringify(block.toolInput ?? {})}]`,
+      );
     else if (block.type === 'tool_result') parts.push(`[tool result: ${block.toolOutput ?? ''}]`);
-    else if (block.type === 'image') parts.push('[image attachment omitted — ACP agent is text-only here]');
+    else if (block.type === 'image')
+      parts.push('[image attachment omitted — ACP agent is text-only here]');
     else if (block.type === 'audio' || block.type === 'video')
       parts.push(`[${block.type} attachment omitted — ACP agent is text-only here]`);
   }

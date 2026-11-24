@@ -36,7 +36,8 @@ type ManagedChild = {
   owned: boolean;
 };
 
-const PROJECT_ROOT = resolve(import.meta.dir, '..');const BACKEND_DIR = resolve(PROJECT_ROOT, 'backend');
+const PROJECT_ROOT = resolve(import.meta.dir, '..');
+const BACKEND_DIR = resolve(PROJECT_ROOT, 'backend');
 const FRONTEND_DIR = resolve(PROJECT_ROOT, 'frontend');
 const DESKTOP_DIR = resolve(PROJECT_ROOT, 'desktop');
 const LOCAL_CLAUDE_BIN_DIR = resolve(PROJECT_ROOT, '.tools', 'bin');
@@ -163,7 +164,9 @@ if (await isPreferredPortHeld()) {
 const sharedEnv = {
   ...process.env,
   ...(existsSync(resolve(LOCAL_CLAUDE_BIN_DIR, 'claude'))
-    ? { PATH: `${LOCAL_CLAUDE_BIN_DIR}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}` }
+    ? {
+        PATH: `${LOCAL_CLAUDE_BIN_DIR}${process.platform === 'win32' ? ';' : ':'}${process.env.PATH ?? ''}`,
+      }
     : {}),
   KORYPHAIOS_HOST: backendHost,
   KORYPHAIOS_PORT: String(backendPort),
@@ -282,7 +285,10 @@ function readActivePort(expectedPid?: number): ActivePort | null {
   // backend-local one (that mismatch caused the launch refusal this fixes).
   return (
     candidates.find(
-      (candidate) => expectedPid !== undefined && candidate.pid === expectedPid && isProcessAlive(candidate.pid!),
+      (candidate) =>
+        expectedPid !== undefined &&
+        candidate.pid === expectedPid &&
+        isProcessAlive(candidate.pid!),
     ) ??
     candidates.find((candidate) => isProcessAlive(candidate.pid!)) ??
     candidates[0] ??

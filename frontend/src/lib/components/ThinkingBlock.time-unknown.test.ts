@@ -27,7 +27,9 @@ describe('ThinkingBlock with an unknown duration', () => {
     expect(container.querySelector('.thinking-tokens')?.textContent).toBe('1.2k tokens');
 
     await fireEvent.click(screen.getByRole('button', { expanded: false }));
-    expect(screen.getByRole('region', { name: 'Reasoning' }).textContent).toContain('Weighing the options.');
+    expect(screen.getByRole('region', { name: 'Reasoning' }).textContent).toContain(
+      'Weighing the options.',
+    );
   });
 
   it('never shimmers as live when the block is not finalized', () => {

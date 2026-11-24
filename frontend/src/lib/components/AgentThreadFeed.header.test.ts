@@ -2,7 +2,9 @@ import { render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentIdentity, AgentStatus } from '@koryphaios/shared';
 
-const tool = vi.hoisted(() => ({ current: undefined as undefined | { name: string; input?: Record<string, unknown> } }));
+const tool = vi.hoisted(() => ({
+  current: undefined as undefined | { name: string; input?: Record<string, unknown> },
+}));
 vi.mock('$lib/stores/agents.svelte', () => ({
   agentStore: {
     getAgentSteeringQueue: () => [],
@@ -22,7 +24,15 @@ import AgentThreadFeed from './AgentThreadFeed.svelte';
 
 function agent(status: AgentStatus, extra: Record<string, unknown> = {}) {
   return {
-    identity: { id: 'w', name: 'frontend', role: 'coder', provider: 'codex', model: 'gpt-5.6-sol', domain: 'ui', glowColor: '' } as AgentIdentity,
+    identity: {
+      id: 'w',
+      name: 'frontend',
+      role: 'coder',
+      provider: 'codex',
+      model: 'gpt-5.6-sol',
+      domain: 'ui',
+      glowColor: '',
+    } as AgentIdentity,
     status,
     sessionId: 's',
     ...extra,
@@ -32,8 +42,12 @@ function agent(status: AgentStatus, extra: Record<string, unknown> = {}) {
 describe('AgentThreadFeed header and empty state', () => {
   it('says the status in words with the current tool, beside the glyph', () => {
     tool.current = { name: 'bash', input: { command: 'bun run test' } };
-    render(AgentThreadFeed, { props: { agent: agent('tool_calling'), feed: [], onClose: vi.fn() } });
-    expect(screen.getByTestId('agent-thread-status').textContent).toMatch(/Running tool\s*·\s*bash · bun run test/);
+    render(AgentThreadFeed, {
+      props: { agent: agent('tool_calling'), feed: [], onClose: vi.fn() },
+    });
+    expect(screen.getByTestId('agent-thread-status').textContent).toMatch(
+      /Running tool\s*·\s*bash · bun run test/,
+    );
     expect(screen.getByText('Codex CLI · gpt-5.6-sol · ui')).toBeTruthy();
     expect(screen.getByRole('button', { name: /Stop worker/ })).toBeTruthy();
     tool.current = undefined;
@@ -41,7 +55,11 @@ describe('AgentThreadFeed header and empty state', () => {
 
   it('shows a frozen duration and a Close control once finished', () => {
     render(AgentThreadFeed, {
-      props: { agent: agent('done', { startedAt: 0, endedAt: 65_000 }), feed: [], onClose: vi.fn() },
+      props: {
+        agent: agent('done', { startedAt: 0, endedAt: 65_000 }),
+        feed: [],
+        onClose: vi.fn(),
+      },
     });
     expect(screen.getByTestId('agent-thread-status').textContent).toMatch(/Done\s*·\s*1m 05s/);
     expect(screen.getByRole('button', { name: /Close worker/ })).toBeTruthy();

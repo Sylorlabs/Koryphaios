@@ -84,7 +84,10 @@ export const sessionReviewRoutes = new Elysia({ prefix: '/api/sessions' })
     '/:id/review-comments/:commentId/resolve',
     async ({ request, params }) => {
       requireAuth(request);
-      return { ok: true, data: { comment: await resolveSessionReviewComment(params.id, params.commentId) } };
+      return {
+        ok: true,
+        data: { comment: await resolveSessionReviewComment(params.id, params.commentId) },
+      };
     },
     { params: commentParams },
   )

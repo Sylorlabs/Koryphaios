@@ -88,7 +88,8 @@ describe('byte-budgeted replay pages (B6)', () => {
 
   test('many small events are split by serialized bytes, not only by count', () => {
     const { log } = setup();
-    for (let i = 0; i < 100; i++) appendEvent(log, 's1', 'stream.delta', { agentId: 'a', content: 'y'.repeat(1000) });
+    for (let i = 0; i < 100; i++)
+      appendEvent(log, 's1', 'stream.delta', { agentId: 'a', content: 'y'.repeat(1000) });
 
     const budget = { maxEvents: 256, maxBytes: 10_000 };
     let after = 0;
@@ -136,11 +137,31 @@ describe('backpressure merges stream deltas for slow sockets (B6)', () => {
     manager.add(socket('slow', sent, buffered));
     manager.subscribeClientToSession('slow', 'session-1');
 
-    manager.broadcastToSession('session-1', { type: 'stream.delta', timestamp: 1, payload: { agentId: 'kory', messageId: 'turn-1', content: 'Hel' } } as any);
-    manager.broadcastToSession('session-1', { type: 'stream.delta', timestamp: 2, payload: { agentId: 'kory', messageId: 'turn-1', content: 'lo ' } } as any);
-    manager.broadcastToSession('session-1', { type: 'stream.delta', timestamp: 3, payload: { agentId: 'kory', messageId: 'turn-1', content: 'world' } } as any);
-    manager.broadcastToSession('session-1', { type: 'stream.complete', timestamp: 4, payload: { agentId: 'kory', messageId: 'turn-1' } } as any);
-    manager.broadcastToSession('session-1', { type: 'stream.delta', timestamp: 5, payload: { agentId: 'kory', messageId: 'turn-2', content: 'again' } } as any);
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 1,
+      payload: { agentId: 'kory', messageId: 'turn-1', content: 'Hel' },
+    } as any);
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 2,
+      payload: { agentId: 'kory', messageId: 'turn-1', content: 'lo ' },
+    } as any);
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 3,
+      payload: { agentId: 'kory', messageId: 'turn-1', content: 'world' },
+    } as any);
+    manager.broadcastToSession('session-1', {
+      type: 'stream.complete',
+      timestamp: 4,
+      payload: { agentId: 'kory', messageId: 'turn-1' },
+    } as any);
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 5,
+      payload: { agentId: 'kory', messageId: 'turn-2', content: 'again' },
+    } as any);
     expect(sent).toEqual([]);
 
     buffered.value = 0;
@@ -168,11 +189,27 @@ describe('backpressure merges stream deltas for slow sockets (B6)', () => {
     manager.add(socket('slow', sent, buffered));
     manager.subscribeClientToSession('slow', 'session-1');
 
-    manager.broadcastToSession('session-1', { type: 'stream.delta', timestamp: 1, payload: { agentId: 'kory', messageId: 'turn-1', content: 'ab' } } as any);
-    manager.broadcastToSession('session-1', { type: 'stream.delta', timestamp: 2, payload: { agentId: 'kory', messageId: 'turn-1', content: 'cd' } } as any);
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 1,
+      payload: { agentId: 'kory', messageId: 'turn-1', content: 'ab' },
+    } as any);
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 2,
+      payload: { agentId: 'kory', messageId: 'turn-1', content: 'cd' },
+    } as any);
     // Still over the threshold: the lifecycle events must not wait for the drain.
-    manager.broadcastToSession('session-1', { type: 'turn.provider_completed', timestamp: 3, payload: { messageId: 'turn-1' } } as any);
-    manager.broadcastToSession('session-1', { type: 'run.settled', timestamp: 4, payload: { runId: 'run-1' } } as any);
+    manager.broadcastToSession('session-1', {
+      type: 'turn.provider_completed',
+      timestamp: 3,
+      payload: { messageId: 'turn-1' },
+    } as any);
+    manager.broadcastToSession('session-1', {
+      type: 'run.settled',
+      timestamp: 4,
+      payload: { runId: 'run-1' },
+    } as any);
 
     const client = (manager as any).clients.get('slow');
     expect(client.deliveryQueue).toEqual([]);
@@ -194,7 +231,11 @@ describe('backpressure merges stream deltas for slow sockets (B6)', () => {
     manager.add(socket('busy', sent, buffered));
     manager.subscribeClientToSession('busy', 'session-1');
 
-    manager.broadcastToSession('session-1', { type: 'stream.delta', timestamp: 1, payload: { agentId: 'kory', messageId: 'turn-1', content: 'live' } } as any);
+    manager.broadcastToSession('session-1', {
+      type: 'stream.delta',
+      timestamp: 1,
+      payload: { agentId: 'kory', messageId: 'turn-1', content: 'live' },
+    } as any);
     expect(parsed(sent).map((f) => [f.type, f.sequence])).toEqual([['stream.delta', 1]]);
   });
 });
@@ -205,8 +246,10 @@ describe('retention and prune marks (B7)', () => {
   const APPENDED = EVENT_RETENTION_KEEP_PER_SESSION + 100;
   test('prune keeps the newest events per session and recent events, and records the mark', () => {
     const { sqlite, log } = setup();
-    for (let i = 0; i < APPENDED; i++) appendEvent(log, 'old', 'stream.delta', { agentId: 'a', content: 'x' });
-    for (let i = 0; i < APPENDED; i++) appendEvent(log, 'recent', 'stream.delta', { agentId: 'a', content: 'x' });
+    for (let i = 0; i < APPENDED; i++)
+      appendEvent(log, 'old', 'stream.delta', { agentId: 'a', content: 'x' });
+    for (let i = 0; i < APPENDED; i++)
+      appendEvent(log, 'recent', 'stream.delta', { agentId: 'a', content: 'x' });
     sqlite.run('UPDATE ordered_session_events SET created_at = 0 WHERE session_id = ?', ['old']);
 
     const { deleted } = log.prune(Date.now());
@@ -227,7 +270,8 @@ describe('retention and prune marks (B7)', () => {
 
   /** Prunes the oldest 100 events of session `s1` so the mark lands at sequence 100 of epoch 1. */
   function prunedSession(sqlite: Database, log: OrderedEventLog) {
-    for (let i = 0; i < APPENDED; i++) appendEvent(log, 's1', 'stream.delta', { agentId: 'a', content: 'x' });
+    for (let i = 0; i < APPENDED; i++)
+      appendEvent(log, 's1', 'stream.delta', { agentId: 'a', content: 'x' });
     sqlite.run('UPDATE ordered_session_events SET created_at = 0');
     log.prune(Date.now());
     expect(log.getPruneMark('s1')).toEqual({ epoch: 1, sequence: 100 });
@@ -284,7 +328,10 @@ describe('retention and prune marks (B7)', () => {
     manager.subscribeClientToSession('other-epoch', 's1', { epoch: 7, sequence: 400 });
 
     const frames = parsed(sent);
-    expect(frames[0]).toMatchObject({ type: 'session.history_pruned', payload: { throughSequence: 100 } });
+    expect(frames[0]).toMatchObject({
+      type: 'session.history_pruned',
+      payload: { throughSequence: 100 },
+    });
     expect(frames[1].sequence).toBe(101);
     expect(log.getCursor('s1').epoch).toBe(1);
   });
@@ -309,7 +356,8 @@ describe('retention and prune marks (B7)', () => {
     prunedSession(sqlite, log);
     // Epoch 2 starts after the prune; its own history is unpruned.
     log.resetEpoch('s1');
-    for (let i = 0; i < 3; i++) appendEvent(log, 's1', 'stream.delta', { agentId: 'a', content: 'y' });
+    for (let i = 0; i < 3; i++)
+      appendEvent(log, 's1', 'stream.delta', { agentId: 'a', content: 'y' });
     expect(log.getCursor('s1').epoch).toBe(2);
 
     const sent: string[] = [];
@@ -318,17 +366,28 @@ describe('retention and prune marks (B7)', () => {
 
     const frames = parsed(sent);
     expect(frames.some((f) => f.type === 'session.history_pruned')).toBe(false);
-    expect(frames.map((f) => [f.epoch, f.sequence])).toEqual([[2, 1], [2, 2], [2, 3]]);
+    expect(frames.map((f) => [f.epoch, f.sequence])).toEqual([
+      [2, 1],
+      [2, 2],
+      [2, 3],
+    ]);
   });
 });
 
 describe('replay stays in order across byte-budgeted pages', () => {
   test('a large history replays completely and in sequence order', () => {
     const { log, manager } = setup();
-    for (let i = 0; i < 30; i++) appendEvent(log, 's1', 'stream.delta', { agentId: 'a', messageId: `t${i}`, content: 'z'.repeat(100 * 1024) });
+    for (let i = 0; i < 30; i++)
+      appendEvent(log, 's1', 'stream.delta', {
+        agentId: 'a',
+        messageId: `t${i}`,
+        content: 'z'.repeat(100 * 1024),
+      });
     const sent: string[] = [];
     manager.add(socket('replay', sent, { value: 0 }));
     manager.subscribeClientToSession('replay', 's1', { epoch: 1, sequence: 0 });
-    expect(parsed(sent).map((f) => f.sequence)).toEqual(Array.from({ length: 30 }, (_, i) => i + 1));
+    expect(parsed(sent).map((f) => f.sequence)).toEqual(
+      Array.from({ length: 30 }, (_, i) => i + 1),
+    );
   });
 });

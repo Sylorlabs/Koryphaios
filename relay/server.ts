@@ -616,8 +616,20 @@ const server = Bun.serve<WsData>({
 
   async fetch(req, server) {
     const url = new URL(req.url);
-    if (url.pathname === '/link-device') return new Response(MOBILE_HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" } });
-    if (url.pathname === '/device-client.js') return new Response(await mobileBundle(), { headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' } });
+    if (url.pathname === '/link-device')
+      return new Response(MOBILE_HTML, {
+        headers: {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Referrer-Policy': 'no-referrer',
+          'Content-Security-Policy':
+            "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        },
+      });
+    if (url.pathname === '/device-client.js')
+      return new Response(await mobileBundle(), {
+        headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' },
+      });
     const deviceResponse = await deviceRelay.fetch(req, server);
     if (deviceResponse !== null) return deviceResponse;
 

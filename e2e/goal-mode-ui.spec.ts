@@ -60,7 +60,9 @@ test('Goal Mode slash commands reveal a scoped, Critic-aware control surface', a
   await goalMode.getByRole('button', { name: 'Expand goal details' }).click();
 
   // The Critic quality gate toggle should be visible for the selected goal
-  await expect(goalMode.getByText(/Critic quality gate (auto|on|off)/)).toBeVisible({ timeout: 10_000 });
+  await expect(goalMode.getByText(/Critic quality gate (auto|on|off)/)).toBeVisible({
+    timeout: 10_000,
+  });
 
   // Test goal resume command
   await composer.fill('/goal resume');

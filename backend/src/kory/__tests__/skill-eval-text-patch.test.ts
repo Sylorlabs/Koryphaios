@@ -118,9 +118,9 @@ describe('text-only skill evaluation patch adapter', () => {
     roots.push(root);
     const path = 'release../summary.txt';
 
-    expect(applySkillEvalTextPatch(root, [
-      { operation: 'write', path, content: 'contained\n' },
-    ])).toEqual([path]);
+    expect(
+      applySkillEvalTextPatch(root, [{ operation: 'write', path, content: 'contained\n' }]),
+    ).toEqual([path]);
     expect(readFileSync(join(root, path), 'utf8')).toBe('contained\n');
     expect(applySkillEvalTextPatch(root, [{ operation: 'delete', path }])).toEqual([path]);
     expect(existsSync(join(root, path))).toBe(false);

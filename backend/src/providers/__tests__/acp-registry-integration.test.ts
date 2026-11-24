@@ -12,7 +12,11 @@ const savedEnv: Record<string, string | undefined> = {};
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'kory-acp-registry-int-'));
-  for (const key of ['KORYPHAIOS_DATA_DIR', 'KORY_DISABLE_CLI_AUTODETECT', 'KORY_DISABLE_PROVIDER_AUTODETECT']) {
+  for (const key of [
+    'KORYPHAIOS_DATA_DIR',
+    'KORY_DISABLE_CLI_AUTODETECT',
+    'KORY_DISABLE_PROVIDER_AUTODETECT',
+  ]) {
     savedEnv[key] = process.env[key];
   }
   process.env.KORYPHAIOS_DATA_DIR = root;

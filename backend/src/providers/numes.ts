@@ -45,9 +45,7 @@ function asPositiveInt(value: unknown): number | undefined {
 
 function asNonNegativeNumber(value: unknown): number | undefined {
   const parsed = typeof value === 'string' ? Number.parseFloat(value) : value;
-  return typeof parsed === 'number' && Number.isFinite(parsed) && parsed >= 0
-    ? parsed
-    : undefined;
+  return typeof parsed === 'number' && Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 /**
@@ -62,7 +60,10 @@ function usdPerTokenToPerMillion(value: unknown): number | undefined {
 }
 
 /** Compact, provider-derived price label. Never a converted or estimated rate. */
-function priceLabel(inputPerM: number | undefined, outputPerM: number | undefined): string | undefined {
+function priceLabel(
+  inputPerM: number | undefined,
+  outputPerM: number | undefined,
+): string | undefined {
   if (inputPerM === undefined && outputPerM === undefined) return undefined;
   const format = (value: number): string => {
     const fixed = value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');

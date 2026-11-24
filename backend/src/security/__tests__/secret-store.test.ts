@@ -1,5 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { mkdtempSync, statSync, rmSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  statSync,
+  rmSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -13,7 +21,6 @@ import {
 } from '../secret-store';
 import { isWindows } from '../../runtime/platform';
 
-
 describe('secret-store permissions', () => {
   let root: string;
   beforeEach(() => {
@@ -24,7 +31,10 @@ describe('secret-store permissions', () => {
       rmSync(root, { recursive: true, force: true });
     } catch (err: unknown) {
       // Best-effort temp dir cleanup — tests don't need serverLog.
-      console.debug('secret-store test cleanup failed:', err instanceof Error ? err.message : String(err));
+      console.debug(
+        'secret-store test cleanup failed:',
+        err instanceof Error ? err.message : String(err),
+      );
     }
   });
 
@@ -154,7 +164,10 @@ describe('provider credential isolation', () => {
       apiKey: 'synthetic-alpha-rotated',
       headers: { ...alpha.headers, Authorization: 'Bearer synthetic-alpha-rotated' },
     };
-    expect(loadProviderSecrets(root)).toEqual({ 'custom:alpha': rotatedAlpha, 'custom:beta': beta });
+    expect(loadProviderSecrets(root)).toEqual({
+      'custom:alpha': rotatedAlpha,
+      'custom:beta': beta,
+    });
 
     const beforeNoop = readFileSync(path, 'utf-8');
     upsertProviderSecrets(root, 'custom:beta', { apiKey: '', authToken: ' ', headers: {} });
@@ -180,7 +193,10 @@ describe('provider credential isolation', () => {
     writeFileSync(path, JSON.stringify({ 'custom:alpha': injected, 'custom:beta': beta }));
     const providers = {
       'custom:alpha': {
-        name: 'custom:alpha', baseUrl: 'https://alpha.invalid', disabled: true, custom: true,
+        name: 'custom:alpha',
+        baseUrl: 'https://alpha.invalid',
+        disabled: true,
+        custom: true,
         headers: { 'x-routing': 'alpha', Authorization: 'Bearer synthetic-old-alpha' },
       },
       'custom:beta': { name: 'custom:beta', baseUrl: 'https://beta.invalid' },
@@ -192,14 +208,18 @@ describe('provider credential isolation', () => {
     expect(hydrated).toEqual({
       ...original,
       'custom:alpha': {
-        ...original['custom:alpha'], ...alpha,
+        ...original['custom:alpha'],
+        ...alpha,
         headers: { 'x-routing': 'alpha', ...alpha.headers },
       },
       'custom:beta': { ...original['custom:beta'], ...beta },
     });
     expect(providers).toEqual(original);
     expect(readFileSync(path, 'utf-8')).toBe(originalStore);
-    expect(hydrateProviderSecrets(root, {})).toEqual({ 'custom:alpha': alpha, 'custom:beta': beta });
+    expect(hydrateProviderSecrets(root, {})).toEqual({
+      'custom:alpha': alpha,
+      'custom:beta': beta,
+    });
 
     // Updating a different provider must not rewrite or discard this entry.
     upsertProviderSecrets(root, 'custom:beta', { apiKey: 'synthetic-beta-rotated' });
@@ -207,12 +227,22 @@ describe('provider credential isolation', () => {
   });
 
   test('invalid credential values and extra upsert fields cannot become runtime settings', () => {
-    writeFileSync(path, JSON.stringify({
-      alpha: {
-        apiKey: { name: 'beta' }, authToken: 42, name: 'beta',
-        headers: { Authorization: 'Bearer synthetic-alpha', empty: '', invalid: 42, ' ': 'ignored' },
-      },
-    }));
+    writeFileSync(
+      path,
+      JSON.stringify({
+        alpha: {
+          apiKey: { name: 'beta' },
+          authToken: 42,
+          name: 'beta',
+          headers: {
+            Authorization: 'Bearer synthetic-alpha',
+            empty: '',
+            invalid: 42,
+            ' ': 'ignored',
+          },
+        },
+      }),
+    );
     expect(hydrateProviderSecrets(root, { alpha: { name: 'alpha' } })).toEqual({
       alpha: { name: 'alpha', headers: { Authorization: 'Bearer synthetic-alpha' } },
     });
@@ -234,27 +264,30 @@ describe('provider credential isolation', () => {
     expect(loadProviderSecrets(root)).toEqual({ alpha, toString: beta });
   });
 
-  test.each(['__proto__', 'constructor', 'prototype'])('rejects dangerous provider key %s', (name) => {
-    saveProviderSecrets(root, { alpha });
-    const before = readFileSync(path, 'utf-8');
-    const dangerous = JSON.parse(JSON.stringify({ [name]: beta }));
-    expect(() => upsertProviderSecrets(root, name, beta)).toThrow();
-    expect(() => removeProviderSecrets(root, name)).toThrow();
-    expect(() => stripProviderSecrets(dangerous)).toThrow();
-    expect(() => hydrateProviderSecrets(root, dangerous)).toThrow();
-    expect(() => saveProviderSecrets(root, dangerous)).toThrow();
-    expect(readFileSync(path, 'utf-8')).toBe(before);
+  test.each(['__proto__', 'constructor', 'prototype'])(
+    'rejects dangerous provider key %s',
+    (name) => {
+      saveProviderSecrets(root, { alpha });
+      const before = readFileSync(path, 'utf-8');
+      const dangerous = JSON.parse(JSON.stringify({ [name]: beta }));
+      expect(() => upsertProviderSecrets(root, name, beta)).toThrow();
+      expect(() => removeProviderSecrets(root, name)).toThrow();
+      expect(() => stripProviderSecrets(dangerous)).toThrow();
+      expect(() => hydrateProviderSecrets(root, dangerous)).toThrow();
+      expect(() => saveProviderSecrets(root, dangerous)).toThrow();
+      expect(readFileSync(path, 'utf-8')).toBe(before);
 
-    writeFileSync(path, JSON.stringify({ alpha, ...dangerous }));
-    const corrupt = readFileSync(path, 'utf-8');
-    expect(() => loadProviderSecrets(root)).toThrow();
-    expect(() => hydrateProviderSecrets(root, {})).toThrow();
-    expect(() => upsertProviderSecrets(root, 'alpha', beta)).toThrow();
-    expect(() => removeProviderSecrets(root, 'alpha')).toThrow();
-    expect(readFileSync(path, 'utf-8')).toBe(corrupt);
-    expect(Object.getPrototypeOf({})).toBe(Object.prototype);
-    expect(Object.prototype).not.toHaveProperty('apiKey');
-  });
+      writeFileSync(path, JSON.stringify({ alpha, ...dangerous }));
+      const corrupt = readFileSync(path, 'utf-8');
+      expect(() => loadProviderSecrets(root)).toThrow();
+      expect(() => hydrateProviderSecrets(root, {})).toThrow();
+      expect(() => upsertProviderSecrets(root, 'alpha', beta)).toThrow();
+      expect(() => removeProviderSecrets(root, 'alpha')).toThrow();
+      expect(readFileSync(path, 'utf-8')).toBe(corrupt);
+      expect(Object.getPrototypeOf({})).toBe(Object.prototype);
+      expect(Object.prototype).not.toHaveProperty('apiKey');
+    },
+  );
 
   test.each([
     ['truncated JSON', '{"alpha":{"apiKey":"synthetic-truncated"'],
@@ -298,7 +331,9 @@ describe('provider credential isolation', () => {
   test('a missing store is empty and can be initialized', () => {
     expect(loadProviderSecrets(root)).toEqual({});
     expect(removeProviderSecrets(root, 'alpha')).toBe(false);
-    expect(hydrateProviderSecrets(root, { alpha: { name: 'alpha' } })).toEqual({ alpha: { name: 'alpha' } });
+    expect(hydrateProviderSecrets(root, { alpha: { name: 'alpha' } })).toEqual({
+      alpha: { name: 'alpha' },
+    });
     expect(existsSync(path)).toBe(false);
     upsertProviderSecrets(root, 'alpha', alpha);
     expect(loadProviderSecrets(root)).toEqual({ alpha });
@@ -313,6 +348,9 @@ function chmodSyncLoose(path: string, mode: number): void {
     chmodSync(path, mode);
   } catch (err: unknown) {
     // Filesystems that reject the mode will surface in the assertion below.
-    console.debug('chmodSyncLoose failed (will surface in assertion):', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'chmodSyncLoose failed (will surface in assertion):',
+      err instanceof Error ? err.message : String(err),
+    );
   }
 }

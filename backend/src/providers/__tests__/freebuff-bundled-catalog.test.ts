@@ -127,12 +127,15 @@ describe('Freebuff private turn model settings', () => {
     expect(result.freebuffModelKey).toBe('m-fixture');
     expect(result.freebuffModel).toBeUndefined();
     expect(result.freebuffCatalogReasoningEfforts).toEqual({
-      'catalog-stable-key': 'ultra', 'm-fixture': 'high',
+      'catalog-stable-key': 'ultra',
+      'm-fixture': 'high',
     });
     expect(result.freebuffModelDefaultMigration).toBe(settings.freebuffModelDefaultMigration);
     expect(settings.freebuffModelKey).toBe('catalog-stable-key');
     expect(settings.freebuffCatalogReasoningEfforts).toEqual({ 'catalog-stable-key': 'ultra' });
-    expect(() => buildFreebuffTurnSettings({}, 'freebuff/catalog-INVALID')).toThrow('selection is invalid');
+    expect(() => buildFreebuffTurnSettings({}, 'freebuff/catalog-INVALID')).toThrow(
+      'selection is invalid',
+    );
   });
 
   it('removes modern key when explicitly selecting a legacy picker model, like the CLI setter', () => {

@@ -15,7 +15,12 @@ describe('welcome background text contrast', () => {
   });
 
   it('uses white text for dark and saturated rainbow backgrounds', () => {
-    for (const color of [pixel(0, 0, 0), pixel(120, 20, 160), pixel(10, 105, 120), pixel(200, 20, 30)]) {
+    for (const color of [
+      pixel(0, 0, 0),
+      pixel(120, 20, 160),
+      pixel(10, 105, 120),
+      pixel(200, 20, 30),
+    ]) {
       expect(welcomeTextColorForPixels(color, 1, lightSurface)).toBe('#ffffff');
     }
   });
@@ -39,8 +44,12 @@ describe('welcome background text contrast', () => {
   });
 
   it('uses image-wide average luminance for mixed color samples', () => {
-    expect(welcomeTextColorForPixels([...pixel(255, 255, 255), ...pixel(0, 0, 0)], 1, darkSurface)).toBe('#000000');
-    expect(welcomeTextColorForPixels([...pixel(0, 0, 0), ...pixel(0, 0, 0)], 1, lightSurface)).toBe('#ffffff');
+    expect(
+      welcomeTextColorForPixels([...pixel(255, 255, 255), ...pixel(0, 0, 0)], 1, darkSurface),
+    ).toBe('#000000');
+    expect(welcomeTextColorForPixels([...pixel(0, 0, 0), ...pixel(0, 0, 0)], 1, lightSurface)).toBe(
+      '#ffffff',
+    );
   });
 });
 

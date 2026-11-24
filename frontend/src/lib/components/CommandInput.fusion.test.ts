@@ -20,12 +20,7 @@ const { catalog, fusionDef } = vi.hoisted(() => {
     );
   const pairings: FusionCatalog['pairings'] = {};
   const add = (lead: string, fast: boolean, sk: string, skEff: string | null) => {
-    pairings[`${lead}|${fast ? 'fast' : 'std'}|${sk}|${skEff ?? ''}`] = cell(
-      lead,
-      fast,
-      sk,
-      skEff,
-    );
+    pairings[`${lead}|${fast ? 'fast' : 'std'}|${sk}|${skEff ?? ''}`] = cell(lead, fast, sk, skEff);
   };
   for (const sk of ['swe-2', 'gpt-6-luna', 'glm-5-2', 'claude-sonnet-5-5']) {
     const eff =
@@ -44,15 +39,35 @@ const { catalog, fusionDef } = vi.hoisted(() => {
   const efforts = (list: string[]) => list;
   const cat: FusionCatalog = {
     leads: [
-      { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', efforts: efforts(LEAD_EFFORTS), defaultEffort: 'medium' },
-      { id: 'claude-fable-5-2', name: 'Claude Fable 5.2', efforts: efforts(LEAD_EFFORTS), defaultEffort: 'medium' },
-      { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', efforts: efforts(LEAD_EFFORTS), defaultEffort: 'medium' },
+      {
+        id: 'claude-opus-5-5',
+        name: 'Claude Opus 5.5',
+        efforts: efforts(LEAD_EFFORTS),
+        defaultEffort: 'medium',
+      },
+      {
+        id: 'claude-fable-5-2',
+        name: 'Claude Fable 5.2',
+        efforts: efforts(LEAD_EFFORTS),
+        defaultEffort: 'medium',
+      },
+      {
+        id: 'claude-sonnet-5-5',
+        name: 'Claude Sonnet 5.5',
+        efforts: efforts(LEAD_EFFORTS),
+        defaultEffort: 'medium',
+      },
     ],
     sidekicks: [
       { id: 'swe-2', name: 'SWE-2', efforts: ['medium', 'high'], defaultEffort: 'medium' },
       { id: 'gpt-6-luna', name: 'GPT-6 Luna', efforts: ['high'], defaultEffort: 'high' },
       { id: 'glm-5-2', name: 'GLM-5.2', efforts: [], defaultEffort: null },
-      { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', efforts: ['medium'], defaultEffort: 'medium' },
+      {
+        id: 'claude-sonnet-5-5',
+        name: 'Claude Sonnet 5.5',
+        efforts: ['medium'],
+        defaultEffort: 'medium',
+      },
     ],
     pairings,
     meta: Object.fromEntries(
@@ -201,7 +216,9 @@ describe('composer Fusion slots', () => {
     await openSlot(1);
     await fireEvent.click(screen.getByText('Claude Fable 5.2'));
     const fast = screen.getByRole('radiogroup', { name: 'Fusion 1 Fast' });
-    await fireEvent.click([...fast.querySelectorAll('button')].find((b) => b.textContent === 'On')!);
+    await fireEvent.click(
+      [...fast.querySelectorAll('button')].find((b) => b.textContent === 'On')!,
+    );
     // Fast Fable pairs only with GPT sidekicks → SWE-2 repaired away, note shown.
     await waitFor(() =>
       expect(
@@ -211,7 +228,9 @@ describe('composer Fusion slots', () => {
     await openSlot(2);
     const swe2 = screen.getByText('SWE-2').closest('button')!;
     expect(swe2.style.opacity).toBe('0.55');
-    expect(screen.getAllByText(/Not offered with Fast Claude Fable 5\.2/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Not offered with Fast Claude Fable 5\.2/).length).toBeGreaterThan(
+      0,
+    );
   });
 
   it('keeps the Fast radiogroup in sync with the chip after the sidekick auto-adjusts', async () => {
@@ -221,9 +240,7 @@ describe('composer Fusion slots', () => {
     await fireEvent.click(screen.getByText('Claude Fable 5.2'));
     const fast = () => screen.getByRole('radiogroup', { name: 'Fusion 1 Fast' });
     const radio = (label: string) =>
-      [...fast().querySelectorAll('button[role="radio"]')].find(
-        (b) => b.textContent === label,
-      )!;
+      [...fast().querySelectorAll('button[role="radio"]')].find((b) => b.textContent === label)!;
     await fireEvent.click(radio('On'));
     // Fast Fable pairs only with GPT sidekicks: SWE-2 is repaired away and the
     // Fast control must read On in the same render, not lag a frame behind.
@@ -248,9 +265,7 @@ describe('composer Fusion slots', () => {
     await screen.findByTestId('fusion-slot-1');
     await openSlot(1);
     await fireEvent.click(screen.getByText('Claude Sonnet 5.5'));
-    await waitFor(() =>
-      expect(screen.getByText('No fast pairing for this lead.')).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByText('No fast pairing for this lead.')).toBeTruthy());
     expect(screen.queryByRole('radiogroup', { name: 'Fusion 1 Fast' })).toBeNull();
   });
 

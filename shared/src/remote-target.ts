@@ -408,11 +408,7 @@ export function isExecutionTarget(value: unknown): value is ExecutionTarget {
  * transports must establish their own target-side grant before they can use
  * this boundary; they must not masquerade as a local target. */
 export function isLocalExecutionTarget(value: unknown, backendId: string): boolean {
-  return (
-    isExecutionTarget(value) &&
-    value.kind === 'local' &&
-    value.backendId === backendId
-  );
+  return isExecutionTarget(value) && value.kind === 'local' && value.backendId === backendId;
 }
 
 export function capabilityIsAvailable(capability: RemoteCapability | undefined): boolean {

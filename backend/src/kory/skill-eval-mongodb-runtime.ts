@@ -116,11 +116,7 @@ quit(0);
     );
     return {
       passed: harness.status === 0,
-      evidence: [
-        harness.stdout,
-        harness.stderr,
-        harness.error?.message,
-      ]
+      evidence: [harness.stdout, harness.stderr, harness.error?.message]
         .filter(Boolean)
         .join('\n')
         .trim()

@@ -9,7 +9,6 @@
  * MCP wire protocol the way a real CLI host (Devin, Claude, Codex) would.
  */
 
-
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { createMcpHandler, type McpHttpHandler } from '@modelcontextprotocol/server';
@@ -137,7 +136,7 @@ describe('MCP passive server', () => {
     });
     const client = new Client(
       { name: 'passive-test-client', version: '1.0.0' },
-      { versionNegotiation: { mode: 'auto' } },
+      { versionNegotiation: { mode: 'auto' } }
     );
 
     try {

@@ -202,13 +202,25 @@ let spokenText = 'toggle works';
 /** Holds the conductor binding (Mod+Shift+Space; Mod is Ctrl on Linux). */
 function pressConductor() {
   window.dispatchEvent(
-    new KeyboardEvent('keydown', { key: ' ', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }),
+    new KeyboardEvent('keydown', {
+      key: ' ',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
   );
 }
 
 function releaseConductor() {
   window.dispatchEvent(
-    new KeyboardEvent('keyup', { key: ' ', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }),
+    new KeyboardEvent('keyup', {
+      key: ' ',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    }),
   );
 }
 
@@ -231,7 +243,10 @@ describe('voice conductor routing in the composer', () => {
     setPlatformForTesting('linux');
     localStorage.clear();
     conductorSettings.reload();
-    shortcutStore.list = defaultShortcuts.map((shortcut) => ({ ...shortcut, keys: [...shortcut.keys] }));
+    shortcutStore.list = defaultShortcuts.map((shortcut) => ({
+      ...shortcut,
+      keys: [...shortcut.keys],
+    }));
     invoke.mockReset();
     apiFetch.mockReset();
     voiceRecorder.end();
@@ -245,7 +260,12 @@ describe('voice conductor routing in the composer', () => {
     });
     invoke.mockImplementation(async (command: string) => {
       if (command === 'local_voice_model_status') {
-        return { installed: true, modelId: 'kory-local-voice', name: 'ggml-tiny.bin', format: 'Ggml' };
+        return {
+          installed: true,
+          modelId: 'kory-local-voice',
+          name: 'ggml-tiny.bin',
+          format: 'Ggml',
+        };
       }
       if (command === 'transcribe_local_voice') return { text: spokenText };
       return undefined;

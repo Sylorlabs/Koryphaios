@@ -24,7 +24,9 @@ const outputPath = outputArg
   : join(projectRoot, 'outputs/skill-library-finish-plan/android-live-session.json');
 
 const androidHome =
-  process.env.ANDROID_HOME ?? process.env.ANDROID_SDK_ROOT ?? join(homedir(), 'Library/Android/sdk');
+  process.env.ANDROID_HOME ??
+  process.env.ANDROID_SDK_ROOT ??
+  join(homedir(), 'Library/Android/sdk');
 const adbPath = join(androidHome, 'platform-tools/adb');
 
 if (!existsSync(adbPath)) {
@@ -186,7 +188,10 @@ if (!talkbackEnabled || !talkbackBound) {
   throw new Error('TalkBack must be enabled and bound before recording a session');
 }
 
-const originalFontScale = require0(['shell', 'settings', 'get', 'system', 'font_scale'], 'font scale');
+const originalFontScale = require0(
+  ['shell', 'settings', 'get', 'system', 'font_scale'],
+  'font scale',
+);
 const originalScale = /^\d+(?:\.\d+)?$/u.test(originalFontScale) ? originalFontScale : '1.0';
 
 require0(
@@ -297,7 +302,10 @@ const session = {
     defaultRowHeight,
     largeRowHeight,
     grew: largeRowHeight > defaultRowHeight,
-    captures: [defaultCapture.replace(projectRoot + '/', ''), largeCapture.replace(projectRoot + '/', '')],
+    captures: [
+      defaultCapture.replace(projectRoot + '/', ''),
+      largeCapture.replace(projectRoot + '/', ''),
+    ],
   },
 };
 

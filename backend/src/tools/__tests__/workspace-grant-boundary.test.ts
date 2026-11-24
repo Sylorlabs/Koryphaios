@@ -96,9 +96,7 @@ describe('host-issued requiredWorkspaceRoot grant', () => {
       context({ workingDirectory: outside, requiredWorkspaceRoot: grant }),
     );
     expect(result.isError).toBeTruthy();
-    expect(String(result.output)).toContain(
-      'Cannot establish the mandatory workspace boundary:',
-    );
+    expect(String(result.output)).toContain('Cannot establish the mandatory workspace boundary:');
     rmSync(grant, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
   });

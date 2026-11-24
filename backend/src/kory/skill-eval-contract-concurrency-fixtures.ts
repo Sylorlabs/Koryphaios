@@ -43,39 +43,64 @@ interface OriginalSourceObservation {
 }
 
 function captureOriginalSource(
-  root: string, scenarioId: string, sourcePath: string, original: string,
-  script: string, expected: unknown,
+  root: string,
+  scenarioId: string,
+  sourcePath: string,
+  original: string,
+  script: string,
+  expected: unknown,
 ): { relativePath: string; text: string } {
   const referencePath = `reference/${sourcePath.slice('src/'.length).replace('.ts', '.before.ts')}`;
-  if (readFixtureText(root, sourcePath) !== original ||
+  if (
+    readFixtureText(root, sourcePath) !== original ||
     readFixtureText(root, referencePath) !== original ||
-    readFixtureText(root, PRE_DISPATCH_SCRIPT) !== script) {
+    readFixtureText(root, PRE_DISPATCH_SCRIPT) !== script
+  ) {
     throw new Error('Original-source pre-dispatch capture has a mismatched source or observer');
   }
   const execution = spawnSync(PRE_DISPATCH_COMMAND[0], PRE_DISPATCH_COMMAND.slice(1), {
-    cwd: root, encoding: 'utf8', timeout: 15_000, maxBuffer: 1_000_000,
+    cwd: root,
+    encoding: 'utf8',
+    timeout: 15_000,
+    maxBuffer: 1_000_000,
   });
-  if (execution.error || execution.signal || execution.status !== 0 ||
+  if (
+    execution.error ||
+    execution.signal ||
+    execution.status !== 0 ||
     readFixtureText(root, sourcePath) !== original ||
     readFixtureText(root, referencePath) !== original ||
-    readFixtureText(root, PRE_DISPATCH_SCRIPT) !== script) {
-    throw new Error(`Original-source observation execution failed: ${execution.error?.message ?? execution.stderr ?? execution.signal ?? execution.status}`);
+    readFixtureText(root, PRE_DISPATCH_SCRIPT) !== script
+  ) {
+    throw new Error(
+      `Original-source observation execution failed: ${execution.error?.message ?? execution.stderr ?? execution.signal ?? execution.status}`,
+    );
   }
   const stdout = execution.stdout ?? '';
   let outcomes: unknown;
-  try { outcomes = JSON.parse(stdout.trim()); } catch {
+  try {
+    outcomes = JSON.parse(stdout.trim());
+  } catch {
     throw new Error('Original-source observation did not emit valid JSON');
   }
   if (JSON.stringify(outcomes) !== JSON.stringify(expected)) {
-    throw new Error('Original-source observation outcomes do not match the defective starting behavior');
+    throw new Error(
+      'Original-source observation outcomes do not match the defective starting behavior',
+    );
   }
   const receipt: OriginalSourceObservation = {
-    schemaVersion: 1, scenarioId,
+    schemaVersion: 1,
+    scenarioId,
     provenance: 'evaluator executed before candidate dispatch; not an agent action',
-    sourcePath, sourceSha256: sha256(original),
-    scriptPath: PRE_DISPATCH_SCRIPT, scriptSha256: sha256(script),
-    command: [...PRE_DISPATCH_COMMAND], exitStatus: execution.status,
-    stdout, stderr: execution.stderr ?? '', outcomes,
+    sourcePath,
+    sourceSha256: sha256(original),
+    scriptPath: PRE_DISPATCH_SCRIPT,
+    scriptSha256: sha256(script),
+    command: [...PRE_DISPATCH_COMMAND],
+    exitStatus: execution.status,
+    stdout,
+    stderr: execution.stderr ?? '',
+    outcomes,
   };
   const text = `${JSON.stringify(receipt, null, 2)}\n`;
   writeFixtureFile(root, PRE_DISPATCH_PATH, text);
@@ -83,29 +108,57 @@ function captureOriginalSource(
 }
 
 function verifiedOriginalSourceCapture(
-  root: string, capture: SkillEvalPreDispatchCapture | undefined,
-  scenarioId: string, sourcePath: string, original: string, script: string, expected: unknown,
+  root: string,
+  capture: SkillEvalPreDispatchCapture | undefined,
+  scenarioId: string,
+  sourcePath: string,
+  original: string,
+  script: string,
+  expected: unknown,
 ): { passed: boolean; tampered: boolean; evidence: string } {
-  if (!capture) return { passed: false, tampered: false, evidence: 'No trusted evaluator pre-dispatch observation was provided.' };
+  if (!capture)
+    return {
+      passed: false,
+      tampered: false,
+      evidence: 'No trusted evaluator pre-dispatch observation was provided.',
+    };
   try {
     const publicText = readFixtureText(root, PRE_DISPATCH_PATH);
     const receipt = JSON.parse(capture.text) as OriginalSourceObservation;
-    const good = capture.relativePath === PRE_DISPATCH_PATH &&
-      capture.sha256 === sha256(capture.text) && publicText === capture.text &&
-      readFixtureText(root, `reference/${sourcePath.slice('src/'.length).replace('.ts', '.before.ts')}`) === original &&
+    const good =
+      capture.relativePath === PRE_DISPATCH_PATH &&
+      capture.sha256 === sha256(capture.text) &&
+      publicText === capture.text &&
+      readFixtureText(
+        root,
+        `reference/${sourcePath.slice('src/'.length).replace('.ts', '.before.ts')}`,
+      ) === original &&
       readFixtureText(root, PRE_DISPATCH_SCRIPT) === script &&
-      receipt.schemaVersion === 1 && receipt.scenarioId === scenarioId &&
+      receipt.schemaVersion === 1 &&
+      receipt.scenarioId === scenarioId &&
       receipt.provenance === 'evaluator executed before candidate dispatch; not an agent action' &&
-      receipt.sourcePath === sourcePath && receipt.sourceSha256 === sha256(original) &&
-      receipt.scriptPath === PRE_DISPATCH_SCRIPT && receipt.scriptSha256 === sha256(script) &&
+      receipt.sourcePath === sourcePath &&
+      receipt.sourceSha256 === sha256(original) &&
+      receipt.scriptPath === PRE_DISPATCH_SCRIPT &&
+      receipt.scriptSha256 === sha256(script) &&
       JSON.stringify(receipt.command) === JSON.stringify(PRE_DISPATCH_COMMAND) &&
       receipt.exitStatus === 0 &&
       JSON.stringify(JSON.parse(receipt.stdout.trim())) === JSON.stringify(expected) &&
       JSON.stringify(receipt.outcomes) === JSON.stringify(expected);
-    return { passed: good, tampered: !good,
-      evidence: good ? `Sealed pre-dispatch source=${receipt.sourceSha256}; command=${receipt.command.join(' ')}; status=0; public receipt intact; expected original-source outcomes verified.` : 'Pre-dispatch source, command, status, outcomes, observer or public receipt failed verification.' };
+    return {
+      passed: good,
+      tampered: !good,
+      evidence: good
+        ? `Sealed pre-dispatch source=${receipt.sourceSha256}; command=${receipt.command.join(' ')}; status=0; public receipt intact; expected original-source outcomes verified.`
+        : 'Pre-dispatch source, command, status, outcomes, observer or public receipt failed verification.',
+    };
   } catch {
-    return { passed: false, tampered: true, evidence: 'Trusted pre-dispatch capture or candidate-visible receipt missing, malformed or modified.' };
+    return {
+      passed: false,
+      tampered: true,
+      evidence:
+        'Trusted pre-dispatch capture or candidate-visible receipt missing, malformed or modified.',
+    };
   }
 }
 
@@ -157,28 +210,41 @@ function executedConcurrencyRepeatability(
       const receipt = readJsonArtifact<Record<string, unknown>>(root, record.testReceipt);
       outcomes = receipt?.outcomes ?? receipt?.perIterationOutcomes;
     }
-    const valid = run.completed && run.passed && record &&
-      Number.isSafeInteger(iterations) && Number(iterations) >= 2 && Number(iterations) <= 1_000 &&
-      Array.isArray(ids) && ids.length === requiredSchedules.length &&
+    const valid =
+      run.completed &&
+      run.passed &&
+      record &&
+      Number.isSafeInteger(iterations) &&
+      Number(iterations) >= 2 &&
+      Number(iterations) <= 1_000 &&
+      Array.isArray(ids) &&
+      ids.length === requiredSchedules.length &&
       new Set(ids).size === requiredSchedules.length &&
       requiredSchedules.every((id) => ids.includes(id) && counts?.[id] === iterations) &&
-      Array.isArray(outcomes) && outcomes.length === iterations &&
-      outcomes.every((row, index) => row && typeof row === 'object' &&
-        (row as Record<string, unknown>).iteration === index + 1 &&
-        requiredSchedules.every((id) => {
-          const schedules = (row as Record<string, unknown>).schedules;
-          return schedules && typeof schedules === 'object' &&
-            Object.hasOwn(schedules, id);
-        })) &&
-      Array.isArray(record.failures) && record.failures.length === 0 &&
+      Array.isArray(outcomes) &&
+      outcomes.length === iterations &&
+      outcomes.every(
+        (row, index) =>
+          row &&
+          typeof row === 'object' &&
+          (row as Record<string, unknown>).iteration === index + 1 &&
+          requiredSchedules.every((id) => {
+            const schedules = (row as Record<string, unknown>).schedules;
+            return schedules && typeof schedules === 'object' && Object.hasOwn(schedules, id);
+          }),
+      ) &&
+      Array.isArray(record.failures) &&
+      record.failures.length === 0 &&
       (record.exitStatus ?? record.exitCode) === run.exitStatus &&
-      typeof record.command === 'string' && /\bbun\s+test\b/u.test(record.command) &&
+      typeof record.command === 'string' &&
+      /\bbun\s+test\b/u.test(record.command) &&
       typeof (record.name ?? record.testName ?? record.testReceipt) === 'string' &&
       String(record.name ?? record.testName ?? record.testReceipt).trim().length > 0;
-    if (!valid) return {
-      passed: false,
-      evidence: `Executed repeatability: missing/invalid runtime-regenerated record (2–1000 iterations, exact schedule IDs/counts, per-iteration outcomes or linked receipt, named loop, command/exit status, failures).\n${run.evidence}`,
-    };
+    if (!valid)
+      return {
+        passed: false,
+        evidence: `Executed repeatability: missing/invalid runtime-regenerated record (2–1000 iterations, exact schedule IDs/counts, per-iteration outcomes or linked receipt, named loop, command/exit status, failures).\n${run.evidence}`,
+      };
     // Independently assert the complete invariant at every recorded iteration.
     // This is evaluator-owned fixed-simulation replay, not agent observations,
     // varied scheduling stress, a race detector, or production recovery.
@@ -194,19 +260,31 @@ function executedConcurrencyRepeatability(
   }
 }
 
-function concurrencyTestsRejectOriginal(root: string, sourcePath: string, original: string, artifactPath: string): {
-  passed: boolean; rejectsDefect: boolean; evidence: string;
+function concurrencyTestsRejectOriginal(
+  root: string,
+  sourcePath: string,
+  original: string,
+  artifactPath: string,
+): {
+  passed: boolean;
+  rejectsDefect: boolean;
+  evidence: string;
 } {
   const authored = runCandidateBunTests(root);
   if (!authored.completed || !authored.passed)
     return { passed: false, rejectsDefect: false, evidence: authored.evidence };
   const repaired = readFixtureText(root, sourcePath);
-  const artifact = existsSync(join(root, artifactPath)) ? readFixtureText(root, artifactPath) : undefined;
+  const artifact = existsSync(join(root, artifactPath))
+    ? readFixtureText(root, artifactPath)
+    : undefined;
   try {
     writeFixtureFile(root, sourcePath, original);
     const defective = runCandidateBunTests(root);
-    return { passed: true, rejectsDefect: defective.completed && !defective.passed,
-      evidence: `${authored.evidence}\nOriginal-source replay: ${defective.evidence}` };
+    return {
+      passed: true,
+      rejectsDefect: defective.completed && !defective.passed,
+      evidence: `${authored.evidence}\nOriginal-source replay: ${defective.evidence}`,
+    };
   } finally {
     writeFixtureFile(root, sourcePath, repaired);
     if (artifact !== undefined) writeFixtureFile(root, artifactPath, artifact);
@@ -214,10 +292,17 @@ function concurrencyTestsRejectOriginal(root: string, sourcePath: string, origin
 }
 
 function hasConcurrencyModelLimits(body: string, deadlock = false): boolean {
-  return /simulat|two.phase|modeled|modelled/u.test(body) &&
+  return (
+    /simulat|two.phase|modeled|modelled/u.test(body) &&
     /repeatability/u.test(body) &&
-    /(?:not|no|unverified|unavailable|does not|cannot)[^.\n]{0,160}(?:real|native|varied|production|cleanup|recovery)/u.test(body) &&
-    (!deadlock || /(?:not|no|unverified|unavailable|does not|cannot)[^.\n]{0,200}(?:completion|acknowledg|cleanup|recovery)/u.test(body));
+    /(?:not|no|unverified|unavailable|does not|cannot)[^.\n]{0,160}(?:real|native|varied|production|cleanup|recovery)/u.test(
+      body,
+    ) &&
+    (!deadlock ||
+      /(?:not|no|unverified|unavailable|does not|cannot)[^.\n]{0,200}(?:completion|acknowledg|cleanup|recovery)/u.test(
+        body,
+      ))
+  );
 }
 
 const LEASE_SOURCE = `export interface Lease { token: string; expiresAt: string }
@@ -586,7 +671,10 @@ const SAVE_EXPECTED = {
     title: { revision: 7, snapshot: { id: 'doc-1', revision: 7, title: 'Old', tags: ['base'] } },
     tags: { revision: 7, snapshot: { id: 'doc-1', revision: 7, title: 'Old', tags: ['base'] } },
   },
-  intendedDeltas: { title: { field: 'title', value: 'New' }, tags: { field: 'tags', value: ['base', 'x'] } },
+  intendedDeltas: {
+    title: { field: 'title', value: 'New' },
+    tags: { field: 'tags', value: ['base', 'x'] },
+  },
   commitOrders: { 'title-first': ['title', 'tags'], 'tags-first': ['tags', 'title'] },
   outcomes: {
     'title-first': { id: 'doc-1', revision: 9, title: 'Old', tags: ['base', 'x'] },
@@ -598,9 +686,15 @@ const SAVE_EXPECTED = {
 const saveMaterializer: SkillEvalFixtureMaterializer = {
   id: 'concurrency-debugging/concurrent-document-saves@4',
   matches: (scenario) => scenario.id === CONCURRENT_SAVE,
-  captureBeforeCandidateDispatch: (root) => captureOriginalSource(
-    root, CONCURRENT_SAVE, 'src/document-store.ts', SAVE_SOURCE, SAVE_OBSERVER, SAVE_EXPECTED,
-  ),
+  captureBeforeCandidateDispatch: (root) =>
+    captureOriginalSource(
+      root,
+      CONCURRENT_SAVE,
+      'src/document-store.ts',
+      SAVE_SOURCE,
+      SAVE_OBSERVER,
+      SAVE_EXPECTED,
+    ),
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-concurrency-save'));
     writeFixtureFile(destination, 'src/document-store.ts', SAVE_SOURCE);
@@ -635,8 +729,13 @@ const saveScorer: SkillEvalDeterministicScorer = {
   scenarioIds: [CONCURRENT_SAVE],
   score: ({ workingDirectory, preDispatchCapture }) => {
     const capture = verifiedOriginalSourceCapture(
-      workingDirectory, preDispatchCapture, CONCURRENT_SAVE,
-      'src/document-store.ts', SAVE_SOURCE, SAVE_OBSERVER, SAVE_EXPECTED,
+      workingDirectory,
+      preDispatchCapture,
+      CONCURRENT_SAVE,
+      'src/document-store.ts',
+      SAVE_SOURCE,
+      SAVE_OBSERVER,
+      SAVE_EXPECTED,
     );
     const referencePath = join(workingDirectory, 'reference/document-store.before.ts');
     const referencePreserved =
@@ -664,14 +763,23 @@ test('hidden: sequential, unrelated document and fresh same-document update',()=
       /sequential/u,
     ]);
     const repeatability = executedConcurrencyRepeatability(
-      workingDirectory, '.kory-eval/concurrency-save.json', ['title-first', 'tags-first'],
-      (iterations, outcomes) => `import { expect,test } from 'bun:test'; import {runOverlap} from '../src/document-store';
+      workingDirectory,
+      '.kory-eval/concurrency-save.json',
+      ['title-first', 'tags-first'],
+      (
+        iterations,
+        outcomes,
+      ) => `import { expect,test } from 'bun:test'; import {runOverlap} from '../src/document-store';
 test('evaluator-owned bounded fixed-simulation save repeatability',()=>{const recorded=${JSON.stringify(outcomes)};let completed=0;for(let i=0;i<${iterations};i++){for(const order of ['title-first','tags-first'] as const){const actual=runOverlap(order);expect(actual).toEqual({id:'doc-1',revision:9,title:'New',tags:['base','x']});expect(recorded[i].schedules[order]).toEqual(actual);}completed++;}expect(completed).toBe(${iterations});});
 `,
     );
     const authored = hidden.passed
-      ? concurrencyTestsRejectOriginal(workingDirectory, 'src/document-store.ts', SAVE_SOURCE,
-          '.kory-eval/concurrency-save.json')
+      ? concurrencyTestsRejectOriginal(
+          workingDirectory,
+          'src/document-store.ts',
+          SAVE_SOURCE,
+          '.kory-eval/concurrency-save.json',
+        )
       : { passed: false, rejectsDefect: false, evidence: 'Repair did not pass invariant checks.' };
     const artifact = readJsonArtifact<unknown>(
       workingDirectory,
@@ -699,12 +807,28 @@ test('evaluator-owned bounded fixed-simulation save repeatability',()=>{const re
       /stale|lost|overwrite|overwrote|replace|erase|clobber/u.test(body);
     const modelLimits = hasConcurrencyModelLimits(body);
     const postEditChecksPassed =
-      referencePreserved && preFix.passed && hidden.passed && noBadSync && regression &&
-      authored.passed && authored.rejectsDefect && repeatability.passed && Boolean(artifact) &&
-      causal && preFixReport && modelLimits;
+      referencePreserved &&
+      preFix.passed &&
+      hidden.passed &&
+      noBadSync &&
+      regression &&
+      authored.passed &&
+      authored.rejectsDefect &&
+      repeatability.passed &&
+      Boolean(artifact) &&
+      causal &&
+      preFixReport &&
+      modelLimits;
     return {
       passed: capture.passed && postEditChecksPassed,
-      quality: capture.passed && postEditChecksPassed ? 1 : postEditChecksPassed ? 0.75 : hidden.passed ? 0.5 : 0,
+      quality:
+        capture.passed && postEditChecksPassed
+          ? 1
+          : postEditChecksPassed
+            ? 0.75
+            : hidden.passed
+              ? 0.5
+              : 0,
       verification: capture.passed && postEditChecksPassed ? 1 : 0,
       integrityFailure: !referencePreserved || capture.tampered,
       evidence: [
@@ -765,22 +889,35 @@ const DEADLOCK_EXPECTED = {
   conflicting: {
     deadlocked: true,
     waitFor: ['shutdown waits queueLock held by flush', 'flush waits sessionLock held by shutdown'],
-    pendingFlushes: 3, drained: false,
+    pendingFlushes: 3,
+    drained: false,
     order: { shutdown: ['sessionLock', 'queueLock'], flush: ['queueLock', 'sessionLock'] },
   },
   normalShutdown: {
-    deadlocked: false, waitFor: [], pendingFlushes: 2, drained: true,
+    deadlocked: false,
+    waitFor: [],
+    pendingFlushes: 2,
+    drained: true,
     order: { shutdown: ['sessionLock', 'queueLock'], flush: ['queueLock', 'sessionLock'] },
   },
-  waitForCycle: ['shutdown waits queueLock held by flush', 'flush waits sessionLock held by shutdown'],
+  waitForCycle: [
+    'shutdown waits queueLock held by flush',
+    'flush waits sessionLock held by shutdown',
+  ],
 };
 
 const deadlockMaterializer: SkillEvalFixtureMaterializer = {
   id: 'concurrency-debugging/shutdown-flush-deadlock@3',
   matches: (scenario) => scenario.id === DEADLOCK,
-  captureBeforeCandidateDispatch: (root) => captureOriginalSource(
-    root, DEADLOCK, 'src/worker-pool.ts', DEADLOCK_SOURCE, DEADLOCK_OBSERVER, DEADLOCK_EXPECTED,
-  ),
+  captureBeforeCandidateDispatch: (root) =>
+    captureOriginalSource(
+      root,
+      DEADLOCK,
+      'src/worker-pool.ts',
+      DEADLOCK_SOURCE,
+      DEADLOCK_OBSERVER,
+      DEADLOCK_EXPECTED,
+    ),
   materialize: (destination) => {
     writeFixtureFile(destination, 'package.json', packageJson('kory-eval-concurrency-deadlock'));
     writeFixtureFile(destination, 'src/worker-pool.ts', DEADLOCK_SOURCE);
@@ -815,15 +952,25 @@ const deadlockScorer: SkillEvalDeterministicScorer = {
   scenarioIds: [DEADLOCK],
   score: ({ workingDirectory, preDispatchCapture }) => {
     const capture = verifiedOriginalSourceCapture(
-      workingDirectory, preDispatchCapture, DEADLOCK,
-      'src/worker-pool.ts', DEADLOCK_SOURCE, DEADLOCK_OBSERVER, DEADLOCK_EXPECTED,
+      workingDirectory,
+      preDispatchCapture,
+      DEADLOCK,
+      'src/worker-pool.ts',
+      DEADLOCK_SOURCE,
+      DEADLOCK_OBSERVER,
+      DEADLOCK_EXPECTED,
     );
-    const referencePreserved = existsSync(join(workingDirectory, 'reference/worker-pool.before.ts')) &&
+    const referencePreserved =
+      existsSync(join(workingDirectory, 'reference/worker-pool.before.ts')) &&
       readFixtureText(workingDirectory, 'reference/worker-pool.before.ts') === DEADLOCK_SOURCE;
-    const preFix = referencePreserved ? runHiddenBunTest(workingDirectory,
-      `import {expect,test} from 'bun:test'; import {simulateConflictingSchedule,simulateNormalShutdown} from '../reference/worker-pool.before';
+    const preFix = referencePreserved
+      ? runHiddenBunTest(
+          workingDirectory,
+          `import {expect,test} from 'bun:test'; import {simulateConflictingSchedule,simulateNormalShutdown} from '../reference/worker-pool.before';
 test('evaluator-owned original-source deadlock and normal-control replay',()=>{expect(simulateConflictingSchedule(3)).toEqual({deadlocked:true,waitFor:['shutdown waits queueLock held by flush','flush waits sessionLock held by shutdown'],pendingFlushes:3,drained:false,order:{shutdown:['sessionLock','queueLock'],flush:['queueLock','sessionLock']}});expect(simulateNormalShutdown(2)).toMatchObject({deadlocked:false,pendingFlushes:2,drained:true,waitFor:[]});});
-`) : { passed: false, evidence: 'Preserved original deadlock source missing or changed.' };
+`,
+        )
+      : { passed: false, evidence: 'Preserved original deadlock source missing or changed.' };
     const hidden = runHiddenBunTest(
       workingDirectory,
       `import { expect,test } from 'bun:test'; import { shutdownOrder,flushOrder,simulateConflictingSchedule,simulateNormalShutdown } from '../src/worker-pool';
@@ -842,13 +989,22 @@ test('hidden: normal shutdown still drains',()=>expect(simulateNormalShutdown(2)
     // from the original deadlocking implementation. Keyword-only tests that
     // assert normal shutdown must not count as proof of the concurrency fix.
     const authored = hidden.passed
-      ? concurrencyTestsRejectOriginal(workingDirectory, 'src/worker-pool.ts', DEADLOCK_SOURCE,
-          '.kory-eval/concurrency-deadlock.json')
+      ? concurrencyTestsRejectOriginal(
+          workingDirectory,
+          'src/worker-pool.ts',
+          DEADLOCK_SOURCE,
+          '.kory-eval/concurrency-deadlock.json',
+        )
       : { passed: false, rejectsDefect: false, evidence: 'Repair did not pass invariant checks.' };
     const rejectsDefect = authored.rejectsDefect;
     const repeatability = executedConcurrencyRepeatability(
-      workingDirectory, '.kory-eval/concurrency-deadlock.json', ['conflicting', 'normal-shutdown'],
-      (iterations, outcomes) => `import {expect,test} from 'bun:test'; import {shutdownOrder,flushOrder,simulateConflictingSchedule,simulateNormalShutdown} from '../src/worker-pool';
+      workingDirectory,
+      '.kory-eval/concurrency-deadlock.json',
+      ['conflicting', 'normal-shutdown'],
+      (
+        iterations,
+        outcomes,
+      ) => `import {expect,test} from 'bun:test'; import {shutdownOrder,flushOrder,simulateConflictingSchedule,simulateNormalShutdown} from '../src/worker-pool';
 test('evaluator-owned bounded fixed-simulation shutdown repeatability',()=>{const recorded=${JSON.stringify(outcomes)};let completed=0;for(let i=0;i<${iterations};i++){for(const id of ['conflicting','normal-shutdown'] as const){const prior=recorded[i].schedules[id];expect(Number.isSafeInteger(prior.pendingFlushes)).toBe(true);expect(prior.pendingFlushes).toBeGreaterThan(0);const actual=id==='conflicting'?simulateConflictingSchedule(prior.pendingFlushes):simulateNormalShutdown(prior.pendingFlushes);expect(shutdownOrder).toEqual(flushOrder);expect(actual).toMatchObject({deadlocked:false,waitFor:[],pendingFlushes:prior.pendingFlushes,drained:true});expect(prior).toEqual(actual);}completed++;}expect(completed).toBe(${iterations});});
 `,
     );
@@ -867,12 +1023,27 @@ test('evaluator-owned bounded fixed-simulation shutdown repeatability',()=>{cons
       /pending/u.test(body);
     const modelLimits = hasConcurrencyModelLimits(body, true);
     const postEditChecksPassed =
-      referencePreserved && preFix.passed && hidden.passed && noTimeout && regression &&
-      authored.passed && rejectsDefect && repeatability.passed &&
-      Boolean(artifact) && causal && modelLimits;
+      referencePreserved &&
+      preFix.passed &&
+      hidden.passed &&
+      noTimeout &&
+      regression &&
+      authored.passed &&
+      rejectsDefect &&
+      repeatability.passed &&
+      Boolean(artifact) &&
+      causal &&
+      modelLimits;
     return {
       passed: capture.passed && postEditChecksPassed,
-      quality: capture.passed && postEditChecksPassed ? 1 : postEditChecksPassed ? 0.75 : hidden.passed ? 0.5 : 0,
+      quality:
+        capture.passed && postEditChecksPassed
+          ? 1
+          : postEditChecksPassed
+            ? 0.75
+            : hidden.passed
+              ? 0.5
+              : 0,
       verification: capture.passed && postEditChecksPassed ? 1 : 0,
       integrityFailure: !referencePreserved || capture.tampered,
       evidence: [

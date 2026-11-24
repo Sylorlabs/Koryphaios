@@ -277,15 +277,24 @@ export function applySkillEvalTextPatch(
 }
 
 function sameSnapshotFile(actual: Stats, expected: Stats): boolean {
-  return actual.isFile() && !actual.isSymbolicLink() &&
-    actual.dev === expected.dev && actual.ino === expected.ino &&
-    actual.size === expected.size && actual.mtimeMs === expected.mtimeMs &&
-    actual.ctimeMs === expected.ctimeMs;
+  return (
+    actual.isFile() &&
+    !actual.isSymbolicLink() &&
+    actual.dev === expected.dev &&
+    actual.ino === expected.ino &&
+    actual.size === expected.size &&
+    actual.mtimeMs === expected.mtimeMs &&
+    actual.ctimeMs === expected.ctimeMs
+  );
 }
 
 function sameSnapshotDirectory(actual: Stats, expected: Stats): boolean {
-  return actual.isDirectory() && !actual.isSymbolicLink() &&
-    actual.dev === expected.dev && actual.ino === expected.ino;
+  return (
+    actual.isDirectory() &&
+    !actual.isSymbolicLink() &&
+    actual.dev === expected.dev &&
+    actual.ino === expected.ino
+  );
 }
 
 function readTextContent(
@@ -310,9 +319,14 @@ function readTextContent(
       if (count === 0) return null;
       offset += count;
     }
-    if (readSync(fd, Buffer.alloc(1), 0, 1, offset) !== 0 ||
-      !sameSnapshotFile(fstatSync(fd), expected) || !directoryUnchanged() ||
-      !sameSnapshotFile(lstatSync(path), expected) || !directoryUnchanged()) return null;
+    if (
+      readSync(fd, Buffer.alloc(1), 0, 1, offset) !== 0 ||
+      !sameSnapshotFile(fstatSync(fd), expected) ||
+      !directoryUnchanged() ||
+      !sameSnapshotFile(lstatSync(path), expected) ||
+      !directoryUnchanged()
+    )
+      return null;
     if (content.includes(0)) return null;
     new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(content);
     return content;
@@ -332,18 +346,25 @@ export function snapshotSkillEvalWorkspace(root: string): string {
   const workspaceRoot = canonicalizePath(requestedRoot);
   const directoryUnchanged = (directory: string, expected: Stats): boolean => {
     try {
-      return sameSnapshotDirectory(lstatSync(requestedRoot), rootStat) &&
+      return (
+        sameSnapshotDirectory(lstatSync(requestedRoot), rootStat) &&
         canonicalizePath(requestedRoot) === workspaceRoot &&
         isContainedBy(workspaceRoot, directory) &&
         sameSnapshotDirectory(lstatSync(directory), expected) &&
-        canonicalizePath(directory) === directory;
+        canonicalizePath(directory) === directory
+      );
     } catch {
       return false;
     }
   };
   const files: string[] = [];
   let totalBytes = 0;
-  const walk = (directory: string, relativeDirectory: string, depth: number, expected: Stats): void => {
+  const walk = (
+    directory: string,
+    relativeDirectory: string,
+    depth: number,
+    expected: Stats,
+  ): void => {
     if (depth > 8 || totalBytes >= MAX_SNAPSHOT_BYTES) return;
     const unchanged = () => directoryUnchanged(directory, expected);
     if (!unchanged()) return;

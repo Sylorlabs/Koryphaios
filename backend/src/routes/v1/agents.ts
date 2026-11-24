@@ -60,10 +60,7 @@ export const agentRoutes = new Elysia({ prefix: '/api/agents' })
           registryId: body.registryId,
           probe: body.probe,
         });
-        serverLog.info(
-          { agent: result.id, status: result.status },
-          'ACP agent registered',
-        );
+        serverLog.info({ agent: result.id, status: result.status }, 'ACP agent registered');
         broadcastProviderStatus();
         return { ok: true, data: result };
       } catch (err) {
@@ -86,9 +83,7 @@ export const agentRoutes = new Elysia({ prefix: '/api/agents' })
         args: t.Optional(t.Array(t.String({ maxLength: 1024 }), { maxItems: 32 })),
         env: t.Optional(t.Record(t.String({ maxLength: 128 }), t.String({ maxLength: 8192 }))),
         cwdPolicy: t.Optional(t.Union([t.Literal('workspace'), t.Literal('private')])),
-        permissionProfile: t.Optional(
-          t.Union([t.Literal('bridge-only'), t.Literal('read-only')]),
-        ),
+        permissionProfile: t.Optional(t.Union([t.Literal('bridge-only'), t.Literal('read-only')])),
         registryId: t.Optional(t.String({ maxLength: 128 })),
         probe: t.Optional(t.Boolean()),
       }),

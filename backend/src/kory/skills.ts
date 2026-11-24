@@ -3526,9 +3526,7 @@ function evaluatePreparedSkillTrigger(
   const negativeExample = skill.metadata.shouldNotTrigger.find((example) => {
     if (containsTokenPhrase(promptTokens, example)) return true;
     const exampleWords = unique(
-      phraseTokensFor(example).filter(
-        (word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word),
-      ),
+      phraseTokensFor(example).filter((word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word)),
     );
     if (exampleWords.length < 6) return false;
     const overlapping = exampleWords.filter((word) => promptWords.has(word));
@@ -3607,9 +3605,7 @@ function evaluatePreparedSkillTrigger(
     // as "task", "request", or "engineering" route unrelated specialties.
     if (isGeneratedRoutingFrameExample(example)) continue;
     const exampleWords = unique(
-      phraseTokensFor(example).filter(
-        (word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word),
-      ),
+      phraseTokensFor(example).filter((word) => word.length > 2 && !TRIGGER_STOP_WORDS.has(word)),
     );
     const specificExampleWords = exampleWords.filter((word) => !GENERIC_TRIGGER_WORDS.has(word));
     const specificOverlap = specificExampleWords.filter((word) => promptWords.has(word));
@@ -4720,7 +4716,7 @@ export function resolveSkills(
       reason.includes('unavailable or invalid') ||
       reason.includes('requires explicit user invocation') ||
       reason.includes('blocked by the agent')
- )
+    )
       return 3;
     if (reason.includes('removed explicitly')) return 2;
     return 1;

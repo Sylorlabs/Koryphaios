@@ -122,7 +122,10 @@ describe('registry parameter gate', () => {
   });
 
   it('keeps only max_tokens for gwarden', () => {
-    const gwarden = new OpenAIProvider({ name: 'gwarden', apiKey: 'k', disabled: false }, 'gwarden');
+    const gwarden = new OpenAIProvider(
+      { name: 'gwarden', apiKey: 'k', disabled: false },
+      'gwarden',
+    );
     const out = gateModelParametersToForwarded(gwarden, defs);
     expect(out[0]?.parameters?.map((d) => d.key)).toEqual(['max_tokens']);
   });
@@ -130,11 +133,7 @@ describe('registry parameter gate', () => {
   it('keeps the full set for a plain OpenAI-compatible provider', () => {
     const openai = new OpenAIProvider({ name: 'openrouter', apiKey: 'k', disabled: false });
     const out = gateModelParametersToForwarded(openai, defs);
-    expect(out[0]?.parameters?.map((d) => d.key)).toEqual([
-      'temperature',
-      'max_tokens',
-      'seed',
-    ]);
+    expect(out[0]?.parameters?.map((d) => d.key)).toEqual(['temperature', 'max_tokens', 'seed']);
   });
 });
 
@@ -164,9 +163,23 @@ const req = (overrides: Partial<StreamRequest> = {}): StreamRequest => ({
 });
 
 const paramDefs = [
-  { key: 'temperature' as const, label: 't', kind: 'float' as const, min: 0, max: 2, description: 'd' },
+  {
+    key: 'temperature' as const,
+    label: 't',
+    kind: 'float' as const,
+    min: 0,
+    max: 2,
+    description: 'd',
+  },
   { key: 'seed' as const, label: 's', kind: 'integer' as const, description: 'd' },
-  { key: 'max_tokens' as const, label: 'm', kind: 'integer' as const, min: 1, max: 4096, description: 'd' },
+  {
+    key: 'max_tokens' as const,
+    label: 'm',
+    kind: 'integer' as const,
+    min: 1,
+    max: 4096,
+    description: 'd',
+  },
 ];
 
 describe('OpenAIProvider model parameters', () => {
@@ -207,7 +220,10 @@ describe('OpenAIProvider model parameters', () => {
   });
 
   it('gwarden sends only max_tokens even when other params are requested', async () => {
-    const provider = new OpenAIProvider({ name: 'gwarden', apiKey: 'k', disabled: false }, 'gwarden');
+    const provider = new OpenAIProvider(
+      { name: 'gwarden', apiKey: 'k', disabled: false },
+      'gwarden',
+    );
     provider.listModels = () => [
       model('test-model', {
         parameters: [

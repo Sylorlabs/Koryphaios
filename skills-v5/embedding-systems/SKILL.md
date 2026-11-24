@@ -48,4 +48,4 @@ mixing namespaces. `embedding-systems` owns the manifest, vector compatibility
 and re-embedding/backfill evidence. `vector-search-systems` owns ANN algorithm,
 graph parameters, sharding, capacity and low level search execution. If both
 change, report both contracts and identify which specialist supplied each
-  measurement.
+measurement.

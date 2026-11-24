@@ -29,8 +29,14 @@ describe('systems protocol concept fixtures', () => {
       BUILTIN_SKILL_EVAL_SCORERS,
     );
     const dedicatedFinopsMaterializers = new Map([
-      ['finops-cloud-cost-full-task-1-individual', 'finops-cloud-cost/reconciled-ledger-full-task@3'],
-      ['finops-cloud-cost-full-task-2-individual', 'finops-cloud-cost/commitment-ledger-full-task@4'],
+      [
+        'finops-cloud-cost-full-task-1-individual',
+        'finops-cloud-cost/reconciled-ledger-full-task@3',
+      ],
+      [
+        'finops-cloud-cost-full-task-2-individual',
+        'finops-cloud-cost/commitment-ledger-full-task@4',
+      ],
     ]);
     expect(SYSTEMS_PROTOCOL_CONCEPTS).toHaveLength(26);
     for (const definition of SYSTEMS_PROTOCOL_CONCEPTS) {
@@ -332,7 +338,9 @@ describe('systems protocol concept fixtures', () => {
       if (item.id === 'payment-integration-full-task-2-individual') {
         // This literal-false check passed the prior 2-vector oracle even though
         // truthy non-boolean values were incorrectly admitted as authenticated.
-        writeFileSync(join(root, 'candidate.ts'), `export function solve(input: any) {
+        writeFileSync(
+          join(root, 'candidate.ts'),
+          `export function solve(input: any) {
   const auditIds: string[] = [];
   const rejectedIds: string[] = [];
   const seen = new Set<string>();
@@ -347,7 +355,8 @@ describe('systems protocol concept fixtures', () => {
     }
   }
   return { state: input.canonical, auditIds, rejectedIds };
-}\n`);
+}\n`,
+        );
         const unsafe = await scorer.score({
           scenario,
           experiment: {} as never,
@@ -357,7 +366,9 @@ describe('systems protocol concept fixtures', () => {
         expect(unsafe.passed).toBe(false);
         expect(unsafe.quality).toBeCloseTo(2 / 3);
         expect(unsafe.verification).toBe(0);
-        expect(unsafe.evidence.some((line) => line.includes('unverified truthy or missing signatures'))).toBe(true);
+        expect(
+          unsafe.evidence.some((line) => line.includes('unverified truthy or missing signatures')),
+        ).toBe(true);
       }
       writeFileSync(join(root, 'candidate.ts'), item.candidate);
       const score = await scorer.score({

@@ -21,7 +21,11 @@ beforeEach(() => {
   cancelledWith = [];
   broadcasts = [];
   setContext({
-    kory: { cancelSessionWorkers: async (id: string) => { cancelledWith.push(id); } },
+    kory: {
+      cancelSessionWorkers: async (id: string) => {
+        cancelledWith.push(id);
+      },
+    },
     goalDriver: { pauseForSession: async () => undefined },
     wsManager: {
       broadcastToSession: (sessionId: string, event: { type: string; payload: unknown }) => {
@@ -32,14 +36,16 @@ beforeEach(() => {
 });
 
 function cancel(body?: unknown): Promise<Response> {
-  return app.handle(new Request(`http://localhost/api/sessions/${SESSION_ID}/cancel`, {
-    method: 'POST',
-    headers: {
-      authorization,
-      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  }));
+  return app.handle(
+    new Request(`http://localhost/api/sessions/${SESSION_ID}/cancel`, {
+      method: 'POST',
+      headers: {
+        authorization,
+        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
+  );
 }
 
 describe('session cancel route', () => {

@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto';
-import { completePairForScenario, selectBlindReviewQueue } from '../backend/src/eval/skills/skill-eval-blind-review';
+import {
+  completePairForScenario,
+  selectBlindReviewQueue,
+} from '../backend/src/eval/skills/skill-eval-blind-review';
 import { selectEligibleSkillEvaluationEvidence } from '../backend/src/eval/skills/skill-eval-eligibility';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -420,16 +423,22 @@ const pending = eligible.filter(
 function pairDiscrimination(item: (typeof pending)[number]): number {
   const withSkill = item.pair.withSkill;
   const withoutSkill = item.pair.withoutSkill;
-  const passGap = Math.abs(Number(Boolean(withSkill.passed)) - Number(Boolean(withoutSkill.passed)));
+  const passGap = Math.abs(
+    Number(Boolean(withSkill.passed)) - Number(Boolean(withoutSkill.passed)),
+  );
   const qualityGap = Math.abs((withSkill.quality ?? 0) - (withoutSkill.quality ?? 0));
-  const verificationGap = Math.abs((withSkill.verification ?? 0) - (withoutSkill.verification ?? 0));
+  const verificationGap = Math.abs(
+    (withSkill.verification ?? 0) - (withoutSkill.verification ?? 0),
+  );
   return passGap * 2 + qualityGap + verificationGap;
 }
 const pendingByDiscrimination = [...pending].sort((left, right) => {
   const delta = pairDiscrimination(right) - pairDiscrimination(left);
   if (delta !== 0) return delta;
   const leftAt = [left.pair.withSkill.recordedAt, left.pair.withoutSkill.recordedAt].sort().at(-1)!;
-  const rightAt = [right.pair.withSkill.recordedAt, right.pair.withoutSkill.recordedAt].sort().at(-1)!;
+  const rightAt = [right.pair.withSkill.recordedAt, right.pair.withoutSkill.recordedAt]
+    .sort()
+    .at(-1)!;
   return rightAt.localeCompare(leftAt);
 });
 const queue = selectBlindReviewQueue(
@@ -437,7 +446,9 @@ const queue = selectBlindReviewQueue(
     skill: item.skill,
     scenarioId: item.task.id,
     comparisonId: item.pair.withSkill.comparisonId!,
-    pairRecordedAt: [item.pair.withSkill.recordedAt, item.pair.withoutSkill.recordedAt].sort().at(-1)!,
+    pairRecordedAt: [item.pair.withSkill.recordedAt, item.pair.withoutSkill.recordedAt]
+      .sort()
+      .at(-1)!,
   })),
   currentBlindReviews.map((run) => ({
     skill: run.skill,
@@ -446,9 +457,14 @@ const queue = selectBlindReviewQueue(
     recordedAt: run.recordedAt,
   })),
   maxPerSkill,
-).map((selected) => pending.find((item) =>
-  item.skill === selected.skill && item.task.id === selected.scenarioId &&
-  item.pair.withSkill.comparisonId === selected.comparisonId)!);
+).map((selected) =>
+  pending.find(
+    (item) =>
+      item.skill === selected.skill &&
+      item.task.id === selected.scenarioId &&
+      item.pair.withSkill.comparisonId === selected.comparisonId,
+  )!,
+);
 
 const persisted: SkillEvaluationRun[] = [];
 const failures: Array<{ skill: string; scenarioId: string; detail: string }> = [];

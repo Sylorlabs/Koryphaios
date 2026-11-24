@@ -158,8 +158,10 @@ describe('chat-scoped Git API and tools', () => {
   });
   test('in-place access refuses a resolved directory that differs from the persisted binding', async () => {
     const session = await sessions.create('local-user', 'Bound folder', undefined, source);
-    const resolver = spyOn(getContext().kory, 'resolveSessionWorkingDirectoryPublic')
-      .mockResolvedValue(b.path);
+    const resolver = spyOn(
+      getContext().kory,
+      'resolveSessionWorkingDirectoryPublic',
+    ).mockResolvedValue(b.path);
     try {
       await expect(chatGitForSession(session.id)).rejects.toThrow('binding changed');
       expect(git(source, 'rev-parse', 'HEAD')).toBe(head);

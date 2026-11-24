@@ -346,8 +346,9 @@ export const LIFECYCLE_CONCEPTS: readonly ConceptFixture[] = [
 // Angular and Android Compose full tasks use their native runtimes. Their
 // state-machine definitions remain as component-only regression controls.
 const fixtures = createConceptFixtures(
-  LIFECYCLE_CONCEPTS.filter((item) =>
-    item.skill !== 'angular-engineering' && item.skill !== 'android-compose'),
+  LIFECYCLE_CONCEPTS.filter(
+    (item) => item.skill !== 'angular-engineering' && item.skill !== 'android-compose',
+  ),
 );
 
 const ANGULAR_FORM = 'angular-engineering-full-task-1-individual';
@@ -612,7 +613,11 @@ function materializeAngular(root: string, number: 1 | 2): void {
       (number === 1
         ? 'Repair src/candidate.component.ts: use Angular signals, reactive forms and real Router reuse. Reinitialize only on entity lifetime changes, reject stale saves including A -> B -> A, handle rejected saves, focus the invalid name input, and tear down route subscriptions. The UI contract uses #editor, #name, #save and #save-status (saved/error).\n'
         : 'Repair src/candidate.component.ts: use Angular DI to share one feature-scoped FeaturePollerService with the dynamically created overlay, ensure service teardown on feature navigation and overlay cleanup, and support concurrent feature owners. Preserve .feature, [data-owner], .open, and .close for browser testing. Never rely on an application singleton.\n') +
-      'All fixed shell, service, compiler, and application entrypoint inputs are evaluator-owned and immutable. In particular, preserve src/main.ts byte-for-byte, including its application providers; make the feature-scoped repair only in src/candidate.component.ts. The scorer runs Angular AOT with strict template and injection checks, bundles the emitted app, and exercises real Chromium. Add verification/result.json with exactly status=verified, angularVersion=\`' + ANGULAR_VERSION + '\`, broaderSkill=frontend-engineering, nearNeighbor=\`' + (number === 1 ? 'react-engineering' : 'svelte-engineering') + '\`, and recovery (a specific string longer than 20 characters). Candidate claims do not substitute for scorer checks or independent blind semantic review.\n',
+      'All fixed shell, service, compiler, and application entrypoint inputs are evaluator-owned and immutable. In particular, preserve src/main.ts byte-for-byte, including its application providers; make the feature-scoped repair only in src/candidate.component.ts. The scorer runs Angular AOT with strict template and injection checks, bundles the emitted app, and exercises real Chromium. Add verification/result.json with exactly status=verified, angularVersion=\`' +
+      ANGULAR_VERSION +
+      '\`, broaderSkill=frontend-engineering, nearNeighbor=\`' +
+      (number === 1 ? 'react-engineering' : 'svelte-engineering') +
+      '\`, and recovery (a specific string longer than 20 characters). Candidate claims do not substitute for scorer checks or independent blind semantic review.\n',
   );
 }
 

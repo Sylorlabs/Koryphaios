@@ -9,7 +9,10 @@ import {
   BUILTIN_SKILL_EVAL_MATERIALIZERS,
   BUILTIN_SKILL_EVAL_SCORERS,
 } from '../../eval/skills/skill-eval-fixtures';
-import { buildSkillEvalSuiteV3, type SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
+import {
+  buildSkillEvalSuiteV3,
+  type SkillEvalScenarioV3,
+} from '../../eval/skills/skill-eval-harness';
 import {
   EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS,
   EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS,
@@ -420,9 +423,9 @@ describe('public research V5 real-source scorer contract', () => {
           item.scenarioIds.includes(scenario.id),
         ),
       ).toEqual([]);
-      expect(
-        BUILTIN_SKILL_EVAL_MATERIALIZERS.filter((item) => item.matches(scenario)),
-      ).toEqual(PUBLIC_RESEARCH_SKILL_EVAL_MATERIALIZERS);
+      expect(BUILTIN_SKILL_EVAL_MATERIALIZERS.filter((item) => item.matches(scenario))).toEqual(
+        PUBLIC_RESEARCH_SKILL_EVAL_MATERIALIZERS,
+      );
       expect(
         BUILTIN_SKILL_EVAL_SCORERS.filter((item) => item.scenarioIds.includes(scenario.id)),
       ).toEqual(PUBLIC_RESEARCH_SKILL_EVAL_SCORERS);
@@ -600,8 +603,9 @@ describe('public research V5 real-source scorer contract', () => {
     );
 
     const forged = structuredClone(report);
-    forged.sources.find((row: { id: string }) => row.id === 'europepmc-trials').sha256 =
-      '0'.repeat(64);
+    forged.sources.find((row: { id: string }) => row.id === 'europepmc-trials').sha256 = '0'.repeat(
+      64,
+    );
     write(forged);
     const forgedScore = await scorePublicResearchRuntime(scenario, root, options);
     expect(forgedScore.passed).toBe(false);
@@ -628,9 +632,7 @@ describe('public research V5 real-source scorer contract', () => {
     );
 
     const badStatus = transport(
-      base.map((source) =>
-        source.id === 'pubmed-trials' ? { ...source, status: 503 } : source,
-      ),
+      base.map((source) => (source.id === 'pubmed-trials' ? { ...source, status: 503 } : source)),
     );
     write(report);
     const unavailable = await scorePublicResearchRuntime(scenario, root, {

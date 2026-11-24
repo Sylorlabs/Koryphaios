@@ -490,9 +490,14 @@ const importReviewScorer: SkillEvalDeterministicScorer = {
         ? (r.artifact as Record<string, unknown>).execution
         : undefined;
     const unprovenExecution =
-      (execution !== null && typeof execution === 'object' &&
-        /\b(executed|succeeded|passed|confirmed|verified)\b/u.test(JSON.stringify(execution).toLowerCase())) ||
-      /\b(?:exploit|traversal)\s+(?:was\s+)?(?:executed|succeeded|confirmed|verified)\b/u.test(r.text);
+      (execution !== null &&
+        typeof execution === 'object' &&
+        /\b(executed|succeeded|passed|confirmed|verified)\b/u.test(
+          JSON.stringify(execution).toLowerCase(),
+        )) ||
+      /\b(?:exploit|traversal)\s+(?:was\s+)?(?:executed|succeeded|confirmed|verified)\b/u.test(
+        r.text,
+      );
     const good =
       Boolean(r.artifact) &&
       !unprovenExecution &&

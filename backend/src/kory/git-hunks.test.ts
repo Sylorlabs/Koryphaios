@@ -74,8 +74,22 @@ describe('parseFileDiff', () => {
       '+++ b/notes.txt',
     ]);
     expect(parsed.hunks.map((hunk) => hunk.header)).toEqual(['@@ -1,3 +1,3 @@', '@@ -10 +10 @@']);
-    expect(parsed.hunks[0]).toMatchObject({ index: 0, oldStart: 1, oldLines: 3, newStart: 1, newLines: 3, additions: 1, deletions: 1 });
-    expect(parsed.hunks[1]).toMatchObject({ index: 1, oldLines: 1, newLines: 1, additions: 1, deletions: 1 });
+    expect(parsed.hunks[0]).toMatchObject({
+      index: 0,
+      oldStart: 1,
+      oldLines: 3,
+      newStart: 1,
+      newLines: 3,
+      additions: 1,
+      deletions: 1,
+    });
+    expect(parsed.hunks[1]).toMatchObject({
+      index: 1,
+      oldLines: 1,
+      newLines: 1,
+      additions: 1,
+      deletions: 1,
+    });
     expect(buildHunkPatch(parsed.prelude, parsed.hunks[1]!)).toBe(
       [...parsed.prelude, '@@ -10 +10 @@', '-line 10', '+line ten', ''].join('\n'),
     );
@@ -89,7 +103,16 @@ describe('parseFileDiff', () => {
 describe('repository path validation', () => {
   test('accepts repository-relative paths and rejects traversal, absolute and backslash forms', () => {
     expect(assertRepoRelativePath('src/app.ts')).toBe('src/app.ts');
-    for (const bad of ['', '../outside.txt', 'src/../../x', '/etc/passwd', 'C:/x', 'a\\b', 'a//b', 'a\0b']) {
+    for (const bad of [
+      '',
+      '../outside.txt',
+      'src/../../x',
+      '/etc/passwd',
+      'C:/x',
+      'a\\b',
+      'a//b',
+      'a\0b',
+    ]) {
       expect(() => assertRepoRelativePath(bad)).toThrow(ValidationError);
     }
     expect(() => normalizeRepoFilePath(repo, '../escape.txt')).toThrow(ValidationError);

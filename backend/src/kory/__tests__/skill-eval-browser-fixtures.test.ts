@@ -18,8 +18,14 @@ import { loadV5SkillPackages } from '../skill-packages';
 import { browserControlTest } from './browser-runtime-test-policy';
 
 const roots: string[] = [];
-const browserTest = browserControlTest('Web browser', BROWSER_SKILL_EVAL_MATERIALIZERS[0].readinessBlockers ?? []);
-const visualTest = browserControlTest('Dashboard browser', BROWSER_SKILL_EVAL_MATERIALIZERS[2].readinessBlockers ?? []);
+const browserTest = browserControlTest(
+  'Web browser',
+  BROWSER_SKILL_EVAL_MATERIALIZERS[0].readinessBlockers ?? [],
+);
+const visualTest = browserControlTest(
+  'Dashboard browser',
+  BROWSER_SKILL_EVAL_MATERIALIZERS[2].readinessBlockers ?? [],
+);
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -175,191 +181,203 @@ async function scoreScenario(id: string, root: string) {
 }
 
 describe('real browser V5 fixtures', () => {
-  browserTest('async operations console starts red then passes real URL/history/focus/network/viewport checks', async () => {
-    const root = workspace('kory-browser-console-');
-    const { scorer, input } = await scoreScenario(
-      'web-interface-full-task-async-operations-console',
-      root,
-    );
-    const red = await scorer.score(input);
-    expect(red.passed).toBe(false);
-    expect(red.integrityFailure).toBe(false);
+  browserTest(
+    'async operations console starts red then passes real URL/history/focus/network/viewport checks',
+    async () => {
+      const root = workspace('kory-browser-console-');
+      const { scorer, input } = await scoreScenario(
+        'web-interface-full-task-async-operations-console',
+        root,
+      );
+      const red = await scorer.score(input);
+      expect(red.passed).toBe(false);
+      expect(red.integrityFailure).toBe(false);
 
-    writeFixtureFile(root, 'src/app.js', GREEN_CONSOLE_APP);
-    writeFixtureFile(root, 'src/styles.css', GREEN_CONSOLE_STYLE);
-    writeFixtureFile(
-      root,
-      'verification/web-interface-implementation-contract.json',
-      `${JSON.stringify(
-        {
-          backendContractVersion: BROWSER_EVAL_CONSTANTS.asyncBackendContractVersion,
-          states: BROWSER_EVAL_CONSTANTS.jobStates,
-          routing: { deepLinks: true, history: true, refresh: true },
-          focus: { dialogRestore: true, keyboardActions: true },
-          network: { slow: true, failed: true, stale: true },
-          cancellationSemantics: 'Backend acknowledgement records cancellation-requested only.',
-          retrySemantics: 'Backend acknowledgement records retrying only.',
-          designSystem: BROWSER_EVAL_CONSTANTS.consoleDesignSystem,
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    writeFixtureFile(
-      root,
-      'verification/browser-state-and-viewport-matrix.json',
-      `${JSON.stringify(
-        {
-          viewports: ['1440x900', '390x844'],
-          states: BROWSER_EVAL_CONSTANTS.jobStates,
-          networkStates: ['slow', 'failed', 'stale'],
-          evidenceType: 'real-browser',
-        },
-        null,
-        2,
-      )}\n`,
-    );
-
-    const green = await scorer.score(input);
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    expect(green.integrityFailure).toBe(false);
-    expect(green.quality).toBe(1);
-    expect(green.verification).toBe(1);
-  }, 60_000);
-
-  browserTest('content-led page starts red then passes supplied-content, semantic, accessibility, responsive, and reduced-motion checks', async () => {
-    const root = workspace('kory-browser-content-');
-    const { scorer, input } = await scoreScenario(
-      'web-interface-full-task-content-led-product-page',
-      root,
-    );
-    const red = await scorer.score(input);
-    expect(red.passed).toBe(false);
-    expect(red.integrityFailure).toBe(false);
-
-    writeFixtureFile(root, 'src/app.js', GREEN_CONTENT_APP);
-    writeFixtureFile(root, 'src/styles.css', GREEN_CONTENT_STYLE);
-    writeFixtureFile(
-      root,
-      'verification/content-led-web-interface-plan.json',
-      `${JSON.stringify(
-        {
-          contentVersion: BROWSER_EVAL_CONSTANTS.contentVersion,
-          audience: BROWSER_EVAL_CONSTANTS.contentAudience,
-          primaryAction: BROWSER_EVAL_CONSTANTS.contentPrimaryAction,
-          secondaryAction: BROWSER_EVAL_CONSTANTS.contentSecondaryAction,
-          assetUse: ['logo.svg', 'product.svg'],
-          unsupportedClaimsAdded: false,
-          designSystem: BROWSER_EVAL_CONSTANTS.contentBrandVersion,
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    writeFixtureFile(
-      root,
-      'verification/responsive-browser-verification-contract.json',
-      `${JSON.stringify(
-        {
-          viewports: ['1440x900', '390x844'],
-          longContent: true,
-          largeText: true,
-          reducedMotion: true,
-          keyboard: true,
-          semanticStructure: true,
-          runtimeConsole: true,
-          evidenceType: 'real-browser',
-        },
-        null,
-        2,
-      )}\n`,
-    );
-
-    const green = await scorer.score(input);
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    expect(green.integrityFailure).toBe(false);
-    expect(green.quality).toBe(1);
-  }, 60_000);
-
-  visualTest('visual verification starts red and only passes when the candidate audit matches the real 24-capture browser matrix', async () => {
-    const root = workspace('kory-browser-visual-');
-    const { scorer, input } = await scoreScenario('visual-verification-full-task-1', root);
-    const red = await scorer.score(input);
-    expect(red.passed).toBe(false);
-    expect(red.integrityFailure).toBe(false);
-
-    const independent = readJsonArtifact<{
-      browserVersion: string;
-      metrics: Array<{
-        captureId: string;
-        width: number;
-        height: number;
-        theme: 'light' | 'dark';
-        state: 'loading' | 'empty' | 'normal' | 'dense';
-        horizontalOverflow: boolean;
-        chartClipped: boolean;
-        legendClipped: boolean;
-        stickyOverlap: boolean;
-        primaryActionDistinct: boolean;
-      }>;
-    }>(root, 'evaluation/visual-verification/independent-matrix.json')!;
-    expect(independent.metrics).toHaveLength(24);
-    const failures = independent.metrics.flatMap((metric) => {
-      const result: string[] = [];
-      if (metric.horizontalOverflow) result.push(`${metric.captureId}:horizontal-overflow`);
-      if (metric.chartClipped) result.push(`${metric.captureId}:chart-clipping`);
-      if (metric.legendClipped) result.push(`${metric.captureId}:legend-clipping`);
-      if (metric.stickyOverlap) result.push(`${metric.captureId}:sticky-header-overlap`);
-      if (!metric.primaryActionDistinct)
-        result.push(`${metric.captureId}:primary-action-not-distinct`);
-      return result;
-    });
-    expect(
-      failures.some((failure) => failure.includes('390x844') && failure.includes('dense')),
-    ).toBe(true);
-
-    writeFixtureFile(
-      root,
-      'verification/visual-verification-scenario-1-capture-matrix.json',
-      `${JSON.stringify(
-        {
-          environment: {
-            dpr: 1,
-            font: BROWSER_EVAL_CONSTANTS.dashboardFont,
-            animations: 'disabled',
-            dataset: 'fixture-v1',
-            browserVersion: independent.browserVersion,
+      writeFixtureFile(root, 'src/app.js', GREEN_CONSOLE_APP);
+      writeFixtureFile(root, 'src/styles.css', GREEN_CONSOLE_STYLE);
+      writeFixtureFile(
+        root,
+        'verification/web-interface-implementation-contract.json',
+        `${JSON.stringify(
+          {
+            backendContractVersion: BROWSER_EVAL_CONSTANTS.asyncBackendContractVersion,
+            states: BROWSER_EVAL_CONSTANTS.jobStates,
+            routing: { deepLinks: true, history: true, refresh: true },
+            focus: { dialogRestore: true, keyboardActions: true },
+            network: { slow: true, failed: true, stale: true },
+            cancellationSemantics: 'Backend acknowledgement records cancellation-requested only.',
+            retrySemantics: 'Backend acknowledgement records retrying only.',
+            designSystem: BROWSER_EVAL_CONSTANTS.consoleDesignSystem,
           },
-          entries: independent.metrics,
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    writeFixtureFile(
-      root,
-      'verification/visual-verification-scenario-1-claim-audit.json',
-      `${JSON.stringify(
-        {
-          failures,
-          renderingNoisePolicy:
-            'Treat differences as rendering noise until DPR, font, animation, dataset, and browser runtime are held constant.',
-        },
-        null,
-        2,
-      )}\n`,
-    );
-    writeFixtureFile(
-      root,
-      'verification/visual-verification-scenario-1-verdict.md',
-      '# Visual verification verdict\n\nThe 390px dense state has meaningful horizontal overflow in both light and dark themes. Other measured claims are judged only after holding DPR, font, animation state, dataset, and browser runtime constant so rendering noise is not mislabeled as product drift.\n',
-    );
+          null,
+          2,
+        )}\n`,
+      );
+      writeFixtureFile(
+        root,
+        'verification/browser-state-and-viewport-matrix.json',
+        `${JSON.stringify(
+          {
+            viewports: ['1440x900', '390x844'],
+            states: BROWSER_EVAL_CONSTANTS.jobStates,
+            networkStates: ['slow', 'failed', 'stale'],
+            evidenceType: 'real-browser',
+          },
+          null,
+          2,
+        )}\n`,
+      );
 
-    const green = await scorer.score(input);
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    expect(green.integrityFailure).toBe(false);
-    expect(green.quality).toBe(1);
-  }, 90_000);
+      const green = await scorer.score(input);
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      expect(green.integrityFailure).toBe(false);
+      expect(green.quality).toBe(1);
+      expect(green.verification).toBe(1);
+    },
+    60_000,
+  );
+
+  browserTest(
+    'content-led page starts red then passes supplied-content, semantic, accessibility, responsive, and reduced-motion checks',
+    async () => {
+      const root = workspace('kory-browser-content-');
+      const { scorer, input } = await scoreScenario(
+        'web-interface-full-task-content-led-product-page',
+        root,
+      );
+      const red = await scorer.score(input);
+      expect(red.passed).toBe(false);
+      expect(red.integrityFailure).toBe(false);
+
+      writeFixtureFile(root, 'src/app.js', GREEN_CONTENT_APP);
+      writeFixtureFile(root, 'src/styles.css', GREEN_CONTENT_STYLE);
+      writeFixtureFile(
+        root,
+        'verification/content-led-web-interface-plan.json',
+        `${JSON.stringify(
+          {
+            contentVersion: BROWSER_EVAL_CONSTANTS.contentVersion,
+            audience: BROWSER_EVAL_CONSTANTS.contentAudience,
+            primaryAction: BROWSER_EVAL_CONSTANTS.contentPrimaryAction,
+            secondaryAction: BROWSER_EVAL_CONSTANTS.contentSecondaryAction,
+            assetUse: ['logo.svg', 'product.svg'],
+            unsupportedClaimsAdded: false,
+            designSystem: BROWSER_EVAL_CONSTANTS.contentBrandVersion,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      writeFixtureFile(
+        root,
+        'verification/responsive-browser-verification-contract.json',
+        `${JSON.stringify(
+          {
+            viewports: ['1440x900', '390x844'],
+            longContent: true,
+            largeText: true,
+            reducedMotion: true,
+            keyboard: true,
+            semanticStructure: true,
+            runtimeConsole: true,
+            evidenceType: 'real-browser',
+          },
+          null,
+          2,
+        )}\n`,
+      );
+
+      const green = await scorer.score(input);
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      expect(green.integrityFailure).toBe(false);
+      expect(green.quality).toBe(1);
+    },
+    60_000,
+  );
+
+  visualTest(
+    'visual verification starts red and only passes when the candidate audit matches the real 24-capture browser matrix',
+    async () => {
+      const root = workspace('kory-browser-visual-');
+      const { scorer, input } = await scoreScenario('visual-verification-full-task-1', root);
+      const red = await scorer.score(input);
+      expect(red.passed).toBe(false);
+      expect(red.integrityFailure).toBe(false);
+
+      const independent = readJsonArtifact<{
+        browserVersion: string;
+        metrics: Array<{
+          captureId: string;
+          width: number;
+          height: number;
+          theme: 'light' | 'dark';
+          state: 'loading' | 'empty' | 'normal' | 'dense';
+          horizontalOverflow: boolean;
+          chartClipped: boolean;
+          legendClipped: boolean;
+          stickyOverlap: boolean;
+          primaryActionDistinct: boolean;
+        }>;
+      }>(root, 'evaluation/visual-verification/independent-matrix.json')!;
+      expect(independent.metrics).toHaveLength(24);
+      const failures = independent.metrics.flatMap((metric) => {
+        const result: string[] = [];
+        if (metric.horizontalOverflow) result.push(`${metric.captureId}:horizontal-overflow`);
+        if (metric.chartClipped) result.push(`${metric.captureId}:chart-clipping`);
+        if (metric.legendClipped) result.push(`${metric.captureId}:legend-clipping`);
+        if (metric.stickyOverlap) result.push(`${metric.captureId}:sticky-header-overlap`);
+        if (!metric.primaryActionDistinct)
+          result.push(`${metric.captureId}:primary-action-not-distinct`);
+        return result;
+      });
+      expect(
+        failures.some((failure) => failure.includes('390x844') && failure.includes('dense')),
+      ).toBe(true);
+
+      writeFixtureFile(
+        root,
+        'verification/visual-verification-scenario-1-capture-matrix.json',
+        `${JSON.stringify(
+          {
+            environment: {
+              dpr: 1,
+              font: BROWSER_EVAL_CONSTANTS.dashboardFont,
+              animations: 'disabled',
+              dataset: 'fixture-v1',
+              browserVersion: independent.browserVersion,
+            },
+            entries: independent.metrics,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      writeFixtureFile(
+        root,
+        'verification/visual-verification-scenario-1-claim-audit.json',
+        `${JSON.stringify(
+          {
+            failures,
+            renderingNoisePolicy:
+              'Treat differences as rendering noise until DPR, font, animation, dataset, and browser runtime are held constant.',
+          },
+          null,
+          2,
+        )}\n`,
+      );
+      writeFixtureFile(
+        root,
+        'verification/visual-verification-scenario-1-verdict.md',
+        '# Visual verification verdict\n\nThe 390px dense state has meaningful horizontal overflow in both light and dark themes. Other measured claims are judged only after holding DPR, font, animation state, dataset, and browser runtime constant so rendering noise is not mislabeled as product drift.\n',
+      );
+
+      const green = await scorer.score(input);
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      expect(green.integrityFailure).toBe(false);
+      expect(green.quality).toBe(1);
+    },
+    90_000,
+  );
 
   test('browser fixtures supersede the generic external gates in readiness', () => {
     const rows = auditSkillEvalExecutionReadiness(
@@ -373,7 +391,9 @@ describe('real browser V5 fixtures', () => {
       'visual-verification-full-task-1',
     ]) {
       const row = rows.find((item) => item.scenarioId === id)!;
-      const materializer = BROWSER_SKILL_EVAL_MATERIALIZERS.find((item) => item.id === row.materializerId)!;
+      const materializer = BROWSER_SKILL_EVAL_MATERIALIZERS.find(
+        (item) => item.id === row.materializerId,
+      )!;
       expect(materializer, id).toBeDefined();
       const blockers = materializer.readinessBlockers ?? [];
       expect(row.ready, id).toBe(blockers.length === 0);

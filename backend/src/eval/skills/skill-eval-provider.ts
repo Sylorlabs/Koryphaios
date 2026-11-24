@@ -187,9 +187,11 @@ async function collectProviderText(input: {
         // truncation: no patch was produced and no test ran, so there is no
         // skill outcome to score. Classify it as infrastructure, not failure.
         return {
-          infrastructureFailure: failure('provider', 'Provider stream ended without a complete event.', [
+          infrastructureFailure: failure(
+            'provider',
             'Provider stream ended without a complete event.',
-          ]),
+            ['Provider stream ended without a complete event.'],
+          ),
           evidence,
         };
       }
@@ -413,7 +415,10 @@ export function createDirectProviderTextPatchSkillEvalExecutor(
             ...(imageAttachments.length
               ? [
                   `Provider request carried ${String(imageAttachments.length)} image attachment(s) as image content parts: ${imageAttachments
-                    .map((attachment) => `${attachment.relativePath} (${attachment.mimeType}, ${attachment.label})`)
+                    .map(
+                      (attachment) =>
+                        `${attachment.relativePath} (${attachment.mimeType}, ${attachment.label})`,
+                    )
                     .join('; ')}.`,
                 ]
               : []),
@@ -585,8 +590,7 @@ export function createLogfareTextOnlyPatchSkillEvalExecutor(options?: {
     );
   }
   const model = options?.model?.trim() || 'deepseek-v4.1-flash-1017';
-  const baseUrl =
-    process.env.KORY_SKILL_EVAL_LOGFARE_BASE_URL?.trim() || 'https://logfare.ai/v1';
+  const baseUrl = process.env.KORY_SKILL_EVAL_LOGFARE_BASE_URL?.trim() || 'https://logfare.ai/v1';
   const config: ProviderConfig = {
     name: 'logfare',
     apiKey,
@@ -609,4 +613,3 @@ export function createLogfareTextOnlyPatchSkillEvalExecutor(options?: {
     wallClockMs: options?.wallClockMs,
   });
 }
-

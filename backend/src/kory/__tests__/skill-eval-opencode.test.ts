@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isUnix, terminateProviderProcessGroup } from '../../runtime/platform';
 import { createOpenCodeTextOnlyPatchSkillEvalExecutor } from '../../eval/skills/skill-eval-opencode';
-import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
+import type {
+  SkillEvalExperimentV3,
+  SkillEvalScenarioV3,
+} from '../../eval/skills/skill-eval-harness';
 
 const roots: string[] = [];
 const environmentKeys = ['KORY_SKILL_EVAL_OPENCODE_BINARY', 'KORY_TEST_OPENCODE_MODE'] as const;

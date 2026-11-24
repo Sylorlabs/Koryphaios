@@ -6,9 +6,7 @@ import { join } from 'node:path';
 import { ProviderRegistry } from '../src/providers/registry';
 import { loadConfig } from '../src/runtime/config';
 import { getModelsForProvider } from '../src/providers/models';
-import {
-  ClaudeCodeProvider,
-} from '../src/providers/claude-code';
+import { ClaudeCodeProvider } from '../src/providers/claude-code';
 import { GrokBuildProvider } from '../src/providers/grok-build';
 import { AntigravityProvider } from '../src/providers/antigravity';
 import { OpenCodeCliProvider } from '../src/providers/opencode-cli';
@@ -118,11 +116,38 @@ async function main() {
 
   // Force-enable probe (ignores config.disabled) to test CLI connectivity directly.
   console.log('\n--- Force-enabled CLI probe (auth markers, not config.disabled) ---');
-  const forced: Array<{ name: ProviderName; provider: { isAvailable(): boolean; listModels(): ModelDef[] } }> = [
-    { name: 'claude', provider: new ClaudeCodeProvider({ name: 'claude', authToken: 'cli:claude:probe', disabled: false }) },
-    { name: 'grok', provider: new GrokBuildProvider({ name: 'grok', authToken: 'cli:grok:probe', disabled: false }) },
-    { name: 'antigravity', provider: new AntigravityProvider({ name: 'antigravity', authToken: 'cli:antigravity:probe', disabled: false }) },
-    { name: 'codex', provider: new CodexProvider({ name: 'codex', authToken: 'cli:codex:probe', disabled: false }) },
+  const forced: Array<{
+    name: ProviderName;
+    provider: { isAvailable(): boolean; listModels(): ModelDef[] };
+  }> = [
+    {
+      name: 'claude',
+      provider: new ClaudeCodeProvider({
+        name: 'claude',
+        authToken: 'cli:claude:probe',
+        disabled: false,
+      }),
+    },
+    {
+      name: 'grok',
+      provider: new GrokBuildProvider({
+        name: 'grok',
+        authToken: 'cli:grok:probe',
+        disabled: false,
+      }),
+    },
+    {
+      name: 'antigravity',
+      provider: new AntigravityProvider({
+        name: 'antigravity',
+        authToken: 'cli:antigravity:probe',
+        disabled: false,
+      }),
+    },
+    {
+      name: 'codex',
+      provider: new CodexProvider({ name: 'codex', authToken: 'cli:codex:probe', disabled: false }),
+    },
   ];
 
   await Bun.sleep(WAIT_MS);
@@ -158,7 +183,15 @@ async function main() {
   const claude = registry.get('claude');
   if (claude?.isAvailable()) {
     const late = claude.listModels();
-    console.log('Claude models after +15s:', late.map((m) => ({ id: m.id, apiModelId: m.apiModelId, realModelId: m.realModelId, name: m.name })));
+    console.log(
+      'Claude models after +15s:',
+      late.map((m) => ({
+        id: m.id,
+        apiModelId: m.apiModelId,
+        realModelId: m.realModelId,
+        name: m.name,
+      })),
+    );
   }
 }
 

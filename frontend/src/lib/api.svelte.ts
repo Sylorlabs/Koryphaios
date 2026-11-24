@@ -176,7 +176,7 @@ async function apiFetchUntracked(
             ? mapDeviceSessionIds(JSON.parse(init.body), target, false)
             : undefined;
         const path = deviceWorkbenchPath(originalUrl.pathname + originalUrl.search, target);
-         const descriptor = remoteRouteDescriptor(originalUrl.pathname, method);
+        const descriptor = remoteRouteDescriptor(originalUrl.pathname, method);
         const prompt = path === '/api/messages' && (init.method ?? 'GET').toUpperCase() === 'POST';
         const cancel =
           path === `/api/sessions/${target.id}/cancel` &&

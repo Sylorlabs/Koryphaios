@@ -1,12 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tooltipAnchorRect } from './tooltip-anchor';
 
-function domRect(partial: {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-}): DOMRect {
+function domRect(partial: { left: number; right: number; top: number; bottom: number }): DOMRect {
   return {
     ...partial,
     width: partial.right - partial.left,

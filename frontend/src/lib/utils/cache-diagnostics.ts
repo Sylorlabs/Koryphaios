@@ -95,7 +95,9 @@ function str(value: unknown): string {
 }
 
 function strList(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 function countMap(value: unknown): Record<string, number> {
@@ -228,23 +230,29 @@ export function buildCacheDiagnosticsNotice(diagnostics: CacheDiagnostics): stri
   const evidenceHitRate = evidenceTotal > 0 ? Math.round((evidence.hits / evidenceTotal) * 100) : 0;
   const last = diagnostics.recent.at(-1);
   const breakDetails: string[] = [];
-  if (last?.details?.toolsAdded.length) breakDetails.push(`tools added: ${last.details.toolsAdded.join(', ')}`);
-  if (last?.details?.toolsRemoved.length) breakDetails.push(`tools removed: ${last.details.toolsRemoved.join(', ')}`);
+  if (last?.details?.toolsAdded.length)
+    breakDetails.push(`tools added: ${last.details.toolsAdded.join(', ')}`);
+  if (last?.details?.toolsRemoved.length)
+    breakDetails.push(`tools removed: ${last.details.toolsRemoved.join(', ')}`);
   if (last?.details?.toolSchemasChanged) breakDetails.push('tool schema changed');
-  if (last?.details?.stableComponentsChanged.length) breakDetails.push(`system sections: ${last.details.stableComponentsChanged.join(', ')}`);
-  if (last?.details?.historyRewriteAt !== undefined) breakDetails.push(`history rewritten at message ${last.details.historyRewriteAt + 1}`);
-  const lastBreak = last?.state === 'cold' && last.reasons.length > 0
-    ? ` Last cold reason: ${last.reasons.join(', ')}${breakDetails.length ? ` (${breakDetails.join('; ')})` : ''}.`
-    : '';
+  if (last?.details?.stableComponentsChanged.length)
+    breakDetails.push(`system sections: ${last.details.stableComponentsChanged.join(', ')}`);
+  if (last?.details?.historyRewriteAt !== undefined)
+    breakDetails.push(`history rewritten at message ${last.details.historyRewriteAt + 1}`);
+  const lastBreak =
+    last?.state === 'cold' && last.reasons.length > 0
+      ? ` Last cold reason: ${last.reasons.join(', ')}${breakDetails.length ? ` (${breakDetails.join('; ')})` : ''}.`
+      : '';
   const maintenance = diagnostics.maintenance;
   const durable = diagnostics.durable;
   const durableHitRate = Math.round(durable.hitRate * 1000) / 10;
   const durableValue = isZeroUsd(durable.savingsUsd)
     ? '$0 net change'
     : `${formatUsdDelta(durable.savingsUsd) ?? ''} net ${durable.savingsUsd >= 0 ? 'saved' : 'cache premium'}`;
-  const providerOutcome = prompt.providerOutcomes > 0
-    ? ` Provider-confirmed warm hits: ${prompt.providerWarmHits}; unexpected warm misses: ${prompt.providerUnexpectedMisses}${prompt.providerUnexpectedMisses > 0 ? ` (${compactTokens(prompt.providerUnexpectedMissWriteTokens)} rewritten tokens)` : ''}.`
-    : '';
+  const providerOutcome =
+    prompt.providerOutcomes > 0
+      ? ` Provider-confirmed warm hits: ${prompt.providerWarmHits}; unexpected warm misses: ${prompt.providerUnexpectedMisses}${prompt.providerUnexpectedMisses > 0 ? ` (${compactTokens(prompt.providerUnexpectedMissWriteTokens)} rewritten tokens)` : ''}.`
+      : '';
   return `Harness cache: ${warm}/${prompt.dispatches} warm candidates.${providerOutcome} Evidence cache: ${evidence.hits} hits, ${evidence.waits} concurrent waits, ${evidenceHitRate}% hit rate. Cache maintenance: ${maintenance.refreshes}/${maintenance.scheduled} economical refreshes, ${maintenance.prewarms} typing prewarms. Durable 30-day provider cache: ${durableHitRate}% hit rate, ${durableValue}.${lastBreak}`;
 }
 

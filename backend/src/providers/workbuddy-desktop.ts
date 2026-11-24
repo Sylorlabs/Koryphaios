@@ -38,10 +38,7 @@ import { resolveProductContextBudget } from './product-context-window';
 import { buildProviderCliEnv } from './cli-environment';
 import { wrapCommand, inferenceSandboxPolicy } from '../collaboration/sandbox-runner';
 import { getCliBridge } from './cli-bridges';
-import {
-  koryBridgeUnavailableError,
-  resolveKoryBridgeScript,
-} from './kory-cli-mcp-config';
+import { koryBridgeUnavailableError, resolveKoryBridgeScript } from './kory-cli-mcp-config';
 import {
   createDesktopRuntimeSession,
   desktopRuntimeTmpDir,
@@ -882,7 +879,8 @@ export class WorkBuddyDesktopProvider implements Provider {
       );
       if (contextBudget !== undefined) {
         const contextOption = (session.configOptions ?? []).find(
-          (opt: AcpConfigOption) => opt.id === 'context_window' || opt.category === 'context_window',
+          (opt: AcpConfigOption) =>
+            opt.id === 'context_window' || opt.category === 'context_window',
         );
         const contextValues = (contextOption?.options ?? [])
           .map((option) => option.value)

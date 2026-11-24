@@ -52,12 +52,7 @@ const BATCH_PURGE = 50;
 const RECLAIM_THRESHOLD_BYTES = 16 * 1024 * 1024;
 
 type CompactionStep =
-  | 'purge_mirrors'
-  | 'drain_revisions'
-  | 'purge_orphans'
-  | 'backfill_notes'
-  | 'vacuum'
-  | 'done';
+  'purge_mirrors' | 'drain_revisions' | 'purge_orphans' | 'backfill_notes' | 'vacuum' | 'done';
 
 interface CompactionState {
   step: CompactionStep;
@@ -83,9 +78,7 @@ const COMPACTION_VERSION = 2;
 
 function loadState(db: Database): CompactionState {
   const row = db
-    .query<{ value: string }, [string]>(
-      'SELECT value FROM notes_compaction_state WHERE key = ?',
-    )
+    .query<{ value: string }, [string]>('SELECT value FROM notes_compaction_state WHERE key = ?')
     .get(STATE_KEY);
   const initial = { step: 'purge_mirrors' as const, cursor: '', v: COMPACTION_VERSION };
   if (!row) return initial;
@@ -205,8 +198,7 @@ async function drainLegacyRevisions(
         .query<{ id: string }, [string]>('SELECT id FROM notes WHERE id = ?')
         .get(noteId);
       const distinct = new Set(rows.map((row) => row.content));
-      const keep =
-        !!note && (distinct.size >= 2 || !noteId.startsWith('project-document:'));
+      const keep = !!note && (distinct.size >= 2 || !noteId.startsWith('project-document:'));
       if (keep) {
         for (const row of rows) {
           const blobId = writeRevisionBlob(row.content, db);
@@ -293,10 +285,9 @@ async function backfillNotes(
   report: NotesCompactionReport,
 ): Promise<'done' | 'yield'> {
   const rows = db
-    .query<
-      { id: string; title: string; content: string; tags: string },
-      [string, number]
-    >(`SELECT id, title, content, tags FROM notes WHERE id > ? ORDER BY id LIMIT ?`)
+    .query<{ id: string; title: string; content: string; tags: string }, [string, number]>(
+      `SELECT id, title, content, tags FROM notes WHERE id > ? ORDER BY id LIMIT ?`,
+    )
     .all(state.cursor, BATCH_NOTES);
   if (rows.length === 0) return 'done';
 

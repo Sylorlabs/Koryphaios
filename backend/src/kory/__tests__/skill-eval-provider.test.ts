@@ -497,7 +497,8 @@ describe('image attachment transport', () => {
     ...provider([
       {
         type: 'content_delta',
-        content: '<kory-eval-patch>[{"operation":"write","path":"result.txt","content":"done\\n"}]</kory-eval-patch>',
+        content:
+          '<kory-eval-patch>[{"operation":"write","path":"result.txt","content":"done\\n"}]</kory-eval-patch>',
       },
       { type: 'complete', finishReason: 'end_turn' },
     ]),
@@ -505,7 +506,8 @@ describe('image attachment transport', () => {
       seen.push(request);
       yield {
         type: 'content_delta',
-        content: '<kory-eval-patch>[{"operation":"write","path":"result.txt","content":"done\\n"}]</kory-eval-patch>',
+        content:
+          '<kory-eval-patch>[{"operation":"write","path":"result.txt","content":"done\\n"}]</kory-eval-patch>',
       };
       yield { type: 'complete', finishReason: 'end_turn' };
     },
@@ -533,7 +535,11 @@ describe('image attachment transport', () => {
       const result = await executor(capturingProvider(seen)).execute({
         ...input(root, workspaceScenario('device')),
         attachments: [
-          { relativePath: 'captures/step-1.png', mimeType: 'image/png', label: 'export dialog after authorize' },
+          {
+            relativePath: 'captures/step-1.png',
+            mimeType: 'image/png',
+            label: 'export dialog after authorize',
+          },
         ],
       });
       expect(result.infrastructureFailure).toBeUndefined();
@@ -544,7 +550,12 @@ describe('image attachment transport', () => {
       const image = parts.find((part) => part.type === 'image');
       expect(image?.imageMimeType).toBe('image/png');
       expect(Buffer.from(image?.imageData ?? '', 'base64').equals(PNG)).toBe(true);
-      expect(parts.some((part) => part.type === 'text' && (part as { text?: string }).text?.includes('export dialog'))).toBe(true);
+      expect(
+        parts.some(
+          (part) =>
+            part.type === 'text' && (part as { text?: string }).text?.includes('export dialog'),
+        ),
+      ).toBe(true);
       expect(result.evidence.join(' ')).toContain('carried 1 image attachment(s)');
       expect(result.evidence.join(' ')).toContain('captures/step-1.png');
     } finally {
@@ -563,7 +574,11 @@ describe('image attachment transport', () => {
         await executor(capturingProvider([])).execute({
           ...input(root, workspaceScenario('device')),
           attachments: [
-            { relativePath: 'captures/huge.png', mimeType: 'image/png', label: 'oversized capture' },
+            {
+              relativePath: 'captures/huge.png',
+              mimeType: 'image/png',
+              label: 'oversized capture',
+            },
           ],
         });
       } catch (error) {

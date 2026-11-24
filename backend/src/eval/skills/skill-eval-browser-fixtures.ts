@@ -1524,10 +1524,7 @@ export function dashboardAssetBlockers(): string[] {
     ? []
     : [`Requires the bundled Inter evaluation font at ${INTER_FONT_SOURCE}.`];
 }
-const visualUnavailable = [
-  ...(browserUnavailable ?? []),
-  ...dashboardAssetBlockers(),
-];
+const visualUnavailable = [...(browserUnavailable ?? []), ...dashboardAssetBlockers()];
 
 export const BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
   {
@@ -1614,11 +1611,7 @@ export const BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterial
         'verification/visual-verification-scenario-1-verdict.md',
         '# Visual verification verdict\n\nTODO\n',
       );
-      writeFixtureFile(
-        root,
-        'README.md',
-        VISUAL_DASHBOARD_README,
-      );
+      writeFixtureFile(root, 'README.md', VISUAL_DASHBOARD_README);
     },
   },
 ] as const;

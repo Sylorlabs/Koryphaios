@@ -1,8 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'bun:test';
-import {
-  createIdleAbortSignal,
-  mergeAbortSignals,
-} from '../utils';
+import { createIdleAbortSignal, mergeAbortSignals } from '../utils';
 
 afterEach(() => {
   vi.useRealTimers();

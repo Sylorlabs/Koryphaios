@@ -133,9 +133,7 @@ describe('provider verification truth', () => {
           return new Response(
             JSON.stringify({
               object: 'list',
-              data: [
-                { id: 'anthropic/synthetic-sonnet', object: 'model', owned_by: 'anthropic' },
-              ],
+              data: [{ id: 'anthropic/synthetic-sonnet', object: 'model', owned_by: 'anthropic' }],
             }),
             { status: 200, headers: { 'content-type': 'application/json' } },
           );
@@ -440,8 +438,7 @@ describe('provider verification truth', () => {
 
   it('reports GitLab Duo as unverified when the chat probe is rejected', async () => {
     const registry = new ProviderRegistry(config());
-    globalThis.fetch = (async () =>
-      new Response('{}', { status: 404 })) as typeof fetch;
+    globalThis.fetch = (async () => new Response('{}', { status: 404 })) as typeof fetch;
 
     const result = await registry.verifyConnection('gitlab', { apiKey: 'synthetic-pat' });
 

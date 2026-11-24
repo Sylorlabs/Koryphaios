@@ -2,12 +2,7 @@
 // Uses Google's GenAI SDK for direct API access.
 // Model list is refreshed from the Gemini API when available; static list is fallback only.
 
-import type {
-  ModelParameterKey,
-  ProviderConfig,
-  ProviderName,
-  ModelDef,
-} from '@koryphaios/shared';
+import type { ModelParameterKey, ProviderConfig, ProviderName, ModelDef } from '@koryphaios/shared';
 import { sanitizeModelParameterValues } from '@koryphaios/shared';
 import { type Provider, type ProviderEvent, type StreamRequest, resolveModel } from './types';
 import { GEMINI_V1BETA_BASE } from './api-endpoints';

@@ -15,7 +15,10 @@ const WEB_LIVE = 'accessibility-verification-full-task-1';
  * document body. It records no screen reader output, because no screen reader
  * was driven. Both facts are what the candidate has to reconcile.
  */
-const SESSION_PATH = join(import.meta.dir, 'fixtures/accessibility-verification/web-live-session.json');
+const SESSION_PATH = join(
+  import.meta.dir,
+  'fixtures/accessibility-verification/web-live-session.json',
+);
 
 export const WEB_LIVE_SESSION = readFileSync(SESSION_PATH, 'utf8');
 
@@ -26,9 +29,17 @@ const AUTOMATION_REPORT = `${JSON.stringify(
     appBuild: 'delete-confirmation-dialog, de-DE',
     checks: [
       { id: 'focus-trap', status: 'pass', detail: 'modal keeps keyboard focus inside the dialog' },
-      { id: 'spoken-announcement', status: 'pass', detail: 'screen reader announces the failure alert' },
+      {
+        id: 'spoken-announcement',
+        status: 'pass',
+        detail: 'screen reader announces the failure alert',
+      },
       { id: 'escape-returns-focus', status: 'pass', detail: 'Escape closes and focus returns' },
-      { id: 'zoom-200-reflow', status: 'pass', detail: 'no horizontal scrolling at 200 percent zoom' },
+      {
+        id: 'zoom-200-reflow',
+        status: 'pass',
+        detail: 'no horizontal scrolling at 200 percent zoom',
+      },
     ],
     note: 'axe-core reports zero rule violations for this page.',
     summary: '4 of 4 checks passed',
@@ -157,7 +168,8 @@ export const accessibilityWebLiveScorer: SkillEvalDeterministicScorer = {
     let fixed = false;
     try {
       fixed =
-        readFileSync(join(workingDirectory, 'evidence/web-live.json'), 'utf8') === WEB_LIVE_SESSION &&
+        readFileSync(join(workingDirectory, 'evidence/web-live.json'), 'utf8') ===
+          WEB_LIVE_SESSION &&
         readFileSync(join(workingDirectory, 'evidence/automation/axe-report.json'), 'utf8') ===
           AUTOMATION_REPORT &&
         readFileSync(join(workingDirectory, 'src/accessibility-web.ts'), 'utf8') === LIVE_TYPES;

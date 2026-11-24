@@ -79,7 +79,10 @@ export class BackgroundCleanupService {
     // than the in-memory session cleanup.
     this.pruneInterval = setInterval(() => {
       void this.kory.pruneResources(this.config.checkpointRetentionDays).catch((err) => {
-        serverLog.warn({ err: err instanceof Error ? err.message : String(err) }, 'Periodic prune failed');
+        serverLog.warn(
+          { err: err instanceof Error ? err.message : String(err) },
+          'Periodic prune failed',
+        );
       });
       // Ordered session event log retention (B7) runs on the same hourly tick.
       this.pruneEventLog();

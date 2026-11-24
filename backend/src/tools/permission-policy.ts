@@ -41,9 +41,7 @@ exactly the granular settings the user chose.
  *  window: strictness narrows reach, it does not contradict a grant. */
 export type SandboxPosture = 'strict' | 'standard' | 'unconstrained';
 
-export function sandboxPostureForPermissionMode(
-  mode: PermissionMode | undefined,
-): SandboxPosture {
+export function sandboxPostureForPermissionMode(mode: PermissionMode | undefined): SandboxPosture {
   if (mode === 'guarded') return 'strict';
   if (mode === 'yolo') return 'unconstrained';
   return 'standard';

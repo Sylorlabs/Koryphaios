@@ -7,9 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const invoke = vi.hoisted(() => vi.fn());
-const listeners = vi.hoisted(
-  () => new Map<string, (event: { payload: unknown }) => void>(),
-);
+const listeners = vi.hoisted(() => new Map<string, (event: { payload: unknown }) => void>());
 const setApiHalted = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
@@ -80,9 +78,7 @@ describe('backend-health starting state', () => {
 
   it('reports starting — not unhealthy — when a failed poll finds a live startup marker', async () => {
     invoke.mockImplementation((command: string) =>
-      command === 'get_backend_startup_status'
-        ? Promise.resolve(STARTING)
-        : Promise.resolve(null),
+      command === 'get_backend_startup_status' ? Promise.resolve(STARTING) : Promise.resolve(null),
     );
     const store = await loadStore();
 
@@ -109,9 +105,7 @@ describe('backend-health starting state', () => {
   it('waitForBackendHealthy keeps waiting through reported startup progress', async () => {
     vi.useFakeTimers();
     invoke.mockImplementation((command: string) =>
-      command === 'get_backend_startup_status'
-        ? Promise.resolve(STARTING)
-        : Promise.resolve(null),
+      command === 'get_backend_startup_status' ? Promise.resolve(STARTING) : Promise.resolve(null),
     );
     const fetchMock = vi.mocked(fetch);
     const store = await loadStore();

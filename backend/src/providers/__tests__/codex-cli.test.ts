@@ -145,7 +145,11 @@ describe('Codex CLI Kory control-plane bridge', () => {
       { type: 'item.completed', item: { type: 'web_search', query: 'codex jsonl' } },
       [],
     );
-    expect(search.events[0]).toMatchObject({ type: 'tool_executed', toolName: 'web_search', toolInput: '{"query":"codex jsonl"}' });
+    expect(search.events[0]).toMatchObject({
+      type: 'tool_executed',
+      toolName: 'web_search',
+      toolInput: '{"query":"codex jsonl"}',
+    });
 
     const todos = codexJsonEvents(
       {

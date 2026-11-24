@@ -113,7 +113,11 @@ export class EventEmitterService {
    * only per-turn record of skill use: skills are guidance delivered through
    * the system prompt, so nothing else in the transcript shows them.
    */
-  emitSkills(sessionId: string, skills: readonly KorySkillUse[], agentId = this.managerAgentId): void {
+  emitSkills(
+    sessionId: string,
+    skills: readonly KorySkillUse[],
+    agentId = this.managerAgentId,
+  ): void {
     if (skills.length === 0) return;
     this.emit(sessionId, 'kory.skill', { agentId, skills: [...skills] });
   }

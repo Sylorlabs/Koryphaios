@@ -101,7 +101,9 @@ describe('helpers', () => {
     expect(describeStatus('idle', WORKERS, { kind: 'ordinal', index: 1 })).toBe(
       'Worker 1 (Ada) is using tools on “Write the parser”.',
     );
-    expect(describeStatus('streaming', WORKERS, { kind: 'manager' })).toBe('Kory is writing a reply.');
+    expect(describeStatus('streaming', WORKERS, { kind: 'manager' })).toBe(
+      'Kory is writing a reply.',
+    );
   });
 
   it('matches chat titles loosely', () => {
@@ -116,7 +118,9 @@ describe('helpers', () => {
   });
 
   it('appends to markdown and html notes', () => {
-    expect(appendToNoteContent({ id: 'n', title: 't', content: 'One\n' }, 'Two')).toBe('One\n\nTwo');
+    expect(appendToNoteContent({ id: 'n', title: 't', content: 'One\n' }, 'Two')).toBe(
+      'One\n\nTwo',
+    );
     expect(appendToNoteContent({ id: 'n', title: 't', content: '' }, 'Two')).toBe('Two');
     expect(
       appendToNoteContent({ id: 'n', title: 't', content: '<p>One</p>', format: 'html' }, 'a<b'),
@@ -167,7 +171,10 @@ describe('non-destructive commands run immediately', () => {
     expect(actions.openPanel).toHaveBeenCalledWith('notes');
     expect(controller.state.hud?.title).toBe('Opened Notes');
     await controller.handleUtterance('open the terminal');
-    expect(controller.state.hud).toMatchObject({ tone: 'warning', title: 'Terminal is not available here' });
+    expect(controller.state.hud).toMatchObject({
+      tone: 'warning',
+      title: 'Terminal is not available here',
+    });
   });
 
   it('reads the last reply aloud', async () => {

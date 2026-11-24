@@ -26,8 +26,7 @@ export function carryContextEstimate(
   // the total itself is the best available estimate of the conversation.
   if (!previous.breakdown) return { used };
   const reconciled = reconcileContextBreakdown(previous.breakdown, used, previous.provider);
-  const keepHarness =
-    previous.provider === nextProvider && hasOpaqueContextHarness(nextProvider);
+  const keepHarness = previous.provider === nextProvider && hasOpaqueContextHarness(nextProvider);
   const breakdown: ContextBreakdown = {
     system: reconciled.system,
     memory: reconciled.memory,

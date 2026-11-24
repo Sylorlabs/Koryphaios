@@ -70,7 +70,15 @@ interface DevinTrajectoryJson {
       arguments?: Record<string, unknown> | string;
       input?: Record<string, unknown>;
     }>;
-    observation?: { results?: Array<{ source_call_id?: string; tool_call_id?: string; content?: string; isError?: boolean; is_error?: boolean }> };
+    observation?: {
+      results?: Array<{
+        source_call_id?: string;
+        tool_call_id?: string;
+        content?: string;
+        isError?: boolean;
+        is_error?: boolean;
+      }>;
+    };
     model_name?: string;
     generation_model?: string;
     extra?: { generation_model?: string; telemetry?: Record<string, unknown> };
@@ -194,12 +202,7 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
     // the prompt kills the whole headless turn silently, and the bridge's
     // context-injection channel is unused on this vocabulary. Keep the events
     // that gate tool calls and turn lifecycle instead.
-    const events = [
-      'PreToolUse',
-      'PostToolUse',
-      'PermissionRequest',
-      'Stop',
-    ] as const;
+    const events = ['PreToolUse', 'PostToolUse', 'PermissionRequest', 'Stop'] as const;
     const actionForEvent: Record<(typeof events)[number], BridgeGrantAction> = {
       PreToolUse: 'hook:pre-tool',
       PostToolUse: 'hook:post-tool',
@@ -477,7 +480,8 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
       return { trajectory: { steps: [] }, events: [] };
     }
     const resultsByCall = new Map(
-      (data.steps ?? []).flatMap((step) => step.observation?.results ?? [])
+      (data.steps ?? [])
+        .flatMap((step) => step.observation?.results ?? [])
         .flatMap((result) => {
           const id = result.source_call_id ?? result.tool_call_id;
           return id ? [[id, result] as const] : [];
@@ -502,16 +506,22 @@ export class DevinCliBridge extends ManagedCliBridge implements CliBridge {
             toolCalls: Array.isArray(s.tool_calls)
               ? s.tool_calls.map((c) => {
                   const id = c.tool_call_id ?? c.id;
-                  const single = s.tool_calls?.length === 1 && s.observation?.results?.length === 1
-                    ? s.observation.results[0] : undefined;
-                  const result = (id ? resultsByCall.get(id) : undefined)
-                    ?? (single && !single.source_call_id && !single.tool_call_id ? single : undefined);
+                  const single =
+                    s.tool_calls?.length === 1 && s.observation?.results?.length === 1
+                      ? s.observation.results[0]
+                      : undefined;
+                  const result =
+                    (id ? resultsByCall.get(id) : undefined) ??
+                    (single && !single.source_call_id && !single.tool_call_id ? single : undefined);
                   const tool = recordedToolIdentity(
                     recordedToolName(c as Record<string, unknown>),
                     recordedToolInput(c.arguments ?? c.input ?? c.function?.arguments),
                   );
                   return {
-                    id, name: tool.name ?? '', input: tool.input, output: result?.content,
+                    id,
+                    name: tool.name ?? '',
+                    input: tool.input,
+                    output: result?.content,
                     isError: result?.isError === true || result?.is_error === true,
                   };
                 })
@@ -589,7 +599,10 @@ export function trajectoryToEvents(t: CliTrajectory): ProviderEvent[] {
   return events;
 }
 
-function numericMetric(metrics: Record<string, unknown> | undefined, key: string): number | undefined {
+function numericMetric(
+  metrics: Record<string, unknown> | undefined,
+  key: string,
+): number | undefined {
   const value = metrics?.[key];
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 }

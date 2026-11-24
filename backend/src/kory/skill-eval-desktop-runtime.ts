@@ -69,9 +69,18 @@ const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const CONTRACT_FILE = '.kory-eval/desktop-fixture.json';
 const MAX_CAPTURE = 10_000_000;
 const ELECTRON_EVENTS = [
-  'open:cycle-1', 'close:cycle-1', 'open:cycle-2', 'close:cycle-2',
-  'open:cycle-3', 'close:cycle-3', 'open:concurrent-a', 'open:concurrent-b',
-  'close:concurrent-a', 'close:concurrent-b', 'before-quit', 'will-quit',
+  'open:cycle-1',
+  'close:cycle-1',
+  'open:cycle-2',
+  'close:cycle-2',
+  'open:cycle-3',
+  'close:cycle-3',
+  'open:concurrent-a',
+  'open:concurrent-b',
+  'close:concurrent-a',
+  'close:concurrent-b',
+  'before-quit',
+  'will-quit',
 ];
 /**
  * A driver reports the canonical path it resolved, which on macOS is `/private/var/...` for a
@@ -100,7 +109,9 @@ export function packagedArtifactIdentity(
   if (!canonicalCandidate.startsWith(canonicalRoot + sep)) {
     return { ok: false, reason: 'Packaged native Tauri executable identity mismatch' };
   }
-  const bytes = readFileSync(regularFile(canonicalRoot, relative(canonicalRoot, canonicalCandidate), 250_000_000));
+  const bytes = readFileSync(
+    regularFile(canonicalRoot, relative(canonicalRoot, canonicalCandidate), 250_000_000),
+  );
   if (declaredSha256 !== sha256(bytes)) {
     return { ok: false, reason: 'Packaged native Tauri executable identity mismatch' };
   }
@@ -108,9 +119,15 @@ export function packagedArtifactIdentity(
 }
 
 const TAURI_EVENTS = [
-  'window:created', 'window:closed',
-  'dialog:opened', 'dialog:cancelled', 'dialog:accepted',
-  'fs:symlink-retargeted', 'app:quit', 'app:restarted', 'renderer:capture',
+  'window:created',
+  'window:closed',
+  'dialog:opened',
+  'dialog:cancelled',
+  'dialog:accepted',
+  'fs:symlink-retargeted',
+  'app:quit',
+  'app:restarted',
+  'renderer:capture',
 ];
 
 const ELECTRON_MAIN = String.raw`
@@ -553,24 +570,29 @@ document.querySelector('#probe').addEventListener('click', async () => {
 });
 `;
 
-const TAURI_MANIFEST = JSON.stringify({
-  $schema: 'https://schema.tauri.app/config/2',
-  productName: 'Kory Native Workspace Fixture',
-  version: '0.1.0',
-  identifier: 'dev.koryphaios.eval.desktopworkspace',
-  build: { frontendDist: '../ui' },
-  app: {
-    withGlobalTauri: true,
-    windows: [{ label: 'main', title: 'Native Workspace Fixture', width: 640, height: 420 }],
-    security: {
-      csp: "default-src 'self'; connect-src ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'",
+const TAURI_MANIFEST =
+  JSON.stringify(
+    {
+      $schema: 'https://schema.tauri.app/config/2',
+      productName: 'Kory Native Workspace Fixture',
+      version: '0.1.0',
+      identifier: 'dev.koryphaios.eval.desktopworkspace',
+      build: { frontendDist: '../ui' },
+      app: {
+        withGlobalTauri: true,
+        windows: [{ label: 'main', title: 'Native Workspace Fixture', width: 640, height: 420 }],
+        security: {
+          csp: "default-src 'self'; connect-src ipc: http://ipc.localhost; script-src 'self'; style-src 'self' 'unsafe-inline'",
+        },
+      },
+      // A v2 bundle needs a declared icon that exists on disk, and a universal target builds a
+      // dmg plus an updater archive the fixture never launches. `app` is the artifact the native
+      // driver starts.
+      bundle: { active: true, targets: ['app'], icon: ['icons/icon.png'] },
     },
-  },
-  // A v2 bundle needs a declared icon that exists on disk, and a universal target builds a
-  // dmg plus an updater archive the fixture never launches. `app` is the artifact the native
-  // driver starts.
-  bundle: { active: true, targets: ['app'], icon: ['icons/icon.png'] },
-}, null, 2) + '\n';
+    null,
+    2,
+  ) + '\n';
 
 // Tauri v2 reads an icon during `generate_context!`, so a fixture without one cannot compile
 // at all: the build panics with "failed to open icon". This is a real 32x32 RGBA PNG, not a
@@ -594,8 +616,10 @@ tauri-plugin-dialog = "2"
 `;
 
 const TUTORIAL = {
-  [ELECTRON]: 'Electron main, isolated preload and renderer; fix repeated-window IPC listener ownership.',
-  [TAURI]: 'Tauri v2 Rust command + native picker; enforce canonical root at use time and typed cancellation.',
+  [ELECTRON]:
+    'Electron main, isolated preload and renderer; fix repeated-window IPC listener ownership.',
+  [TAURI]:
+    'Tauri v2 Rust command + native picker; enforce canonical root at use time and typed cancellation.',
 };
 
 const NEAR_NEIGHBOR = {
@@ -647,7 +671,6 @@ function tauriCliBinary(): string {
   );
 }
 
-
 function hasExecutable(path: string): boolean {
   if (!isAbsolute(path)) return false;
   try {
@@ -668,9 +691,18 @@ function hasNativeExecutableHeader(path: string): boolean {
       if (readSync(fd, header, 0, header.length, 0) !== header.length) return false;
       const magic = header.toString('hex');
       // Mach-O (both endiannesses, universal), ELF and Windows PE executable.
-      return ['cffaedfe', 'feedfacf', 'cefaedfe', 'feedface',
-        'cafebabe', 'bebafeca', '7f454c46'].includes(magic) ||
-        (header[0] === 0x4d && header[1] === 0x5a);
+      return (
+        [
+          'cffaedfe',
+          'feedfacf',
+          'cefaedfe',
+          'feedface',
+          'cafebabe',
+          'bebafeca',
+          '7f454c46',
+        ].includes(magic) ||
+        (header[0] === 0x4d && header[1] === 0x5a)
+      );
     } finally {
       closeSync(fd);
     }
@@ -693,8 +725,10 @@ export function desktopVmMode(): boolean {
 export function desktopIsolationBlocker(): string | null {
   if (process.env.KORY_SKILL_EVAL_DESKTOP_VM === '1') return null;
   if (!isMac()) {
-    return 'Desktop evaluation requires an isolated desktop session or a virtual machine target: ' +
-      'set KORY_SKILL_EVAL_DESKTOP_VM=1 when the target is a virtual machine';
+    return (
+      'Desktop evaluation requires an isolated desktop session or a virtual machine target: ' +
+      'set KORY_SKILL_EVAL_DESKTOP_VM=1 when the target is a virtual machine'
+    );
   }
   let owner: string;
   try {
@@ -706,8 +740,10 @@ export function desktopIsolationBlocker(): string | null {
     return 'Desktop evaluation cannot verify that it owns the display: the console owner is unreadable';
   }
   if (process.getuid?.() === Number(owner)) {
-    return 'Desktop evaluation is refused on the interactive display: run it in a separate login ' +
-      'session that does not hold the console, or in a virtual machine (KORY_SKILL_EVAL_DESKTOP_VM=1)';
+    return (
+      'Desktop evaluation is refused on the interactive display: run it in a separate login ' +
+      'session that does not hold the console, or in a virtual machine (KORY_SKILL_EVAL_DESKTOP_VM=1)'
+    );
   }
   return null;
 }
@@ -717,22 +753,31 @@ export function desktopRuntimeReadiness(scenarioId: DesktopScenario): string[] {
   const isolation = desktopIsolationBlocker();
   if (isolation) blockers.push(isolation);
   if (scenarioId === ELECTRON && desktopVmMode()) {
-    const launcher = process.env.KORY_SKILL_EVAL_ELECTRON_VM_DRIVER?.trim() ||
+    const launcher =
+      process.env.KORY_SKILL_EVAL_ELECTRON_VM_DRIVER?.trim() ||
       resolve(process.cwd(), 'scripts', 'kory-vm-electron-driver.sh');
     if (!hasExecutable(launcher)) {
-      blockers.push('No isolated guest launcher for the Electron scenario: set ' +
-        'KORY_SKILL_EVAL_ELECTRON_VM_DRIVER to the guest launcher executable');
+      blockers.push(
+        'No isolated guest launcher for the Electron scenario: set ' +
+          'KORY_SKILL_EVAL_ELECTRON_VM_DRIVER to the guest launcher executable',
+      );
     }
   } else if (scenarioId === ELECTRON) {
     const bin = electronBinary();
     if (!hasNativeExecutableHeader(bin)) {
-      blockers.push('A callable pinned Electron desktop runtime is unavailable: ' +
-        'set KORY_SKILL_EVAL_ELECTRON_BINARY to the absolute path of a native executable');
+      blockers.push(
+        'A callable pinned Electron desktop runtime is unavailable: ' +
+          'set KORY_SKILL_EVAL_ELECTRON_BINARY to the absolute path of a native executable',
+      );
     } else {
       const checked = command(bin, ['--version']);
       if (checked.status !== 0 || checked.stdout.trim() !== `v${PINNED_ELECTRON_VERSION}`) {
-        blockers.push('A callable pinned Electron desktop runtime is unavailable (requires ' +
-          PINNED_ELECTRON_VERSION + '): ' + (checked.error || checked.stdout.trim()));
+        blockers.push(
+          'A callable pinned Electron desktop runtime is unavailable (requires ' +
+            PINNED_ELECTRON_VERSION +
+            '): ' +
+            (checked.error || checked.stdout.trim()),
+        );
       }
     }
   } else if (scenarioId === TAURI && desktopVmMode()) {
@@ -741,8 +786,13 @@ export function desktopRuntimeReadiness(scenarioId: DesktopScenario): string[] {
     if (!hasExecutable(process.env.KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER?.trim() ?? '')) {
       blockers.push('No native desktop driver is configured for the isolated guest');
     }
-    if (command('limactl', ['list', '--format', '{{.Name}} {{.Status}}'], undefined, 20_000).status !== 0) {
-      blockers.push('The virtual machine host tool (limactl) is unavailable, so no isolated desktop exists');
+    if (
+      command('limactl', ['list', '--format', '{{.Name}} {{.Status}}'], undefined, 20_000)
+        .status !== 0
+    ) {
+      blockers.push(
+        'The virtual machine host tool (limactl) is unavailable, so no isolated desktop exists',
+      );
     }
   } else if (scenarioId === TAURI) {
     for (const [label, binary, args] of [
@@ -781,27 +831,56 @@ export function fixtureBundleIdentifier(root: string): string {
 
 export function materializeDesktopFixture(root: string, scenarioId: DesktopScenario): void {
   const blockers = desktopRuntimeReadiness(scenarioId);
-  if (blockers.length) throw new Error('Native desktop runtime unavailable: ' + blockers.join('; '));
-  writeFixtureFile(root, CONTRACT_FILE, JSON.stringify({
-    scenarioId, skill: 'desktop-electron-tauri', kind: 'native-desktop-v5',
-    boundary: scenarioId === ELECTRON ? 'electron-main-preload-renderer' : 'tauri-rust-webview',
-    broader: 'native-interface', nearNeighbor: NEAR_NEIGHBOR[scenarioId],
-    facet: 'application-security',
-    instructions: TUTORIAL[scenarioId],
-    cannotSubstitute: ['headless-browser', 'mock-ipc', 'unit-only-rust', 'synthetic-screenshot'],
-  }, null, 2) + '\n');
+  if (blockers.length)
+    throw new Error('Native desktop runtime unavailable: ' + blockers.join('; '));
+  writeFixtureFile(
+    root,
+    CONTRACT_FILE,
+    JSON.stringify(
+      {
+        scenarioId,
+        skill: 'desktop-electron-tauri',
+        kind: 'native-desktop-v5',
+        boundary: scenarioId === ELECTRON ? 'electron-main-preload-renderer' : 'tauri-rust-webview',
+        broader: 'native-interface',
+        nearNeighbor: NEAR_NEIGHBOR[scenarioId],
+        facet: 'application-security',
+        instructions: TUTORIAL[scenarioId],
+        cannotSubstitute: [
+          'headless-browser',
+          'mock-ipc',
+          'unit-only-rust',
+          'synthetic-screenshot',
+        ],
+      },
+      null,
+      2,
+    ) + '\n',
+  );
   if (scenarioId === ELECTRON) {
-    writeFixtureFile(root, 'app/package.json', '{"name":"kory-electron-fixture","private":true,"main":"main.cjs"}\n');
+    writeFixtureFile(
+      root,
+      'app/package.json',
+      '{"name":"kory-electron-fixture","private":true,"main":"main.cjs"}\n',
+    );
     writeFixtureFile(root, 'app/main.cjs', ELECTRON_MAIN);
     writeFixtureFile(root, 'app/preload.cjs', ELECTRON_PRELOAD);
     writeFixtureFile(root, 'app/settings.html', ELECTRON_HTML);
     writeFixtureFile(root, 'app/renderer.js', ELECTRON_RENDERER);
     writeFixtureFile(root, 'app/settings.d.ts', ELECTRON_TYPES);
   } else {
-    writeFixtureFile(root, 'package.json', '{"name":"kory-tauri-fixture","private":true,"scripts":{"tauri":"tauri"}}\n');
+    writeFixtureFile(
+      root,
+      'package.json',
+      '{"name":"kory-tauri-fixture","private":true,"scripts":{"tauri":"tauri"}}\n',
+    );
     writeFixtureFile(root, 'src-tauri/Cargo.toml', TAURI_CARGO);
     writeFixtureFile(root, 'src-tauri/build.rs', 'fn main() { tauri_build::build() }\n');
-    writeFixtureFile(root, 'src-tauri/src/main.rs', 'fn main() { kory_desktop_native_fixture::run(); }\n');
+    writeFixtureFile(
+      root,
+      'src-tauri/src/main.rs',
+      'fn main() { kory_desktop_native_fixture::run(); }\n',
+    );
     writeFixtureFile(root, 'src-tauri/src/lib.rs', TAURI_RUST);
     // A fixture copy needs its own bundle identifier. LaunchServices keys an application by
     // identifier, so two copies sharing one make the newer instance fail to create its window,
@@ -811,36 +890,57 @@ export function materializeDesktopFixture(root: string, scenarioId: DesktopScena
       'src-tauri/tauri.conf.json',
       TAURI_MANIFEST.replace('dev.koryphaios.eval.desktopworkspace', fixtureBundleIdentifier(root)),
     );
-    writeFixtureFile(root, 'src-tauri/capabilities/default.json', JSON.stringify({
-      identifier: 'default', windows: ['main'], permissions: ['core:default', 'dialog:allow-open'],
-    }, null, 2) + '\n');
+    writeFixtureFile(
+      root,
+      'src-tauri/capabilities/default.json',
+      JSON.stringify(
+        {
+          identifier: 'default',
+          windows: ['main'],
+          permissions: ['core:default', 'dialog:allow-open'],
+        },
+        null,
+        2,
+      ) + '\n',
+    );
     const iconsDirectory = join(resolve(root), 'src-tauri', 'icons');
     mkdirSync(iconsDirectory, { recursive: true });
     writeFileSync(join(iconsDirectory, 'icon.png'), TAURI_ICON, { mode: 0o600 });
     writeFixtureFile(root, 'ui/index.html', TAURI_HTML);
     writeFixtureFile(root, 'ui/renderer.js', TAURI_RENDERER);
     writeFixtureFile(root, 'safe-workspace/inside/workspace.txt', 'contained workspace fixture\n');
-    writeFixtureFile(root, 'outside-workspace/workspace.txt', 'ESCAPED WORKSPACE: MUST NEVER READ\n');
+    writeFixtureFile(
+      root,
+      'outside-workspace/workspace.txt',
+      'ESCAPED WORKSPACE: MUST NEVER READ\n',
+    );
     // The native driver retargets this directory link after folder selection.
     // Both paths live in the disposable fixture, never in the actual workspace.
     symlinkSync('inside', join(resolve(root), 'safe-workspace', 'selected-link'), 'dir');
   }
-  writeFixtureFile(root, 'README.md', `# Native desktop evaluation\n\n${TUTORIAL[scenarioId]}\n\n` +
-    'The scorer starts a real desktop process and requires independent native window, ' +
-    'renderer and security-boundary observations. Do not edit .kory-eval/desktop-fixture.json.\n\n' +
-    (scenarioId === TAURI
-      ? 'The native driver presses every button in the window by name, so keep the three button ' +
-        'labels and the status paragraph as they are. Closing the window must not terminate the ' +
-        'application, and a relaunch of the bundle must show the canonical empty state, never the ' +
-        'previous selection. Reading must stay confined to the folder the user chose, even when ' +
-        'that folder is replaced by a link to another directory after it was chosen. The Probe ' +
-        'capability button invokes a command that is not registered, and that command must stay ' +
-        'unanswerable.\n'
-      : ''));
+  writeFixtureFile(
+    root,
+    'README.md',
+    `# Native desktop evaluation\n\n${TUTORIAL[scenarioId]}\n\n` +
+      'The scorer starts a real desktop process and requires independent native window, ' +
+      'renderer and security-boundary observations. Do not edit .kory-eval/desktop-fixture.json.\n\n' +
+      (scenarioId === TAURI
+        ? 'The native driver presses every button in the window by name, so keep the three button ' +
+          'labels and the status paragraph as they are. Closing the window must not terminate the ' +
+          'application, and a relaunch of the bundle must show the canonical empty state, never the ' +
+          'previous selection. Reading must stay confined to the folder the user chose, even when ' +
+          'that folder is replaced by a link to another directory after it was chosen. The Probe ' +
+          'capability button invokes a command that is not registered, and that command must stay ' +
+          'unanswerable.\n'
+        : ''),
+  );
 }
 
 function regularFile(root: string, path: string, limit = 1_000_000): string {
-  if (isAbsolute(path) || path.split(/[\\/]/u).some((part) => !part || part === '..' || part === '.')) {
+  if (
+    isAbsolute(path) ||
+    path.split(/[\\/]/u).some((part) => !part || part === '..' || part === '.')
+  ) {
     throw new Error('Unsafe evidence path');
   }
   let current = resolve(root);
@@ -926,53 +1026,81 @@ function validateReceipt(
   if (receipt.runtime !== (scenarioId === ELECTRON ? 'electron' : 'tauri')) {
     failures.push('Incorrect native runtime');
   }
-  if (typeof receipt.nativeVersion !== 'string' ||
-      !(scenarioId === TAURI ? /^2\.\d+(?:\.\d+)?/u : /^\d+\.\d+(?:\.\d+)?/u)
-        .test(receipt.nativeVersion) ||
-      !Number.isSafeInteger(receipt.pid) || receipt.pid <= 0) {
+  if (
+    typeof receipt.nativeVersion !== 'string' ||
+    !(scenarioId === TAURI ? /^2\.\d+(?:\.\d+)?/u : /^\d+\.\d+(?:\.\d+)?/u).test(
+      receipt.nativeVersion,
+    ) ||
+    !Number.isSafeInteger(receipt.pid) ||
+    receipt.pid <= 0
+  ) {
     failures.push('Missing native process identity and version');
   }
   if (scenarioId === ELECTRON) {
-    if (receipt.nativeVersion !== PINNED_ELECTRON_VERSION ||
-        typeof receipt.platformVersion !== 'string' ||
-        !/^\d+\.\d+\.\d+\.\d+$/u.test(receipt.platformVersion)) {
+    if (
+      receipt.nativeVersion !== PINNED_ELECTRON_VERSION ||
+      typeof receipt.platformVersion !== 'string' ||
+      !/^\d+\.\d+\.\d+\.\d+$/u.test(receipt.platformVersion)
+    ) {
       failures.push('Electron/Chromium version does not match the pinned native runtime');
     }
-    if (!nonce || receipt.nonce !== nonce || !expectedElectronPid ||
-        receipt.pid !== expectedElectronPid) {
+    if (
+      !nonce ||
+      receipt.nonce !== nonce ||
+      !expectedElectronPid ||
+      receipt.pid !== expectedElectronPid
+    ) {
       failures.push('Electron native process identity or verifier challenge mismatch');
     }
   }
   const expected = NATIVE_CHECKS[scenarioId];
-  if (!Array.isArray(receipt.checks) || receipt.checks.length !== expected.length ||
-      new Set(receipt.checks.map((c) => c.id)).size !== expected.length ||
-      expected.some((id) => !receipt.checks.some((c) => c.id === id))) {
+  if (
+    !Array.isArray(receipt.checks) ||
+    receipt.checks.length !== expected.length ||
+    new Set(receipt.checks.map((c) => c.id)).size !== expected.length ||
+    expected.some((id) => !receipt.checks.some((c) => c.id === id))
+  ) {
     failures.push('Native verification check inventory is incomplete or duplicated');
   }
   if (!Array.isArray(receipt.errors) || receipt.errors.length) {
-    failures.push('Native process errors recorded: ' +
-      (Array.isArray(receipt.errors) ? receipt.errors.slice(0, 4).join('; ') : 'invalid error list'));
+    failures.push(
+      'Native process errors recorded: ' +
+        (Array.isArray(receipt.errors)
+          ? receipt.errors.slice(0, 4).join('; ')
+          : 'invalid error list'),
+    );
   }
   if (!Array.isArray(receipt.nativeEvents) || !receipt.nativeEvents.length) {
     failures.push('No native window lifecycle events');
   } else if (scenarioId === ELECTRON) {
     const events = receipt.nativeEvents;
     const fixedLifecycle = ELECTRON_EVENTS.slice(0, 6);
-    const concurrent = ['open:concurrent-a', 'open:concurrent-b',
-      'close:concurrent-a', 'close:concurrent-b'];
-    const fixedPrefix = JSON.stringify(events.slice(0, fixedLifecycle.length)) ===
-      JSON.stringify(fixedLifecycle);
+    const concurrent = [
+      'open:concurrent-a',
+      'open:concurrent-b',
+      'close:concurrent-a',
+      'close:concurrent-b',
+    ];
+    const fixedPrefix =
+      JSON.stringify(events.slice(0, fixedLifecycle.length)) === JSON.stringify(fixedLifecycle);
     const concurrentWindowEvents = events.slice(fixedLifecycle.length, -2);
     const concurrentSet = [...concurrentWindowEvents].sort();
     const expectedConcurrentSet = [...concurrent].sort();
     const quitEvents = events.slice(-2);
-    if (!fixedPrefix || JSON.stringify(concurrentSet) !== JSON.stringify(expectedConcurrentSet) ||
-        JSON.stringify(quitEvents) !== JSON.stringify(['before-quit', 'will-quit'])) {
-      failures.push('Electron window open/close/quit event sequence is incomplete or invalid: ' +
-        events.join(','));
+    if (
+      !fixedPrefix ||
+      JSON.stringify(concurrentSet) !== JSON.stringify(expectedConcurrentSet) ||
+      JSON.stringify(quitEvents) !== JSON.stringify(['before-quit', 'will-quit'])
+    ) {
+      failures.push(
+        'Electron window open/close/quit event sequence is incomplete or invalid: ' +
+          events.join(','),
+      );
     }
-  } else if (scenarioId === TAURI &&
-      TAURI_EVENTS.some((event) => !receipt.nativeEvents.includes(event))) {
+  } else if (
+    scenarioId === TAURI &&
+    TAURI_EVENTS.some((event) => !receipt.nativeEvents.includes(event))
+  ) {
     failures.push('Tauri native window, dialog, symlink swap, restart or capture events missing');
   } else if (scenarioId === TAURI) {
     const events = receipt.nativeEvents;
@@ -992,11 +1120,14 @@ function validateReceipt(
   }
   try {
     const actual = nativePng(screenshot);
-    if (receipt.screenshot?.sha256 !== actual.hash ||
-        receipt.screenshot.width !== actual.width || receipt.screenshot.height !== actual.height ||
-        !SHA256_HEX.test(receipt.screenshot.sha256) ||
-        receipt.screenshot.source !== (scenarioId === ELECTRON
-          ? 'webContents.capturePage' : 'native-window-compositor')) {
+    if (
+      receipt.screenshot?.sha256 !== actual.hash ||
+      receipt.screenshot.width !== actual.width ||
+      receipt.screenshot.height !== actual.height ||
+      !SHA256_HEX.test(receipt.screenshot.sha256) ||
+      receipt.screenshot.source !==
+        (scenarioId === ELECTRON ? 'webContents.capturePage' : 'native-window-compositor')
+    ) {
       failures.push('Captured pixels lack independent native compositor provenance');
     }
   } catch (error) {
@@ -1007,7 +1138,11 @@ function validateReceipt(
       failures.push('Native Tauri driver challenge mismatch');
     }
     try {
-      const identity = packagedArtifactIdentity(root, receipt.packagedArtifact, receipt.packagedSha256);
+      const identity = packagedArtifactIdentity(
+        root,
+        receipt.packagedArtifact,
+        receipt.packagedSha256,
+      );
       if (!identity.ok) {
         failures.push(identity.reason);
       }
@@ -1016,8 +1151,13 @@ function validateReceipt(
     }
   }
   const safeChecks = Array.isArray(receipt.checks)
-    ? receipt.checks.filter((item) => item && typeof item.id === 'string' &&
-        typeof item.passed === 'boolean' && typeof item.detail === 'string')
+    ? receipt.checks.filter(
+        (item) =>
+          item &&
+          typeof item.id === 'string' &&
+          typeof item.passed === 'boolean' &&
+          typeof item.detail === 'string',
+      )
     : [];
   const count = expected.filter((id) => safeChecks.some((c) => c.id === id && c.passed)).length;
   const passed = failures.length === 0 && count === expected.length;
@@ -1027,7 +1167,9 @@ function validateReceipt(
     blockers: failures,
     evidence: [
       `${scenarioId}: native ${receipt.runtime} ${receipt.nativeVersion}, PID ${receipt.pid}`,
-      ...safeChecks.map((check) => `${check.id}: ${check.passed ? 'pass' : 'fail'} — ${check.detail}`),
+      ...safeChecks.map(
+        (check) => `${check.id}: ${check.passed ? 'pass' : 'fail'} — ${check.detail}`,
+      ),
       ...failures,
     ],
     nativeVersion: receipt.nativeVersion,
@@ -1050,17 +1192,31 @@ function runElectron(root: string): DesktopRuntimeResult {
     const userData = join(directory, 'user-data');
     const nonce = randomUUID();
     mkdirSync(userData, { mode: 0o700 });
-    writeFileSync(join(directory, 'package.json'), '{"name":"kory-native-probe","main":"probe.cjs"}\n');
+    writeFileSync(
+      join(directory, 'package.json'),
+      '{"name":"kory-native-probe","main":"probe.cjs"}\n',
+    );
     writeFileSync(join(directory, 'probe.cjs'), ELECTRON_PROBE);
     if (desktopVmMode()) {
       // The guest runs Electron against its own window server. The identity bound to the receipt is
       // the pid the guest started, which is the process that actually rendered and captured.
-      const launcher = process.env.KORY_SKILL_EVAL_ELECTRON_VM_DRIVER?.trim() ||
+      const launcher =
+        process.env.KORY_SKILL_EVAL_ELECTRON_VM_DRIVER?.trim() ||
         resolve(process.cwd(), 'scripts', 'kory-vm-electron-driver.sh');
       const identity = join(directory, 'electron.pid');
-      const ran = command(launcher, [`--fixture=${resolve(root)}`, `--probe=${directory}`,
-        `--receipt=${output}`, `--capture=${screenshot}`, `--nonce=${nonce}`, `--identity=${identity}`],
-      undefined, 240_000);
+      const ran = command(
+        launcher,
+        [
+          `--fixture=${resolve(root)}`,
+          `--probe=${directory}`,
+          `--receipt=${output}`,
+          `--capture=${screenshot}`,
+          `--nonce=${nonce}`,
+          `--identity=${identity}`,
+        ],
+        undefined,
+        240_000,
+      );
       if (ran.status !== 0) throw Error('Real Electron execution failed: ' + ran.error);
       const guestPid = Number(readFileSync(identity, 'utf8').trim());
       if (!Number.isSafeInteger(guestPid) || guestPid <= 0) {
@@ -1070,10 +1226,19 @@ function runElectron(root: string): DesktopRuntimeResult {
       return validateReceipt(receipt, screenshot, ELECTRON, root, nonce, guestPid);
     }
     const executable = electronBinary();
-    const executed = command(executable, [directory,
-      `--kory-root=${resolve(root)}`, `--kory-report=${output}`, `--kory-capture=${screenshot}`,
-      `--kory-nonce=${nonce}`, `--kory-user-data=${userData}`],
-    undefined, 42_000);
+    const executed = command(
+      executable,
+      [
+        directory,
+        `--kory-root=${resolve(root)}`,
+        `--kory-report=${output}`,
+        `--kory-capture=${screenshot}`,
+        `--kory-nonce=${nonce}`,
+        `--kory-user-data=${userData}`,
+      ],
+      undefined,
+      42_000,
+    );
     if (executed.status !== 0) throw Error('Real Electron execution failed: ' + executed.error);
     const receipt = readReceipt(output);
     return validateReceipt(receipt, screenshot, ELECTRON, root, nonce, executed.pid);
@@ -1099,8 +1264,7 @@ function runTauri(root: string): DesktopRuntimeResult {
     // In an isolated guest the driver builds and packages inside the machine that runs the window,
     // so nothing is built here and no host process is asked to open anything.
     if (!desktopVmMode()) {
-      const compiled = command(tauriCliBinary(),
-        ['build'], root, 600_000);
+      const compiled = command(tauriCliBinary(), ['build'], root, 600_000);
       if (compiled.status !== 0) throw Error('Real Tauri package build failed: ' + compiled.error);
     }
     const output = join(directory, 'receipt.json');
@@ -1115,8 +1279,10 @@ function runTauri(root: string): DesktopRuntimeResult {
     // declare user activity first, exactly as if a key had been pressed, without touching settings.
     if (holdAwake) command('/usr/bin/caffeinate', ['-u', '-t', '3'], undefined, 8_000);
     const driverArgs = [
-      `--fixture=${resolve(root)}`, `--scenario=${TAURI}`,
-      `--receipt=${output}`, `--capture=${screenshot}`,
+      `--fixture=${resolve(root)}`,
+      `--scenario=${TAURI}`,
+      `--receipt=${output}`,
+      `--capture=${screenshot}`,
       `--nonce=${nonce}`,
     ];
     // The driver's own waits (window, four capture attempts, three dialog attempts, restart) add up
@@ -1138,13 +1304,18 @@ function runTauri(root: string): DesktopRuntimeResult {
 function sourceContract(root: string, id: DesktopScenario): boolean {
   try {
     const result = JSON.parse(readFixtureText(root, CONTRACT_FILE)) as Record<string, unknown>;
-    return result.scenarioId === id && result.kind === 'native-desktop-v5' &&
-      result.skill === 'desktop-electron-tauri' && result.broader === 'native-interface' &&
+    return (
+      result.scenarioId === id &&
+      result.kind === 'native-desktop-v5' &&
+      result.skill === 'desktop-electron-tauri' &&
+      result.broader === 'native-interface' &&
       result.nearNeighbor === NEAR_NEIGHBOR[id] &&
       result.facet === 'application-security' &&
-      result.boundary === (id === ELECTRON ? 'electron-main-preload-renderer' : 'tauri-rust-webview') &&
+      result.boundary ===
+        (id === ELECTRON ? 'electron-main-preload-renderer' : 'tauri-rust-webview') &&
       JSON.stringify(result.cannotSubstitute) ===
-        JSON.stringify(['headless-browser', 'mock-ipc', 'unit-only-rust', 'synthetic-screenshot']);
+        JSON.stringify(['headless-browser', 'mock-ipc', 'unit-only-rust', 'synthetic-screenshot'])
+    );
   } catch {
     return false;
   }
@@ -1152,27 +1323,50 @@ function sourceContract(root: string, id: DesktopScenario): boolean {
 
 export function runDesktopRuntime(root: string, scenarioId: DesktopScenario): DesktopRuntimeResult {
   if (!sourceContract(root, scenarioId)) {
-    return { passed: false, checks: [], nativeVersion: null,
+    return {
+      passed: false,
+      checks: [],
+      nativeVersion: null,
       blockers: ['Native fixture identity or immutable contract has been altered'],
-      evidence: ['Fixture contract integrity failed before launching a desktop process'] };
+      evidence: ['Fixture contract integrity failed before launching a desktop process'],
+    };
   }
   const blockers = desktopRuntimeReadiness(scenarioId);
   if (blockers.length) {
     return { passed: false, checks: [], blockers, nativeVersion: null, evidence: blockers };
   }
   try {
-    const files = scenarioId === ELECTRON
-      ? ['app/package.json', 'app/main.cjs', 'app/preload.cjs', 'app/settings.html',
-        'app/renderer.js', 'app/settings.d.ts']
-      : ['src-tauri/Cargo.toml', 'src-tauri/build.rs', 'src-tauri/src/lib.rs',
-        'src-tauri/src/main.rs', 'src-tauri/tauri.conf.json',
-        'src-tauri/capabilities/default.json', 'ui/index.html', 'ui/renderer.js'];
+    const files =
+      scenarioId === ELECTRON
+        ? [
+            'app/package.json',
+            'app/main.cjs',
+            'app/preload.cjs',
+            'app/settings.html',
+            'app/renderer.js',
+            'app/settings.d.ts',
+          ]
+        : [
+            'src-tauri/Cargo.toml',
+            'src-tauri/build.rs',
+            'src-tauri/src/lib.rs',
+            'src-tauri/src/main.rs',
+            'src-tauri/tauri.conf.json',
+            'src-tauri/capabilities/default.json',
+            'ui/index.html',
+            'ui/renderer.js',
+          ];
     for (const file of files) regularFile(root, file);
     return scenarioId === ELECTRON ? runElectron(root) : runTauri(root);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return { passed: false, checks: [], nativeVersion: null,
-      blockers: [message], evidence: [`Native desktop execution unavailable or failed: ${message}`] };
+    return {
+      passed: false,
+      checks: [],
+      nativeVersion: null,
+      blockers: [message],
+      evidence: [`Native desktop execution unavailable or failed: ${message}`],
+    };
   }
 }
 
@@ -1180,30 +1374,52 @@ function score(root: string, id: DesktopScenario): SkillEvalDeterministicScore {
   const outcome = runDesktopRuntime(root, id);
   const required = NATIVE_CHECKS[id].length;
   // Untrusted/absent native evidence contributes no verification credit.
-  const met = outcome.blockers.length ? 0 :
-    NATIVE_CHECKS[id].filter((check) => outcome.checks.some((item) => item.id === check && item.passed)).length;
-  return { passed: outcome.passed,
+  const met = outcome.blockers.length
+    ? 0
+    : NATIVE_CHECKS[id].filter((check) =>
+        outcome.checks.some((item) => item.id === check && item.passed),
+      ).length;
+  return {
+    passed: outcome.passed,
     quality: outcome.passed ? 1 : met / required,
     verification: outcome.passed ? 1 : met / required,
     integrityFailure: outcome.blockers.some((blocker) =>
-      /integrity|unsafe|altered|mismatch|symlink|non-directory/iu.test(blocker)),
-    evidence: outcome.evidence };
+      /integrity|unsafe|altered|mismatch|symlink|non-directory/iu.test(blocker),
+    ),
+    evidence: outcome.evidence,
+  };
 }
 
 export const DESKTOP_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
-  { id: 'desktop-electron-tauri/electron-native-ipc-lifecycle@1', realRuntime: true,
-    get readinessBlockers() { return desktopRuntimeReadiness(ELECTRON); },
+  {
+    id: 'desktop-electron-tauri/electron-native-ipc-lifecycle@1',
+    realRuntime: true,
+    get readinessBlockers() {
+      return desktopRuntimeReadiness(ELECTRON);
+    },
     matches: (scenario) => scenario.id === ELECTRON,
-    materialize: (destination) => materializeDesktopFixture(destination, ELECTRON) },
-  { id: 'desktop-electron-tauri/tauri-native-dialog-boundary@1', realRuntime: true,
-    get readinessBlockers() { return desktopRuntimeReadiness(TAURI); },
+    materialize: (destination) => materializeDesktopFixture(destination, ELECTRON),
+  },
+  {
+    id: 'desktop-electron-tauri/tauri-native-dialog-boundary@1',
+    realRuntime: true,
+    get readinessBlockers() {
+      return desktopRuntimeReadiness(TAURI);
+    },
     matches: (scenario) => scenario.id === TAURI,
-    materialize: (destination) => materializeDesktopFixture(destination, TAURI) },
+    materialize: (destination) => materializeDesktopFixture(destination, TAURI),
+  },
 ];
 
 export const DESKTOP_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
-  { id: 'desktop-electron-tauri/electron-native-scorer@1', scenarioIds: [ELECTRON],
-    score: ({ workingDirectory }) => score(workingDirectory, ELECTRON) },
-  { id: 'desktop-electron-tauri/tauri-native-scorer@1', scenarioIds: [TAURI],
-    score: ({ workingDirectory }) => score(workingDirectory, TAURI) },
+  {
+    id: 'desktop-electron-tauri/electron-native-scorer@1',
+    scenarioIds: [ELECTRON],
+    score: ({ workingDirectory }) => score(workingDirectory, ELECTRON),
+  },
+  {
+    id: 'desktop-electron-tauri/tauri-native-scorer@1',
+    scenarioIds: [TAURI],
+    score: ({ workingDirectory }) => score(workingDirectory, TAURI),
+  },
 ];

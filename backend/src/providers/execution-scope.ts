@@ -14,7 +14,9 @@ const scopes = new AsyncLocalStorage<ProviderExecutionScope>();
 const sessionScopes = new Map<string, ProviderExecutionScope>();
 export function bindProviderExecutionScope(scope: ProviderExecutionScope): () => void {
   sessionScopes.set(scope.sessionId, scope);
-  return () => { if (sessionScopes.get(scope.sessionId) === scope) sessionScopes.delete(scope.sessionId); };
+  return () => {
+    if (sessionScopes.get(scope.sessionId) === scope) sessionScopes.delete(scope.sessionId);
+  };
 }
 export function withSessionProviderExecutionScope<T>(sessionId: string, operation: () => T): T {
   const scope = sessionScopes.get(sessionId);
@@ -25,7 +27,10 @@ export function currentProviderExecutionScope(): ProviderExecutionScope | undefi
   scope?.assertActive();
   return scope;
 }
-export function withProviderExecutionScope<T>(scope: ProviderExecutionScope, operation: () => T): T {
+export function withProviderExecutionScope<T>(
+  scope: ProviderExecutionScope,
+  operation: () => T,
+): T {
   scope.assertActive();
   return scopes.run(scope, operation);
 }

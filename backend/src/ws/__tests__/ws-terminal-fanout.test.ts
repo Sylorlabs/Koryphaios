@@ -43,11 +43,12 @@ function subscribe(manager: WSManager, id: string, sessionId: string) {
   (manager as any).clients.get(id).subscribedSessions.add(sessionId);
 }
 
-const output = (terminalId: string): WSMessage => ({
-  type: 'terminal.output',
-  timestamp: 1,
-  payload: { terminalId, seq: 1, data: 'aGk=' },
-} as WSMessage);
+const output = (terminalId: string): WSMessage =>
+  ({
+    type: 'terminal.output',
+    timestamp: 1,
+    payload: { terminalId, seq: 1, data: 'aGk=' },
+  }) as WSMessage;
 
 describe('terminal live fan-out', () => {
   test('delivers output only to sockets subscribed to the owning chat', () => {

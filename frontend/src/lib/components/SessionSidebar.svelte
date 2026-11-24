@@ -2223,7 +2223,7 @@
                 id={`project-chats-${project.key.replace(/[^a-zA-Z0-9_-]/g, '-')}`}
                 class="project-children"
               >
-                
+
                 {#each project.sessions.filter((s) => !chatSidebarPrefs.isPinned(s.id)) as session (session.id)}
                   {@render sessionRow(session, project.path)}
                 {/each}

@@ -1,4 +1,4 @@
-![MCP-for-beginners](./images/mcp-beginners.png) 
+![MCP-for-beginners](./images/mcp-beginners.png)
 
 [![GitHub contributors](https://img.shields.io/github/contributors/microsoft/mcp-for-beginners.svg)](https://GitHub.com/microsoft/mcp-for-beginners/graphs/contributors)
 [![GitHub issues](https://img.shields.io/github/issues/microsoft/mcp-for-beginners.svg)](https://GitHub.com/microsoft/mcp-for-beginners/issues)
@@ -10,20 +10,20 @@
 [![GitHub forks](https://img.shields.io/github/forks/microsoft/mcp-for-beginners.svg?style=social&label=Fork)](https://GitHub.com/microsoft/mcp-for-beginners/fork)
 [![GitHub stars](https://img.shields.io/github/stars/microsoft/mcp-for-beginners?style=social&label=Star)](https://GitHub.com/microsoft/mcp-for-beginners/stargazers)
 
-
 [![Microsoft Foundry Discord](https://dcbadge.limes.pink/api/server/nTYy5BXMWG)](https://discord.gg/nTYy5BXMWG)
 
 Follow these steps to get started using these resources:
-1. **Fork the Repository**: Click [![GitHub forks](https://img.shields.io/github/forks/microsoft/mcp-for-beginners.svg?style=social&label=Fork)](https://GitHub.com/microsoft/mcp-for-beginners/fork)
-2. **Clone the Repository**:   `git clone https://github.com/microsoft/mcp-for-beginners.git`
-3. **Join The** [![Microsoft Foundry Discord](https://dcbadge.limes.pink/api/server/nTYy5BXMWG)](https://discord.gg/nTYy5BXMWG)
 
+1. **Fork the Repository**: Click [![GitHub forks](https://img.shields.io/github/forks/microsoft/mcp-for-beginners.svg?style=social&label=Fork)](https://GitHub.com/microsoft/mcp-for-beginners/fork)
+2. **Clone the Repository**: `git clone https://github.com/microsoft/mcp-for-beginners.git`
+3. **Join The** [![Microsoft Foundry Discord](https://dcbadge.limes.pink/api/server/nTYy5BXMWG)](https://discord.gg/nTYy5BXMWG)
 
 ### 🌐 Multi-Language Support
 
 #### Supported via GitHub Action (Automated & Always Up-to-Date)
 
 <!-- CO-OP TRANSLATOR LANGUAGES TABLE START -->
+
 [Arabic](./translations/ar/README.md) | [Bengali](./translations/bn/README.md) | [Bulgarian](./translations/bg/README.md) | [Burmese (Myanmar)](./translations/my/README.md) | [Chinese (Simplified)](./translations/zh-CN/README.md) | [Chinese (Traditional, Hong Kong)](./translations/zh-HK/README.md) | [Chinese (Traditional, Macau)](./translations/zh-MO/README.md) | [Chinese (Traditional, Taiwan)](./translations/zh-TW/README.md) | [Croatian](./translations/hr/README.md) | [Czech](./translations/cs/README.md) | [Danish](./translations/da/README.md) | [Dutch](./translations/nl/README.md) | [Estonian](./translations/et/README.md) | [Finnish](./translations/fi/README.md) | [French](./translations/fr/README.md) | [German](./translations/de/README.md) | [Greek](./translations/el/README.md) | [Hebrew](./translations/he/README.md) | [Hindi](./translations/hi/README.md) | [Hungarian](./translations/hu/README.md) | [Indonesian](./translations/id/README.md) | [Italian](./translations/it/README.md) | [Japanese](./translations/ja/README.md) | [Kannada](./translations/kn/README.md) | [Khmer](./translations/km/README.md) | [Korean](./translations/ko/README.md) | [Lithuanian](./translations/lt/README.md) | [Malay](./translations/ms/README.md) | [Malayalam](./translations/ml/README.md) | [Marathi](./translations/mr/README.md) | [Nepali](./translations/ne/README.md) | [Nigerian Pidgin](./translations/pcm/README.md) | [Norwegian](./translations/no/README.md) | [Persian (Farsi)](./translations/fa/README.md) | [Polish](./translations/pl/README.md) | [Portuguese (Brazil)](./translations/pt-BR/README.md) | [Portuguese (Portugal)](./translations/pt-PT/README.md) | [Punjabi (Gurmukhi)](./translations/pa/README.md) | [Romanian](./translations/ro/README.md) | [Russian](./translations/ru/README.md) | [Serbian (Cyrillic)](./translations/sr/README.md) | [Slovak](./translations/sk/README.md) | [Slovenian](./translations/sl/README.md) | [Spanish](./translations/es/README.md) | [Swahili](./translations/sw/README.md) | [Swedish](./translations/sv/README.md) | [Tagalog (Filipino)](./translations/tl/README.md) | [Tamil](./translations/ta/README.md) | [Telugu](./translations/te/README.md) | [Thai](./translations/th/README.md) | [Turkish](./translations/tr/README.md) | [Ukrainian](./translations/uk/README.md) | [Urdu](./translations/ur/README.md) | [Vietnamese](./translations/vi/README.md)
 
 > **Prefer to Clone Locally?**
@@ -31,6 +31,7 @@ Follow these steps to get started using these resources:
 > This repository includes 50+ language translations which significantly increases the download size. To clone without translations, use sparse checkout:
 >
 > **Bash / macOS / Linux:**
+>
 > ```bash
 > git clone --filter=blob:none --sparse https://github.com/microsoft/mcp-for-beginners.git
 > cd mcp-for-beginners
@@ -38,6 +39,7 @@ Follow these steps to get started using these resources:
 > ```
 >
 > **CMD (Windows):**
+>
 > ```cmd
 > git clone --filter=blob:none --sparse https://github.com/microsoft/mcp-for-beginners.git
 > cd mcp-for-beginners
@@ -45,6 +47,7 @@ Follow these steps to get started using these resources:
 > ```
 >
 > This gives you everything you need to complete the course with a much faster download.
+
 <!-- CO-OP TRANSLATOR LANGUAGES TABLE END -->
 
 # 🚀 Model Context Protocol (MCP) Curriculum for Beginners
@@ -52,6 +55,7 @@ Follow these steps to get started using these resources:
 ## **Learn MCP with Hands-on Code Examples in C#, Java, JavaScript, Rust, Python, and TypeScript**
 
 ## 🧠 Overview of the Model Context Protocol Curriculum
+
 Welcome to your journey into the Model Context Protocol! If you've ever wondered how AI applications communicate with different tools and services, you're about to discover the elegant solution that's transforming how developers build intelligent systems.
 
 Think of MCP as a universal translator for AI applications - just like how USB ports let you connect any device to your computer, MCP lets AI models connect to any tool or service in a standardized way. Whether you're building your first chatbot or working on complex AI workflows, understanding MCP will give you the power to create more capable and flexible applications.
@@ -67,12 +71,13 @@ This curriculum is aligned with **MCP Specification 2025-11-25** (the latest sta
 > **Looking ahead:** a release candidate for the next specification version, **2026-07-28**, is scheduled to ship on July 28, 2026. It makes the protocol stateless at the transport layer, formalizes an Extensions framework (MCP Apps, Tasks), hardens authorization, and deprecates Roots, Sampling, and Logging. See [What's Changing in MCP: The 2026-07-28 Release Candidate](./01-CoreConcepts/mcp-2026-07-28-release-candidate.md) for a full breakdown.
 
 These resources become more valuable as your understanding grows, but don't feel pressured to read everything immediately. Start with the areas that interest you most!
+
 - 📘 [MCP Documentation](https://modelcontextprotocol.io/) – This is your go-to resource for step-by-step tutorials and user guides. The documentation is written with beginners in mind, providing clear examples you can follow along with at your own pace.
 - 📜 [MCP Specification](https://modelcontextprotocol.io/specification/2025-11-25) – Think of this as your comprehensive reference manual. As you work through the curriculum, you'll find yourself returning here to look up specific details and explore advanced features.
 - 📜 [MCP Specification Versioning](https://modelcontextprotocol.io/specification/versioning) – This contains information about protocol version history and how MCP uses date-based versioning (YYYY-MM-DD format).
-- 🧑‍💻 [MCP GitHub Repository](https://github.com/modelcontextprotocol) –  Here you'll find SDKs, tools, and code samples in multiple programming languages. It's like a treasure trove of practical examples and ready-to-use components.
+- 🧑‍💻 [MCP GitHub Repository](https://github.com/modelcontextprotocol) – Here you'll find SDKs, tools, and code samples in multiple programming languages. It's like a treasure trove of practical examples and ready-to-use components.
 - 🌐 [MCP Community](https://github.com/orgs/modelcontextprotocol/discussions) – Join fellow learners and experienced developers in discussions about MCP. It's a supportive community where questions are welcome and knowledge is shared freely.
-  
+
 ## Learning Objectives
 
 By the end of this curriculum, you'll feel confident and excited about your new abilities. Here's what you'll achieve:
@@ -87,7 +92,7 @@ By the end of this curriculum, you'll feel confident and excited about your new 
 
 • **Deploy with confidence**: You'll know how to take your MCP projects from development to production, with practical deployment strategies that work in the real world.
 
-• **Join the MCP community**: You'll become part of a growing community of developers who are shaping the future of AI application development. 
+• **Join the MCP community**: You'll become part of a growing community of developers who are shaping the future of AI application development.
 
 ## Essential Background
 
@@ -147,74 +152,74 @@ Module 11 deserves special mention - it's a complete 13-lab hands-on learning pa
 
 ### 📚 Complete Curriculum Structure
 
-| Module | Topic | Description | Link |
-|--------|-------|-------------|------|
-| **Module 0-3: Fundamentals** | | | |
-| 00 | Introduction to MCP | Overview of the Model Context Protocol and its significance in AI pipelines | [Read more](./00-Introduction/README.md) |
-| 01 | Core Concepts Explained | In-depth exploration of core MCP concepts | [Read more](./01-CoreConcepts/README.md) |
-| 1.1 | What's Changing in MCP (2026-07-28 RC) | Stateless protocol, Extensions framework, and feature deprecations coming in the next spec version | [Guide](./01-CoreConcepts/mcp-2026-07-28-release-candidate.md) |
-| 02 | Security in MCP | Security threats and best practices | [Read more](./02-Security/README.md) |
-| 03 | Getting Started with MCP | Environment setup, basic servers/clients, integration | [Read more](./03-GettingStarted/README.md) |
-| **Module 3: Building Your First Server & Client** | | | |
-| 3.1 | First Server | Create your first MCP server | [Guide](./03-GettingStarted/01-first-server/README.md) |
-| 3.2 | First Client | Develop a basic MCP client | [Guide](./03-GettingStarted/02-client/README.md) |
-| 3.3 | Client with LLM | Integrate large language models | [Guide](./03-GettingStarted/03-llm-client/README.md) |
-| 3.4 | VS Code Integration | Consume MCP servers in VS Code | [Guide](./03-GettingStarted/04-vscode/README.md) |
-| 3.5 | stdio Server | Create servers using stdio transport | [Guide](./03-GettingStarted/05-stdio-server/README.md) |
-| 3.6 | HTTP Streaming | Implement HTTP streaming in MCP | [Guide](./03-GettingStarted/06-http-streaming/README.md) |
-| 3.7 | Microsoft Foundry Toolkit | Use Microsoft Foundry Toolkit with MCP | [Guide](./03-GettingStarted/07-aitk/README.md) |
-| 3.8 | Testing | Test your MCP server implementation | [Guide](./03-GettingStarted/08-testing/README.md) |
-| 3.9 | Deployment | Deploy MCP servers to production | [Guide](./03-GettingStarted/09-deployment/README.md) |
-| 3.10 | Advanced server usage | Use advanced servers for advanced feature usage and improved architecture | [Guide](./03-GettingStarted/10-advanced/README.md) |
-| 3.11 | Simple auth | A chapter showing you auth from the beginning and RBAC | [Guide](./03-GettingStarted/11-simple-auth/README.md) |
-| 3.12 | MCP Hosts | Configure Claude Desktop, Cursor, Cline, and other MCP hosts | [Guide](./03-GettingStarted/12-mcp-hosts/README.md) |
-| 3.13 | MCP Inspector | Debug and test MCP servers with the Inspector tool | [Guide](./03-GettingStarted/13-mcp-inspector/README.md) |
-| 3.14 | Sampling | Use sampling to collaborate with the client | [Guide](./03-GettingStarted/14-sampling/README.md) |
-| 3.15 | MCP Apps | Build MCP Apps | [Guide](./03-GettingStarted/15-mcp-apps/README.md) |
-| **Module 4-5: Practical & Advanced** | | | |
-| 04 | Practical Implementation | SDKs, debugging, testing, reusable prompt templates | [Read more](./04-PracticalImplementation/README.md) |
-| 4.1 | Pagination | Handle large result sets with cursor-based pagination | [Guide](./04-PracticalImplementation/pagination/README.md) |
-| 05 | Advanced Topics in MCP | Multi-modal AI, scaling, enterprise use | [Read more](./05-AdvancedTopics/README.md) |
-| 5.1 | Azure Integration | MCP Integration with Azure | [Guide](./05-AdvancedTopics/mcp-integration/README.md) |
-| 5.2 | Multi-modality | Working with multiple modalities | [Guide](./05-AdvancedTopics/mcp-multi-modality/README.md) |
-| 5.3 | OAuth2 Demo | Implement OAuth2 authentication | [Guide](./05-AdvancedTopics/mcp-oauth2-demo/README.md) |
-| 5.4 | Root Contexts | Understand and implement root contexts | [Guide](./05-AdvancedTopics/mcp-root-contexts/README.md) |
-| 5.5 | Routing | MCP routing strategies | [Guide](./05-AdvancedTopics/mcp-routing/README.md) |
-| 5.6 | Sampling | Sampling techniques in MCP | [Guide](./05-AdvancedTopics/mcp-sampling/README.md) |
-| 5.7 | Scaling | Scale MCP implementations | [Guide](./05-AdvancedTopics/mcp-scaling/README.md) |
-| 5.8 | Security | Advanced security considerations | [Guide](./05-AdvancedTopics/mcp-security/README.md) |
-| 5.9 | Web Search | Implement web search capabilities | [Guide](./05-AdvancedTopics/web-search-mcp/README.md) |
-| 5.10 | Realtime Streaming | Build realtime streaming functionality | [Guide](./05-AdvancedTopics/mcp-realtimestreaming/README.md) |
-| 5.11 | Realtime Search | Implement realtime search | [Guide](./05-AdvancedTopics/mcp-realtimesearch/README.md) |
-| 5.12 | Entra ID Auth | Authentication with Microsoft Entra ID | [Guide](./05-AdvancedTopics/mcp-security-entra/README.md) |
-| 5.13 | Foundry Integration | Integrate with Microsoft Foundry | [Guide](./05-AdvancedTopics/mcp-foundry-agent-integration/README.md) |
-| 5.14 | Context Engineering | Techniques for effective context engineering | [Guide](./05-AdvancedTopics/mcp-contextengineering/README.md) |
-| 5.15 | MCP Custom Transport | Custom Transport implementations | [Guide](./05-AdvancedTopics/mcp-transport/README.md) |
-| 5.16 | Protocol Features | Progress notifications, cancellation, resource templates | [Guide](./05-AdvancedTopics/mcp-protocol-features/README.md) |
-| 5.17 | Adversarial Multi-Agent Reasoning | Two agents argue opposite sides using shared MCP tools, evaluated by a judge agent | [Guide](./05-AdvancedTopics/mcp-adversarial-agents/README.md) |
-| **Module 6-10: Community & Best Practices** | | | |
-| 06 | Community Contributions | How to contribute to the MCP ecosystem | [Guide](./06-CommunityContributions/README.md) |
-| 07 | Insights from Early Adoption | Real-world implementation stories | [Guide](./07-LessonsfromEarlyAdoption/README.md) |
-| 08 | Best Practices for MCP | Performance, fault-tolerance, resilience | [Guide](./08-BestPractices/README.md) |
-| 09 | MCP Case Studies | Practical implementation examples | [Guide](./09-CaseStudy/README.md) |
-| 10 | Hands-on Workshop | Building an MCP Server with Microsoft Foundry Toolkit | [Lab](./10-StreamliningAIWorkflowsBuildingAnMCPServerWithAIToolkit/README.md) |
-| **Module 11: MCP Server Hands On Lab** | | | |
-| 11 | MCP Server Database Integration | Comprehensive 13-lab hands-on learning path for PostgreSQL integration | [Labs](./11-MCPServerHandsOnLabs/README.md) |
-| 11.1 | Introduction | Overview of MCP with database integration and retail analytics use case | [Lab 00](./11-MCPServerHandsOnLabs/00-Introduction/README.md) |
-| 11.2 | Core Architecture | Understanding MCP server architecture, database layers, and security patterns | [Lab 01](./11-MCPServerHandsOnLabs/01-Architecture/README.md) |
-| 11.3 | Security & Multi-Tenancy | Row Level Security, authentication, and multi-tenant data access | [Lab 02](./11-MCPServerHandsOnLabs/02-Security/README.md) |
-| 11.4 | Environment Setup | Setting up development environment, Docker, Azure resources | [Lab 03](./11-MCPServerHandsOnLabs/03-Setup/README.md) |
-| 11.5 | Database Design | PostgreSQL setup, retail schema design, and sample data | [Lab 04](./11-MCPServerHandsOnLabs/04-Database/README.md) |
-| 11.6 | MCP Server Implementation | Building the FastMCP server with database integration | [Lab 05](./11-MCPServerHandsOnLabs/05-MCP-Server/README.md) |
-| 11.7 | Tool Development | Creating database query tools and schema introspection | [Lab 06](./11-MCPServerHandsOnLabs/06-Tools/README.md) |
-| 11.8 | Semantic Search | Implementing vector embeddings with Azure OpenAI and pgvector | [Lab 07](./11-MCPServerHandsOnLabs/07-Semantic-Search/README.md) |
-| 11.9 | Testing & Debugging | Testing strategies, debugging tools, and validation approaches | [Lab 08](./11-MCPServerHandsOnLabs/08-Testing/README.md) |
-| 11.10 | VS Code Integration | Configuring VS Code MCP integration and AI Chat usage | [Lab 09](./11-MCPServerHandsOnLabs/09-VS-Code/README.md) |
-| 11.11 | Deployment Strategies | Docker deployment, Azure Container Apps, and scaling considerations | [Lab 10](./11-MCPServerHandsOnLabs/10-Deployment/README.md) |
-| 11.12 | Monitoring | Application Insights, logging, performance monitoring | [Lab 11](./11-MCPServerHandsOnLabs/11-Monitoring/README.md) |
-| 11.13 | Best Practices | Performance optimization, security hardening, and production tips | [Lab 12](./11-MCPServerHandsOnLabs/12-Best-Practices/README.md) |
-| **Module 12: MCP Tooling** | | | |
-| 12.1 | Tooling | MCP usage in Copilot App | [ Guide ](./12-tooling/README.md) |
+| Module                                            | Topic                                  | Description                                                                                        | Link                                                                          |
+| ------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Module 0-3: Fundamentals**                      |                                        |                                                                                                    |                                                                               |
+| 00                                                | Introduction to MCP                    | Overview of the Model Context Protocol and its significance in AI pipelines                        | [Read more](./00-Introduction/README.md)                                      |
+| 01                                                | Core Concepts Explained                | In-depth exploration of core MCP concepts                                                          | [Read more](./01-CoreConcepts/README.md)                                      |
+| 1.1                                               | What's Changing in MCP (2026-07-28 RC) | Stateless protocol, Extensions framework, and feature deprecations coming in the next spec version | [Guide](./01-CoreConcepts/mcp-2026-07-28-release-candidate.md)                |
+| 02                                                | Security in MCP                        | Security threats and best practices                                                                | [Read more](./02-Security/README.md)                                          |
+| 03                                                | Getting Started with MCP               | Environment setup, basic servers/clients, integration                                              | [Read more](./03-GettingStarted/README.md)                                    |
+| **Module 3: Building Your First Server & Client** |                                        |                                                                                                    |                                                                               |
+| 3.1                                               | First Server                           | Create your first MCP server                                                                       | [Guide](./03-GettingStarted/01-first-server/README.md)                        |
+| 3.2                                               | First Client                           | Develop a basic MCP client                                                                         | [Guide](./03-GettingStarted/02-client/README.md)                              |
+| 3.3                                               | Client with LLM                        | Integrate large language models                                                                    | [Guide](./03-GettingStarted/03-llm-client/README.md)                          |
+| 3.4                                               | VS Code Integration                    | Consume MCP servers in VS Code                                                                     | [Guide](./03-GettingStarted/04-vscode/README.md)                              |
+| 3.5                                               | stdio Server                           | Create servers using stdio transport                                                               | [Guide](./03-GettingStarted/05-stdio-server/README.md)                        |
+| 3.6                                               | HTTP Streaming                         | Implement HTTP streaming in MCP                                                                    | [Guide](./03-GettingStarted/06-http-streaming/README.md)                      |
+| 3.7                                               | Microsoft Foundry Toolkit              | Use Microsoft Foundry Toolkit with MCP                                                             | [Guide](./03-GettingStarted/07-aitk/README.md)                                |
+| 3.8                                               | Testing                                | Test your MCP server implementation                                                                | [Guide](./03-GettingStarted/08-testing/README.md)                             |
+| 3.9                                               | Deployment                             | Deploy MCP servers to production                                                                   | [Guide](./03-GettingStarted/09-deployment/README.md)                          |
+| 3.10                                              | Advanced server usage                  | Use advanced servers for advanced feature usage and improved architecture                          | [Guide](./03-GettingStarted/10-advanced/README.md)                            |
+| 3.11                                              | Simple auth                            | A chapter showing you auth from the beginning and RBAC                                             | [Guide](./03-GettingStarted/11-simple-auth/README.md)                         |
+| 3.12                                              | MCP Hosts                              | Configure Claude Desktop, Cursor, Cline, and other MCP hosts                                       | [Guide](./03-GettingStarted/12-mcp-hosts/README.md)                           |
+| 3.13                                              | MCP Inspector                          | Debug and test MCP servers with the Inspector tool                                                 | [Guide](./03-GettingStarted/13-mcp-inspector/README.md)                       |
+| 3.14                                              | Sampling                               | Use sampling to collaborate with the client                                                        | [Guide](./03-GettingStarted/14-sampling/README.md)                            |
+| 3.15                                              | MCP Apps                               | Build MCP Apps                                                                                     | [Guide](./03-GettingStarted/15-mcp-apps/README.md)                            |
+| **Module 4-5: Practical & Advanced**              |                                        |                                                                                                    |                                                                               |
+| 04                                                | Practical Implementation               | SDKs, debugging, testing, reusable prompt templates                                                | [Read more](./04-PracticalImplementation/README.md)                           |
+| 4.1                                               | Pagination                             | Handle large result sets with cursor-based pagination                                              | [Guide](./04-PracticalImplementation/pagination/README.md)                    |
+| 05                                                | Advanced Topics in MCP                 | Multi-modal AI, scaling, enterprise use                                                            | [Read more](./05-AdvancedTopics/README.md)                                    |
+| 5.1                                               | Azure Integration                      | MCP Integration with Azure                                                                         | [Guide](./05-AdvancedTopics/mcp-integration/README.md)                        |
+| 5.2                                               | Multi-modality                         | Working with multiple modalities                                                                   | [Guide](./05-AdvancedTopics/mcp-multi-modality/README.md)                     |
+| 5.3                                               | OAuth2 Demo                            | Implement OAuth2 authentication                                                                    | [Guide](./05-AdvancedTopics/mcp-oauth2-demo/README.md)                        |
+| 5.4                                               | Root Contexts                          | Understand and implement root contexts                                                             | [Guide](./05-AdvancedTopics/mcp-root-contexts/README.md)                      |
+| 5.5                                               | Routing                                | MCP routing strategies                                                                             | [Guide](./05-AdvancedTopics/mcp-routing/README.md)                            |
+| 5.6                                               | Sampling                               | Sampling techniques in MCP                                                                         | [Guide](./05-AdvancedTopics/mcp-sampling/README.md)                           |
+| 5.7                                               | Scaling                                | Scale MCP implementations                                                                          | [Guide](./05-AdvancedTopics/mcp-scaling/README.md)                            |
+| 5.8                                               | Security                               | Advanced security considerations                                                                   | [Guide](./05-AdvancedTopics/mcp-security/README.md)                           |
+| 5.9                                               | Web Search                             | Implement web search capabilities                                                                  | [Guide](./05-AdvancedTopics/web-search-mcp/README.md)                         |
+| 5.10                                              | Realtime Streaming                     | Build realtime streaming functionality                                                             | [Guide](./05-AdvancedTopics/mcp-realtimestreaming/README.md)                  |
+| 5.11                                              | Realtime Search                        | Implement realtime search                                                                          | [Guide](./05-AdvancedTopics/mcp-realtimesearch/README.md)                     |
+| 5.12                                              | Entra ID Auth                          | Authentication with Microsoft Entra ID                                                             | [Guide](./05-AdvancedTopics/mcp-security-entra/README.md)                     |
+| 5.13                                              | Foundry Integration                    | Integrate with Microsoft Foundry                                                                   | [Guide](./05-AdvancedTopics/mcp-foundry-agent-integration/README.md)          |
+| 5.14                                              | Context Engineering                    | Techniques for effective context engineering                                                       | [Guide](./05-AdvancedTopics/mcp-contextengineering/README.md)                 |
+| 5.15                                              | MCP Custom Transport                   | Custom Transport implementations                                                                   | [Guide](./05-AdvancedTopics/mcp-transport/README.md)                          |
+| 5.16                                              | Protocol Features                      | Progress notifications, cancellation, resource templates                                           | [Guide](./05-AdvancedTopics/mcp-protocol-features/README.md)                  |
+| 5.17                                              | Adversarial Multi-Agent Reasoning      | Two agents argue opposite sides using shared MCP tools, evaluated by a judge agent                 | [Guide](./05-AdvancedTopics/mcp-adversarial-agents/README.md)                 |
+| **Module 6-10: Community & Best Practices**       |                                        |                                                                                                    |                                                                               |
+| 06                                                | Community Contributions                | How to contribute to the MCP ecosystem                                                             | [Guide](./06-CommunityContributions/README.md)                                |
+| 07                                                | Insights from Early Adoption           | Real-world implementation stories                                                                  | [Guide](./07-LessonsfromEarlyAdoption/README.md)                              |
+| 08                                                | Best Practices for MCP                 | Performance, fault-tolerance, resilience                                                           | [Guide](./08-BestPractices/README.md)                                         |
+| 09                                                | MCP Case Studies                       | Practical implementation examples                                                                  | [Guide](./09-CaseStudy/README.md)                                             |
+| 10                                                | Hands-on Workshop                      | Building an MCP Server with Microsoft Foundry Toolkit                                              | [Lab](./10-StreamliningAIWorkflowsBuildingAnMCPServerWithAIToolkit/README.md) |
+| **Module 11: MCP Server Hands On Lab**            |                                        |                                                                                                    |                                                                               |
+| 11                                                | MCP Server Database Integration        | Comprehensive 13-lab hands-on learning path for PostgreSQL integration                             | [Labs](./11-MCPServerHandsOnLabs/README.md)                                   |
+| 11.1                                              | Introduction                           | Overview of MCP with database integration and retail analytics use case                            | [Lab 00](./11-MCPServerHandsOnLabs/00-Introduction/README.md)                 |
+| 11.2                                              | Core Architecture                      | Understanding MCP server architecture, database layers, and security patterns                      | [Lab 01](./11-MCPServerHandsOnLabs/01-Architecture/README.md)                 |
+| 11.3                                              | Security & Multi-Tenancy               | Row Level Security, authentication, and multi-tenant data access                                   | [Lab 02](./11-MCPServerHandsOnLabs/02-Security/README.md)                     |
+| 11.4                                              | Environment Setup                      | Setting up development environment, Docker, Azure resources                                        | [Lab 03](./11-MCPServerHandsOnLabs/03-Setup/README.md)                        |
+| 11.5                                              | Database Design                        | PostgreSQL setup, retail schema design, and sample data                                            | [Lab 04](./11-MCPServerHandsOnLabs/04-Database/README.md)                     |
+| 11.6                                              | MCP Server Implementation              | Building the FastMCP server with database integration                                              | [Lab 05](./11-MCPServerHandsOnLabs/05-MCP-Server/README.md)                   |
+| 11.7                                              | Tool Development                       | Creating database query tools and schema introspection                                             | [Lab 06](./11-MCPServerHandsOnLabs/06-Tools/README.md)                        |
+| 11.8                                              | Semantic Search                        | Implementing vector embeddings with Azure OpenAI and pgvector                                      | [Lab 07](./11-MCPServerHandsOnLabs/07-Semantic-Search/README.md)              |
+| 11.9                                              | Testing & Debugging                    | Testing strategies, debugging tools, and validation approaches                                     | [Lab 08](./11-MCPServerHandsOnLabs/08-Testing/README.md)                      |
+| 11.10                                             | VS Code Integration                    | Configuring VS Code MCP integration and AI Chat usage                                              | [Lab 09](./11-MCPServerHandsOnLabs/09-VS-Code/README.md)                      |
+| 11.11                                             | Deployment Strategies                  | Docker deployment, Azure Container Apps, and scaling considerations                                | [Lab 10](./11-MCPServerHandsOnLabs/10-Deployment/README.md)                   |
+| 11.12                                             | Monitoring                             | Application Insights, logging, performance monitoring                                              | [Lab 11](./11-MCPServerHandsOnLabs/11-Monitoring/README.md)                   |
+| 11.13                                             | Best Practices                         | Performance optimization, security hardening, and production tips                                  | [Lab 12](./11-MCPServerHandsOnLabs/12-Best-Practices/README.md)               |
+| **Module 12: MCP Tooling**                        |                                        |                                                                                                    |                                                                               |
+| 12.1                                              | Tooling                                | MCP usage in Copilot App                                                                           | [ Guide ](./12-tooling/README.md)                                             |
 
 ### 💻 Sample Code Projects
 
@@ -222,25 +227,24 @@ One of the most exciting parts of learning MCP is seeing your code skills develo
 
 #### Basic MCP Calculator Samples
 
-| Language | Description | Link |
-|----------|-------------|------|
-| C# | MCP Server Example | [View Code](./03-GettingStarted/samples/csharp/README.md) |
-| Java | MCP Calculator | [View Code](./03-GettingStarted/samples/java/calculator/README.md) |
-| JavaScript | MCP Demo | [View Code](./03-GettingStarted/samples/javascript/README.md) |
-| Python | MCP Server | [View Code](./03-GettingStarted/samples/python/mcp_calculator_server.py) |
-| TypeScript | MCP Example | [View Code](./03-GettingStarted/samples/typescript/README.md) |
-| Rust | MCP Example | [View Code](./03-GettingStarted/samples/rust/README.md) |
+| Language   | Description        | Link                                                                     |
+| ---------- | ------------------ | ------------------------------------------------------------------------ |
+| C#         | MCP Server Example | [View Code](./03-GettingStarted/samples/csharp/README.md)                |
+| Java       | MCP Calculator     | [View Code](./03-GettingStarted/samples/java/calculator/README.md)       |
+| JavaScript | MCP Demo           | [View Code](./03-GettingStarted/samples/javascript/README.md)            |
+| Python     | MCP Server         | [View Code](./03-GettingStarted/samples/python/mcp_calculator_server.py) |
+| TypeScript | MCP Example        | [View Code](./03-GettingStarted/samples/typescript/README.md)            |
+| Rust       | MCP Example        | [View Code](./03-GettingStarted/samples/rust/README.md)                  |
 
 #### Advanced MCP Implementations
 
-| Language | Description | Link |
-|----------|-------------|------|
-| C# | Advanced Sample | [View Code](./04-PracticalImplementation/samples/csharp/README.md) |
-| Java with Spring | Container App Example | [View Code](./04-PracticalImplementation/samples/java/containerapp/README.md) |
-| JavaScript | Advanced Sample | [View Code](./04-PracticalImplementation/samples/javascript/README.md) |
-| Python | Complex Implementation | [View Code](./04-PracticalImplementation/samples/python/README.md) |
-| TypeScript | Container Sample | [View Code](./04-PracticalImplementation/samples/typescript/README.md) |
-
+| Language         | Description            | Link                                                                          |
+| ---------------- | ---------------------- | ----------------------------------------------------------------------------- |
+| C#               | Advanced Sample        | [View Code](./04-PracticalImplementation/samples/csharp/README.md)            |
+| Java with Spring | Container App Example  | [View Code](./04-PracticalImplementation/samples/java/containerapp/README.md) |
+| JavaScript       | Advanced Sample        | [View Code](./04-PracticalImplementation/samples/javascript/README.md)        |
+| Python           | Complex Implementation | [View Code](./04-PracticalImplementation/samples/python/README.md)            |
+| TypeScript       | Container Sample       | [View Code](./04-PracticalImplementation/samples/typescript/README.md)        |
 
 ## 🎯 Prerequisites for Learning MCP
 
@@ -262,6 +266,7 @@ This repository includes several resources to help you navigate and learn effect
 A comprehensive [Study Guide](./study_guide.md) is available to help you navigate this repository effectively. This visual curriculum map shows how all the topics connect and provides guidance on how to use the sample projects effectively. It's especially helpful if you're a visual learner who likes to see the big picture.
 
 The guide includes:
+
 - A visual curriculum map showing all topics covered
 - Detailed breakdown of each repository section
 - Guidance on how to use sample projects
@@ -271,6 +276,7 @@ The guide includes:
 ### Changelog
 
 We maintain a detailed [Changelog](./changelog.md) that tracks all significant updates to the curriculum materials, so you can stay current with the latest improvements and additions.
+
 - New content additions
 - Structural changes
 - Feature improvements
@@ -280,16 +286,21 @@ We maintain a detailed [Changelog](./changelog.md) that tracks all significant u
 
 Each lesson in this guide includes:
 
-1. Clear explanations of MCP concepts  
-2. Live code examples in multiple languages  
-3. Exercises to build real MCP applications  
+1. Clear explanations of MCP concepts
+2. Live code examples in multiple languages
+3. Exercises to build real MCP applications
 4. Extra resources for advanced learners
 
 ### Let's Learn MCP with C# - Tutorial Series
+
 Let's learn about the Model Context Protocol (MCP), a cutting-edge framework designed to standardize interactions between AI models and client applications. Through this beginner-friendly session, we'll introduce you to MCP and guide you through creating your first MCP server.
+
 #### C#: [https://aka.ms/letslearnmcp-csharp](https://aka.ms/letslearnmcp-csharp)
+
 #### Java: [https://aka.ms/letslearnmcp-java](https://aka.ms/letslearnmcp-java)
+
 #### JavaScript: [https://aka.ms/letslearnmcp-javascript](https://aka.ms/letslearnmcp-javascript)
+
 #### Python: [https://aka.ms/letslearnmcp-python](https://aka.ms/letslearnmcp-python)
 
 ## 🎓 Your MCP Journey Begins
@@ -333,9 +344,10 @@ The contribution process is designed to be welcoming and supportive. Most contri
 ## 📜 Open Source Learning
 
 This entire curriculum is available under the MIT [LICENSE](./LICENSE), meaning you can use, modify, and share it freely. This supports our mission of making MCP knowledge accessible to developers everywhere.
+
 ## 🤝 Contribution Guidelines
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
+This project welcomes contributions and suggestions. Most contributions require you to agree to a
 Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
 the rights to use your contribution. For details, visit <https://cla.opensource.microsoft.com>.
 
@@ -349,37 +361,41 @@ contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additio
 
 ---
 
-*Ready to start your MCP journey? Begin with [Module 00 - Introduction to MCP](./00-Introduction/README.md) and take your first steps into the world of Model Context Protocol development!*
-
-
+_Ready to start your MCP journey? Begin with [Module 00 - Introduction to MCP](./00-Introduction/README.md) and take your first steps into the world of Model Context Protocol development!_
 
 ## 🎒 Other Courses
+
 Our team produces other courses! Check out:
 
 <!-- CO-OP TRANSLATOR OTHER COURSES START -->
+
 ### LangChain
+
 [![LangChain4j for Beginners](https://img.shields.io/badge/LangChain4j%20for%20Beginners-22C55E?style=for-the-badge&&labelColor=E5E7EB&color=0553D6)](https://aka.ms/langchain4j-for-beginners)
 [![LangChain.js for Beginners](https://img.shields.io/badge/LangChain.js%20for%20Beginners-22C55E?style=for-the-badge&labelColor=E5E7EB&color=0553D6)](https://aka.ms/langchainjs-for-beginners?WT.mc_id=m365-94501-dwahlin)
 [![LangChain for Beginners](https://img.shields.io/badge/LangChain%20for%20Beginners-22C55E?style=for-the-badge&labelColor=E5E7EB&color=0553D6)](https://github.com/microsoft/langchain-for-beginners?WT.mc_id=m365-94501-dwahlin)
 ---
 
 ### Azure / Edge / MCP / Agents
+
 [![AZD for Beginners](https://img.shields.io/badge/AZD%20for%20Beginners-0078D4?style=for-the-badge&labelColor=E5E7EB&color=0078D4)](https://github.com/microsoft/AZD-for-beginners?WT.mc_id=academic-105485-koreyst)
 [![Edge AI for Beginners](https://img.shields.io/badge/Edge%20AI%20for%20Beginners-00B8E4?style=for-the-badge&labelColor=E5E7EB&color=00B8E4)](https://github.com/microsoft/edgeai-for-beginners?WT.mc_id=academic-105485-koreyst)
 [![MCP for Beginners](https://img.shields.io/badge/MCP%20for%20Beginners-009688?style=for-the-badge&labelColor=E5E7EB&color=009688)](https://github.com/microsoft/mcp-for-beginners?WT.mc_id=academic-105485-koreyst)
 [![AI Agents for Beginners](https://img.shields.io/badge/AI%20Agents%20for%20Beginners-00C49A?style=for-the-badge&labelColor=E5E7EB&color=00C49A)](https://github.com/microsoft/ai-agents-for-beginners?WT.mc_id=academic-105485-koreyst)
 
 ---
- 
+
 ### Generative AI Series
+
 [![Generative AI for Beginners](https://img.shields.io/badge/Generative%20AI%20for%20Beginners-8B5CF6?style=for-the-badge&labelColor=E5E7EB&color=8B5CF6)](https://github.com/microsoft/generative-ai-for-beginners?WT.mc_id=academic-105485-koreyst)
-[![Generative AI (.NET)](https://img.shields.io/badge/Generative%20AI%20(.NET)-9333EA?style=for-the-badge&labelColor=E5E7EB&color=9333EA)](https://github.com/microsoft/Generative-AI-for-beginners-dotnet?WT.mc_id=academic-105485-koreyst)
-[![Generative AI (Java)](https://img.shields.io/badge/Generative%20AI%20(Java)-C084FC?style=for-the-badge&labelColor=E5E7EB&color=C084FC)](https://github.com/microsoft/generative-ai-for-beginners-java?WT.mc_id=academic-105485-koreyst)
-[![Generative AI (JavaScript)](https://img.shields.io/badge/Generative%20AI%20(JavaScript)-E879F9?style=for-the-badge&labelColor=E5E7EB&color=E879F9)](https://github.com/microsoft/generative-ai-with-javascript?WT.mc_id=academic-105485-koreyst)
+[![Generative AI (.NET)](<https://img.shields.io/badge/Generative%20AI%20(.NET)-9333EA?style=for-the-badge&labelColor=E5E7EB&color=9333EA>)](https://github.com/microsoft/Generative-AI-for-beginners-dotnet?WT.mc_id=academic-105485-koreyst)
+[![Generative AI (Java)](<https://img.shields.io/badge/Generative%20AI%20(Java)-C084FC?style=for-the-badge&labelColor=E5E7EB&color=C084FC>)](https://github.com/microsoft/generative-ai-for-beginners-java?WT.mc_id=academic-105485-koreyst)
+[![Generative AI (JavaScript)](<https://img.shields.io/badge/Generative%20AI%20(JavaScript)-E879F9?style=for-the-badge&labelColor=E5E7EB&color=E879F9>)](https://github.com/microsoft/generative-ai-with-javascript?WT.mc_id=academic-105485-koreyst)
 
 ---
- 
+
 ### Core Learning
+
 [![ML for Beginners](https://img.shields.io/badge/ML%20for%20Beginners-22C55E?style=for-the-badge&labelColor=E5E7EB&color=22C55E)](https://aka.ms/ml-beginners?WT.mc_id=academic-105485-koreyst)
 [![Data Science for Beginners](https://img.shields.io/badge/Data%20Science%20for%20Beginners-84CC16?style=for-the-badge&labelColor=E5E7EB&color=84CC16)](https://aka.ms/datascience-beginners?WT.mc_id=academic-105485-koreyst)
 [![AI for Beginners](https://img.shields.io/badge/AI%20for%20Beginners-A3E635?style=for-the-badge&labelColor=E5E7EB&color=A3E635)](https://aka.ms/ai-beginners?WT.mc_id=academic-105485-koreyst)
@@ -389,8 +405,9 @@ Our team produces other courses! Check out:
 [![XR Development for Beginners](https://img.shields.io/badge/XR%20Development%20for%20Beginners-38BDF8?style=for-the-badge&labelColor=E5E7EB&color=38BDF8)](https://github.com/microsoft/xr-development-for-beginners?WT.mc_id=academic-105485-koreyst)
 
 ---
- 
+
 ### Copilot Series
+
 [![Copilot for AI Paired Programming](https://img.shields.io/badge/Copilot%20for%20AI%20Paired%20Programming-FACC15?style=for-the-badge&labelColor=E5E7EB&color=FACC15)](https://aka.ms/GitHubCopilotAI?WT.mc_id=academic-105485-koreyst)
 [![Copilot for C#/.NET](https://img.shields.io/badge/Copilot%20for%20C%23/.NET-FBBF24?style=for-the-badge&labelColor=E5E7EB&color=FBBF24)](https://github.com/microsoft/mastering-github-copilot-for-dotnet-csharp-developers?WT.mc_id=academic-105485-koreyst)
 [![Copilot Adventure](https://img.shields.io/badge/Copilot%20Adventure-FDE68A?style=for-the-badge&labelColor=E5E7EB&color=FDE68A)](https://github.com/microsoft/CopilotAdventures?WT.mc_id=academic-105485-koreyst)

@@ -1037,8 +1037,12 @@ export class MCPToolWrapper implements Tool {
     readonly projectRoot: string = process.cwd(),
   ) {}
 
-  get mcpServerName() { return this.client.name; }
-  get mcpToolName() { return this.def.name; }
+  get mcpServerName() {
+    return this.client.name;
+  }
+  get mcpToolName() {
+    return this.def.name;
+  }
 
   get name() {
     return `mcp_${this.client.name}_${this.def.name}`;
@@ -1052,8 +1056,17 @@ export class MCPToolWrapper implements Tool {
 
   async run(ctx: ToolContext, input: ToolCallInput): Promise<ToolCallOutput> {
     const start = performance.now();
-    if (mcpProjectScope(ctx.settingsRoot ?? ctx.workingDirectory) !== mcpProjectScope(this.projectRoot)) {
-      return { callId: input.id, name: this.name, output: 'MCP tool is not registered for this project.', isError: true, durationMs: 0 };
+    if (
+      mcpProjectScope(ctx.settingsRoot ?? ctx.workingDirectory) !==
+      mcpProjectScope(this.projectRoot)
+    ) {
+      return {
+        callId: input.id,
+        name: this.name,
+        output: 'MCP tool is not registered for this project.',
+        isError: true,
+        durationMs: 0,
+      };
     }
     try {
       const result = await this.client.callTool(this.def.name, input.input);
@@ -1102,7 +1115,11 @@ export class MCPManager {
 
   constructor(private workingDirectory: string) {}
 
-  async ensureConfiguredServers(configs: MCPServerConfig[], registry: ToolRegistry, projectRoot: string): Promise<void> {
+  async ensureConfiguredServers(
+    configs: MCPServerConfig[],
+    registry: ToolRegistry,
+    projectRoot: string,
+  ): Promise<void> {
     for (const config of configs) {
       const key = this.scopeKey(config.name, projectRoot);
       if (this.clients.has(key)) continue;
@@ -1111,12 +1128,18 @@ export class MCPManager {
       if (failure?.signature === signature && Date.now() - failure.at < 30_000) continue;
       let pending = this.discoveryPending.get(key);
       if (!pending) {
-        pending = this.addServer(config, registry, projectRoot).then(() => {
-          this.discoveryFailures.delete(key);
-        }).catch(() => {
-          this.discoveryFailures.set(key, { signature, at: Date.now() });
-          mcpLog.warn({ server: config.name }, 'Configured MCP server unavailable; discovery will retry');
-        }).finally(() => this.discoveryPending.delete(key));
+        pending = this.addServer(config, registry, projectRoot)
+          .then(() => {
+            this.discoveryFailures.delete(key);
+          })
+          .catch(() => {
+            this.discoveryFailures.set(key, { signature, at: Date.now() });
+            mcpLog.warn(
+              { server: config.name },
+              'Configured MCP server unavailable; discovery will retry',
+            );
+          })
+          .finally(() => this.discoveryPending.delete(key));
         this.discoveryPending.set(key, pending);
       }
       await pending;
@@ -1153,7 +1176,12 @@ export class MCPManager {
   ): Promise<MCPClient> {
     const key = this.scopeKey(config.name, projectRoot);
     const client = new MCPClient(config, this.authResolverFor(config, projectRoot));
-    try { await client.connect(); } catch (error) { await client.shutdown(); throw error; }
+    try {
+      await client.connect();
+    } catch (error) {
+      await client.shutdown();
+      throw error;
+    }
     this.clients.set(key, client);
     return client;
   }
@@ -1173,7 +1201,12 @@ export class MCPManager {
       this.clients.delete(key);
     }
     const client = new MCPClient(config, this.authResolverFor(config, projectRoot));
-    try { await client.connect(); } catch (error) { await client.shutdown(); throw error; }
+    try {
+      await client.connect();
+    } catch (error) {
+      await client.shutdown();
+      throw error;
+    }
     this.clients.set(key, client);
     await registerMCPToolsInRegistry(registry, client, projectRoot);
     return client;

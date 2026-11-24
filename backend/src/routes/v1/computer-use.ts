@@ -25,9 +25,13 @@ export function createComputerUseRoutes(
         set.status = 404;
         return { ok: false, error: 'Screenshot expired or unavailable' };
       }
-      return new Response(Buffer.from(bytes), { headers: {
-        'Content-Type': 'image/png', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
-      } });
+      return new Response(Buffer.from(bytes), {
+        headers: {
+          'Content-Type': 'image/png',
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
     })
     .get('/status', async ({ request, set }) => {
       if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };

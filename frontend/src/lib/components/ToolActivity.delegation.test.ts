@@ -18,16 +18,36 @@ function delegation(type: 'tool_call' | 'tool_result', agentId: string): FeedEnt
     text: '',
     metadata: {
       sessionId: 'chat',
-      toolCall: { id: `agent-spawn-${agentId}`, name: 'delegate_to_worker', input: { agentId, agentName: 'frontend' } },
+      toolCall: {
+        id: `agent-spawn-${agentId}`,
+        name: 'delegate_to_worker',
+        input: { agentId, agentName: 'frontend' },
+      },
       ...(type === 'tool_result'
-        ? { toolResult: { callId: `agent-spawn-${agentId}`, name: 'delegate_to_worker', output: 'frontend done', isError: false, durationMs: 64_000 } }
+        ? {
+            toolResult: {
+              callId: `agent-spawn-${agentId}`,
+              name: 'delegate_to_worker',
+              output: 'frontend done',
+              isError: false,
+              durationMs: 64_000,
+            },
+          }
         : {}),
     },
   } as FeedEntryLocal;
 }
 
 const worker = (id: string): AgentIdentity =>
-  ({ id, name: 'frontend', role: 'coder', provider: 'codex', model: 'gpt', domain: 'ui', glowColor: '' }) as AgentIdentity;
+  ({
+    id,
+    name: 'frontend',
+    role: 'coder',
+    provider: 'codex',
+    model: 'gpt',
+    domain: 'ui',
+    glowColor: '',
+  }) as AgentIdentity;
 
 describe('delegation row', () => {
   it('follows the delegated agent: status and current tool while it works', () => {
@@ -35,7 +55,9 @@ describe('delegation row', () => {
     agentStore.updateAgentStatus('chat', 'dw1', 'tool_calling');
     noteAgentToolCall('chat', 'dw1', { id: 'c', name: 'bash', input: { command: 'bun test' } });
     render(ToolActivity, { entry: delegation('tool_call', 'dw1') });
-    expect(screen.getByTestId('delegated-status').textContent).toBe('Running tool: bash · bun test');
+    expect(screen.getByTestId('delegated-status').textContent).toBe(
+      'Running tool: bash · bun test',
+    );
   });
 
   it('says when the delegated agent is waiting on the user', () => {

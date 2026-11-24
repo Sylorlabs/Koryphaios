@@ -47,9 +47,9 @@ For versions Kory has measured (`KNOWN_FREEBUFF_ARCHIVE_SHA256`), the recorded a
 | Artifact                                                                                  | SHA-256                                                            |
 | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `https://codebuff.com/api/releases/download/0.2.36/freebuff-linux-x64-baseline.tar.gz`    | `7991a166aba6f374792ac8e9d9300280f6e5a2044935b268dfd96ff4b7d103e3` |
-| `https://codebuff.com/api/releases/download/0.2.36/freebuff-linux-arm64.tar.gz`            | `ed752a58958a01a3172eebdda3b7fabff27d4dc099e94c5d8a3a6da5d97692a3` |
+| `https://codebuff.com/api/releases/download/0.2.36/freebuff-linux-arm64.tar.gz`           | `ed752a58958a01a3172eebdda3b7fabff27d4dc099e94c5d8a3a6da5d97692a3` |
 | `https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64-baseline.zip` | `a063908ae08b7852ca10939bbdc6ceed3ddabce8fb9402dce83d65d73b36e6c7` |
-| `https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-aarch64.zip`       | `a27ffb63a8310375836e0d6f668ae17fa8d8d18b88c37c821c65331973a19a3b` |
+| `https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-aarch64.zip`      | `a27ffb63a8310375836e0d6f668ae17fa8d8d18b88c37c821c65331973a19a3b` |
 
 The Debian base is digest-pinned. Debian runtime packages use signed Debian repositories and current Bookworm security updates rather than frozen vulnerable package versions. Consequently the image is not byte-for-byte reproducible across Debian updates; the native CLI and Bun artifacts are byte-pinned. The shipped tree-sitter WASM remains alongside Freebuff.
 

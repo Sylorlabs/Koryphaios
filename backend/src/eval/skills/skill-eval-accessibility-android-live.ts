@@ -149,7 +149,11 @@ export const accessibilityAndroidLiveMaterializer: SkillEvalFixtureMaterializer 
   id: 'accessibility-verification/android-live-session@4',
   matches: (scenario) => scenario.id === ANDROID_LIVE,
   materialize: (directory) => {
-    writeFixtureFile(directory, 'package.json', packageJson('kory-eval-accessibility-android-live'));
+    writeFixtureFile(
+      directory,
+      'package.json',
+      packageJson('kory-eval-accessibility-android-live'),
+    );
     writeFixtureFile(directory, 'src/accessibility-live.ts', LIVE_TYPES);
     writeFixtureFile(directory, 'evidence/android-live.json', ANDROID_LIVE_SESSION);
     writeFixtureFile(directory, 'evidence/automation/espresso-report.json', AUTOMATION_REPORT);

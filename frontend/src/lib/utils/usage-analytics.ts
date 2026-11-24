@@ -259,7 +259,10 @@ export function deriveUsageWindowView(
     if (!existingProv || existingProv.tokens === 0) {
       providerMap.set(cli.provider, {
         name: cli.provider,
-        sessionCount: Math.max(1, (cli.dailyUsage ?? []).filter((d: any) => d.tokens > 0).length || 1),
+        sessionCount: Math.max(
+          1,
+          (cli.dailyUsage ?? []).filter((d: any) => d.tokens > 0).length || 1,
+        ),
         spendUsd: 0,
         apiEquivalentUsd:
           typeof cli.apiValueUsd === 'number'
@@ -312,10 +315,7 @@ export function deriveUsageWindowView(
   const models = [...modelMap.values()];
 
   const totalSpendUsd = providers.reduce((sum, p) => sum + (p.subscription ? 0 : p.spendUsd), 0);
-  const totalApiEquivalentUsd = providers.reduce(
-    (sum, p) => sum + (p.apiEquivalentUsd ?? 0),
-    0,
-  );
+  const totalApiEquivalentUsd = providers.reduce((sum, p) => sum + (p.apiEquivalentUsd ?? 0), 0);
   const processedTokens =
     rawWindow && filterNorm === 'all' && rawWindow.totals?.processedTokens > 0
       ? Math.max(
@@ -530,9 +530,7 @@ export function buildUsageChartGeometry(
 ): ChartGeometry {
   const usableHeight = Math.max(10, height - padTop - padBottom);
   const baseY = padTop + usableHeight;
-  const values = series.map((item) =>
-    Math.max(0, mode === 'tokens' ? item.tokens : item.costUsd),
-  );
+  const values = series.map((item) => Math.max(0, mode === 'tokens' ? item.tokens : item.costUsd));
   const rawMax = values.length ? Math.max(...values) : 0;
   const maxValue = niceMaxValue(rawMax, mode);
 

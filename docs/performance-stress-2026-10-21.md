@@ -88,17 +88,17 @@ final runner end to end: `completed: true`, `deadlineExceeded: false`,
 `budgetsPassed: false`. The command exited nonzero because API and switching
 latency still exceeded their budgets. There were no browser page errors.
 
-| Measurement | Result |
-| --- | ---: |
-| History p50 / p95 | 20.6 / 115.5 ms |
-| Chat switching p50 / p95 | 290.1 / 367.2 ms |
-| Insertion-to-paint p50 / p95 | 17.3 / 64.5 ms |
-| Renderer heap: idle / after switching | 13.9 / 42.9 MiB |
-| Renderer heap: streaming complete / ordinary recovery | 24.6 / 26.6 MiB |
-| Renderer heap after separately forced GC | 14.9 MiB |
-| Browser + backend RSS at stream-complete checkpoint | 858.2 MiB |
-| Browser + backend RSS after deletion + 10 s idle | 620.5 MiB |
-| Backend RSS at final ordinary recovery checkpoint | 97.5 MiB |
+| Measurement                                           |           Result |
+| ----------------------------------------------------- | ---------------: |
+| History p50 / p95                                     |  20.6 / 115.5 ms |
+| Chat switching p50 / p95                              | 290.1 / 367.2 ms |
+| Insertion-to-paint p50 / p95                          |   17.3 / 64.5 ms |
+| Renderer heap: idle / after switching                 |  13.9 / 42.9 MiB |
+| Renderer heap: streaming complete / ordinary recovery |  24.6 / 26.6 MiB |
+| Renderer heap after separately forced GC              |         14.9 MiB |
+| Browser + backend RSS at stream-complete checkpoint   |        858.2 MiB |
+| Browser + backend RSS after deletion + 10 s idle      |        620.5 MiB |
+| Backend RSS at final ordinary recovery checkpoint     |         97.5 MiB |
 
 Host load averages were still approximately 41–50, but lower than during the
 full attempt. This is **not a demonstrated software speedup**: the environment
@@ -122,14 +122,14 @@ the earlier bundle. The before/after runs used the same workload; host/cache
 conditions differed, so the streaming-render change is the only result
 attributed directly to the frontend optimization.
 
-| Measurement | Before (`harness-full-quiet.json`) | After (`harness-full-verified-fix.json`) |
-| --- | ---: | ---: |
-| API p95 average across 3 rounds | 160.8 ms | 23.8 ms |
-| Switch p95 average across 3 rounds | 318.3 ms | 165.9 ms |
-| Streaming input-to-paint p95 | 136.0 ms | 96.0 ms |
-| Budget failures | 7 | 0 |
-| Streaming lanes / events | 32 / 9,664 | 32 / 9,664 |
-| Completion / cutoff | complete / no | complete / no |
+| Measurement                        | Before (`harness-full-quiet.json`) | After (`harness-full-verified-fix.json`) |
+| ---------------------------------- | ---------------------------------: | ---------------------------------------: |
+| API p95 average across 3 rounds    |                           160.8 ms |                                  23.8 ms |
+| Switch p95 average across 3 rounds |                           318.3 ms |                                 165.9 ms |
+| Streaming input-to-paint p95       |                           136.0 ms |                                  96.0 ms |
+| Budget failures                    |                                  7 |                                        0 |
+| Streaming lanes / events           |                         32 / 9,664 |                               32 / 9,664 |
+| Completion / cutoff                |                      complete / no |                            complete / no |
 
 The fast path directly targets the streaming renderer; therefore the streaming
 input improvement is the most relevant comparison. Do not attribute the full
@@ -160,19 +160,19 @@ October 21). This artifact predates the explicit completion flags; it
 contains streaming, deletion recovery, and budget results without a workload
 exception.
 
-| Measurement | Result |
-| --- | ---: |
-| History request p50 / p95 | 57.7 / 241.3 ms |
-| Eight chat switches p50 / p95 | 906.6 / 1850.9 ms |
-| Composer insertion-to-paint p50 / p95 | 21.3 / 696.8 ms |
-| Streaming data/terminal events sent | 1,024 |
-| Renderer heap before switching | 13.9 MiB |
-| Renderer heap after switching | 44.4 MiB |
-| Renderer heap after streaming | 49.8 MiB |
-| Renderer heap after deletion + 10 s idle | 51.8 MiB |
-| Renderer heap after separate forced-GC diagnostic | 14.9 MiB |
-| Backend recovery RSS median / maximum sampled | 78.3 / 104.3 MiB |
-| Browser page errors | 0 |
+| Measurement                                       |            Result |
+| ------------------------------------------------- | ----------------: |
+| History request p50 / p95                         |   57.7 / 241.3 ms |
+| Eight chat switches p50 / p95                     | 906.6 / 1850.9 ms |
+| Composer insertion-to-paint p50 / p95             |   21.3 / 696.8 ms |
+| Streaming data/terminal events sent               |             1,024 |
+| Renderer heap before switching                    |          13.9 MiB |
+| Renderer heap after switching                     |          44.4 MiB |
+| Renderer heap after streaming                     |          49.8 MiB |
+| Renderer heap after deletion + 10 s idle          |          51.8 MiB |
+| Renderer heap after separate forced-GC diagnostic |          14.9 MiB |
+| Backend recovery RSS median / maximum sampled     |  78.3 / 104.3 MiB |
+| Browser page errors                               |                 0 |
 
 The reachable heap diagnostic is encouraging, but normal idle heap had **not**
 returned to baseline after ten seconds. Do not describe 14.9 MiB as ordinary
@@ -187,12 +187,12 @@ marker and the outer shell reached its 240-second limit. The backend-unavailable
 overlay in its screenshot is caused by that cutoff, not evidence of a product
 crash. No completed CPU profile or full recovery measurement was obtained.
 
-| Checkpoint | Browser RSS | Backend RSS | Combined RSS | Renderer heap |
-| --- | ---: | ---: | ---: | ---: |
-| Browser idle, seeded chats | 338.0 MiB | 154.0 MiB | 491.9 MiB | 15.7 MiB |
-| Switch round 1 | 564.6 MiB | 104.8 MiB | 669.3 MiB | 49.9 MiB |
-| Switch round 2 | 568.6 MiB | 163.5 MiB | 732.1 MiB | 64.2 MiB |
-| Switch round 3 | 615.4 MiB | 134.0 MiB | 749.3 MiB | 69.2 MiB |
+| Checkpoint                 | Browser RSS | Backend RSS | Combined RSS | Renderer heap |
+| -------------------------- | ----------: | ----------: | -----------: | ------------: |
+| Browser idle, seeded chats |   338.0 MiB |   154.0 MiB |    491.9 MiB |      15.7 MiB |
+| Switch round 1             |   564.6 MiB |   104.8 MiB |    669.3 MiB |      49.9 MiB |
+| Switch round 2             |   568.6 MiB |   163.5 MiB |    732.1 MiB |      64.2 MiB |
+| Switch round 3             |   615.4 MiB |   134.0 MiB |    749.3 MiB |      69.2 MiB |
 
 History p95 by round: **408.8, 312.1, 371.5 ms**. Switch p95 by round:
 **1859.7, 1420.2, 880.4 ms**. Partial streaming input measurements overlap the
@@ -241,19 +241,19 @@ so a clean-revision attribution of every failure is not claimed.
 
 Other actual checks:
 
-| Check | Result |
-| --- | --- |
-| Fresh `bun run build:frontend:static` | Passed, static frontend generated |
-| `bun run --filter frontend check` | Passed: 0 errors, 8 existing warnings in AgentThreadFeed.svelte |
-| Full frontend suite after final fix | Passed: 188 files, 1,418 tests |
-| Full MCP suite observed inside root run | Passed: 30 files, 496 tests |
-| Six focused frontend store files | 119 passed |
-| Migration regression file | 27 passed |
-| Cache-fabric regression file | 11 passed |
-| Installed TypeScript compiler on benchmark runner | Passed |
-| One-millisecond benchmark cutoff probe | Expected nonzero exit; incomplete/cutoff JSON written |
-| Final benchmark smoke | Completed, no page errors, 2 latency budget failures |
-| `git diff --check` | Passed |
+| Check                                             | Result                                                          |
+| ------------------------------------------------- | --------------------------------------------------------------- |
+| Fresh `bun run build:frontend:static`             | Passed, static frontend generated                               |
+| `bun run --filter frontend check`                 | Passed: 0 errors, 8 existing warnings in AgentThreadFeed.svelte |
+| Full frontend suite after final fix               | Passed: 188 files, 1,418 tests                                  |
+| Full MCP suite observed inside root run           | Passed: 30 files, 496 tests                                     |
+| Six focused frontend store files                  | 119 passed                                                      |
+| Migration regression file                         | 27 passed                                                       |
+| Cache-fabric regression file                      | 11 passed                                                       |
+| Installed TypeScript compiler on benchmark runner | Passed                                                          |
+| One-millisecond benchmark cutoff probe            | Expected nonzero exit; incomplete/cutoff JSON written           |
+| Final benchmark smoke                             | Completed, no page errors, 2 latency budget failures            |
+| `git diff --check`                                | Passed                                                          |
 
 Focused frontend command:
 

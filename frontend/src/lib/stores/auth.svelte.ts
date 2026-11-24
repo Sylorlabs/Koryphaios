@@ -45,7 +45,10 @@ function loadStoredToken(): string | undefined {
   try {
     return localStorage.getItem(LOCAL_AUTH_TOKEN_KEY) || undefined;
   } catch (err: unknown) {
-    console.debug('Failed to read auth token from localStorage:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to read auth token from localStorage:',
+      err instanceof Error ? err.message : String(err),
+    );
     return undefined;
   }
 }
@@ -56,7 +59,10 @@ function persistToken(nextToken: string | undefined) {
     if (nextToken) localStorage.setItem(LOCAL_AUTH_TOKEN_KEY, nextToken);
     else localStorage.removeItem(LOCAL_AUTH_TOKEN_KEY);
   } catch (err: unknown) {
-    console.debug('Failed to persist auth token to localStorage:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to persist auth token to localStorage:',
+      err instanceof Error ? err.message : String(err),
+    );
     // Ignore localStorage failures.
   }
 }
@@ -73,7 +79,10 @@ async function validateToken(candidate: string): Promise<AuthUser | null> {
     const data = JSON.parse(text);
     return data?.ok && data?.data?.user ? (data.data.user as AuthUser) : null;
   } catch (err: unknown) {
-    console.debug('Failed to parse auth/me response as JSON:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to parse auth/me response as JSON:',
+      err instanceof Error ? err.message : String(err),
+    );
     return null;
   }
 }
@@ -90,7 +99,10 @@ async function createLocalSession(): Promise<string | undefined> {
     const data = JSON.parse(text);
     return data?.ok ? data?.data?.bearerToken : undefined;
   } catch (err: unknown) {
-    console.debug('Failed to parse auth/session response as JSON:', err instanceof Error ? err.message : String(err));
+    console.debug(
+      'Failed to parse auth/session response as JSON:',
+      err instanceof Error ? err.message : String(err),
+    );
     return undefined;
   }
 }
@@ -168,7 +180,10 @@ export const authStore = {
         isInitialized = true;
         return !!resolvedUser;
       } catch (err: unknown) {
-        console.warn('Auth session validation failed:', err instanceof Error ? err.message : String(err));
+        console.warn(
+          'Auth session validation failed:',
+          err instanceof Error ? err.message : String(err),
+        );
         user = null;
         token = undefined;
         persistToken(undefined);

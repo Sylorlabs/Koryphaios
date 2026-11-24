@@ -43,7 +43,12 @@ describe('undo toasts', () => {
     toastStore.success('Chat pinned', { duration: STAY, action: newer, actionLabel: 'Undo' });
     render(ToastContainer);
 
-    const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true });
+    const event = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
     window.dispatchEvent(event);
 
     expect(newer).toHaveBeenCalledTimes(1);
@@ -60,7 +65,12 @@ describe('undo toasts', () => {
     const textarea = document.createElement('textarea');
     document.body.append(textarea);
     textarea.focus();
-    const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true });
+    const event = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
     textarea.dispatchEvent(event);
 
     expect(undo).not.toHaveBeenCalled();
@@ -73,7 +83,12 @@ describe('undo toasts', () => {
     toastStore.success('Chat restored to the sidebar', { duration: STAY });
     render(ToastContainer);
 
-    const event = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true });
+    const event = new KeyboardEvent('keydown', {
+      key: 'z',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
     window.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);

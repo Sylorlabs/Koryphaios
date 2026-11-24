@@ -14,11 +14,16 @@ export function shouldSkipBrowserControl(
 /** Only real-runtime controls use this gate. Unit/registration/integrity tests use test(). */
 export function browserControlTest(label: string, blockers: readonly string[]) {
   const skip = shouldSkipBrowserControl(blockers);
-  if (skip) console.warn(`${label} controls unavailable (not browser evidence): ${blockers.join('; ')}`);
+  if (skip)
+    console.warn(`${label} controls unavailable (not browser evidence): ${blockers.join('; ')}`);
   return (name: string, run: () => unknown | Promise<unknown>, timeout?: number) => {
-    test.skipIf(skip)(name, async () => {
-      expect(blockers, `${label} provisioning`).toEqual([]);
-      await run();
-    }, timeout);
+    test.skipIf(skip)(
+      name,
+      async () => {
+        expect(blockers, `${label} provisioning`).toEqual([]);
+        await run();
+      },
+      timeout,
+    );
   };
 }

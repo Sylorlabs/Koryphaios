@@ -1,1 +1,7 @@
-{"name":"kory-tauri-fixture","private":true,"scripts":{"tauri":"tauri"}}
+{
+  "name": "kory-tauri-fixture",
+  "private": true,
+  "scripts": {
+    "tauri": "tauri"
+  }
+}

@@ -147,9 +147,7 @@ describe('note appearance discovery', () => {
       },
       root,
     );
-    getDb()
-      .query(`UPDATE notes SET content = '{not json' WHERE id = ?`)
-      .run(board.id);
+    getDb().query(`UPDATE notes SET content = '{not json' WHERE id = ?`).run(board.id);
     const appearances = await listNoteAppearances(target.id, root);
     expect(appearances.canvases).toEqual([]);
     expect(appearances.truncated).toBe(false);

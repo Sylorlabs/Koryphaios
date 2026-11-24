@@ -164,9 +164,7 @@ export function validateConfig(config: Partial<KoryphaiosConfig>): void {
         !Number.isInteger(config.workspace.worktreeLimit) ||
         config.workspace.worktreeLimit < 0
       ) {
-        errors.push(
-          'workspace.worktreeLimit must be a non-negative integer (0 means unlimited)',
-        );
+        errors.push('workspace.worktreeLimit must be a non-negative integer (0 means unlimited)');
       }
     }
     if (

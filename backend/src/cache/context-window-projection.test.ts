@@ -212,14 +212,28 @@ describe('context-window projection', () => {
     const small = projectionMessagesTokenUpperBound([
       {
         role: 'user',
-        content: [{ type: 'image', imageMimeType: 'image/png', imageData: payload, width: 800, height: 600 }],
+        content: [
+          {
+            type: 'image',
+            imageMimeType: 'image/png',
+            imageData: payload,
+            width: 800,
+            height: 600,
+          },
+        ],
       },
     ]);
     const large = projectionMessagesTokenUpperBound([
       {
         role: 'user',
         content: [
-          { type: 'image', imageMimeType: 'image/png', imageData: payload, width: 4000, height: 3000 },
+          {
+            type: 'image',
+            imageMimeType: 'image/png',
+            imageData: payload,
+            width: 4000,
+            height: 3000,
+          },
         ],
       },
     ]);

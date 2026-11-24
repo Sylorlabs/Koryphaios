@@ -416,11 +416,14 @@ export class DeviceClient {
         .then(() => {
           const pending = this.pending.get(requestId);
           if (!pending) return;
-          pending.timer = setTimeout(() => {
-            this.pending.delete(requestId);
-            signal?.removeEventListener('abort', cancel);
-            reject(new Error('Device is offline or did not respond'));
-          }, Math.max(250, timeoutMs));
+          pending.timer = setTimeout(
+            () => {
+              this.pending.delete(requestId);
+              signal?.removeEventListener('abort', cancel);
+              reject(new Error('Device is offline or did not respond'));
+            },
+            Math.max(250, timeoutMs),
+          );
         })
         .catch((error) => {
           const pending = this.pending.get(requestId);
@@ -478,7 +481,11 @@ export class DeviceClient {
     if (this.socket !== socket || !this.connected) return;
     socket.send(JSON.stringify({ type: 'envelope', envelope }));
   }
-  private acceptChunk(peerId: string, body: DeviceBody, now: number): { accepted: boolean; restored: DeviceBody | null } {
+  private acceptChunk(
+    peerId: string,
+    body: DeviceBody,
+    now: number,
+  ): { accepted: boolean; restored: DeviceBody | null } {
     const transferId = typeof body.transferId === 'string' ? body.transferId : '';
     const index = Number(body.index);
     const total = Number(body.total);

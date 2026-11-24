@@ -14,7 +14,9 @@ import { currentV5SkillEvaluationContracts } from '../../eval/skills/skill-eval-
 
 function currentTaskIdentity(skill: string, scenarioId: string) {
   const pkg = loadV5SkillPackages().packages.find((item) => item.sidecar.name === skill)!;
-  const contract = currentV5SkillEvaluationContracts(pkg, CURRENT_SKILL_EVAL_CONTRACT_VERSION).get(scenarioId)!;
+  const contract = currentV5SkillEvaluationContracts(pkg, CURRENT_SKILL_EVAL_CONTRACT_VERSION).get(
+    scenarioId,
+  )!;
   return {
     evaluationContractVersion: contract.evaluationContractVersion,
     evaluationContractHash: contract.evaluationContractHash,
@@ -118,8 +120,10 @@ describe('protocol-v3 regression closure', () => {
           ...currentTaskIdentity(skill.name, scenario.id),
           // Historical revisions may have a revision-bound hash; current evidence
           // must use the exact current source contract.
-          evaluationContractHash: input.revisionHash === skill.hash
-            ? currentTaskIdentity(skill.name, scenario.id).evaluationContractHash : input.contractHash,
+          evaluationContractHash:
+            input.revisionHash === skill.hash
+              ? currentTaskIdentity(skill.name, scenario.id).evaluationContractHash
+              : input.contractHash,
         });
       }
     };
@@ -224,7 +228,10 @@ describe('protocol-v3 regression closure', () => {
   });
 
   test('generic newer evaluator generation supersedes an obsolete generation regression once current evidence exists', () => {
-    const skill = { ...listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!, name: 'generic-contract-test' };
+    const skill = {
+      ...listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!,
+      name: 'generic-contract-test',
+    };
     const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
 
     const recordPair = (input: {
@@ -344,18 +351,32 @@ describe('aborted arms are not candidate findings', () => {
     const skill = listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!;
     const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
     record(root, skill, scenario.id, {
-      id: 'complete-with', variant: 'with-skill', quality: 0.9, passed: true, recordedAt: '2026-09-02T10:00:00Z',
+      id: 'complete-with',
+      variant: 'with-skill',
+      quality: 0.9,
+      passed: true,
+      recordedAt: '2026-09-02T10:00:00Z',
     });
     record(root, skill, scenario.id, {
-      id: 'complete-without', variant: 'without-skill', quality: 0.5, passed: false, recordedAt: '2026-09-02T10:05:00Z',
+      id: 'complete-without',
+      variant: 'without-skill',
+      quality: 0.5,
+      passed: false,
+      recordedAt: '2026-09-02T10:05:00Z',
     });
     // The CLI exited with no artifact. This is the arm the harness aborted, not a candidate result.
     record(root, skill, scenario.id, {
-      id: 'aborted-with', variant: 'with-skill', quality: 0, passed: false, recordedAt: '2026-09-02T11:00:00Z',
+      id: 'aborted-with',
+      variant: 'with-skill',
+      quality: 0,
+      passed: false,
+      recordedAt: '2026-09-02T11:00:00Z',
       aborted: true,
     });
     const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
-    expect(gate.reasons).not.toContain('Candidate regressed against the matched no-skill baseline.');
+    expect(gate.reasons).not.toContain(
+      'Candidate regressed against the matched no-skill baseline.',
+    );
     expect(gate.openRegressions).toBe(0);
     expect(listOpenSkillRegressionSources(root, skill.name, skill.hash)).toHaveLength(0);
   }, 20_000);
@@ -364,18 +385,31 @@ describe('aborted arms are not candidate findings', () => {
     const skill = listSkills(root).find((item) => item.name === 'skill-authoring-evaluation')!;
     const scenario = buildSkillEvaluationCard(root, skill).suite.categories['full-task'][0]!;
     record(root, skill, scenario.id, {
-      id: 'complete-with', variant: 'with-skill', quality: 0.9, passed: true, recordedAt: '2026-09-02T10:00:00Z',
+      id: 'complete-with',
+      variant: 'with-skill',
+      quality: 0.9,
+      passed: true,
+      recordedAt: '2026-09-02T10:00:00Z',
     });
     record(root, skill, scenario.id, {
-      id: 'complete-without', variant: 'without-skill', quality: 0.5, passed: false, recordedAt: '2026-09-02T10:05:00Z',
+      id: 'complete-without',
+      variant: 'without-skill',
+      quality: 0.5,
+      passed: false,
+      recordedAt: '2026-09-02T10:05:00Z',
     });
     // A run that finished and still scored below the baseline is a real finding and must survive.
     record(root, skill, scenario.id, {
-      id: 'finished-with', variant: 'with-skill', quality: 0.2, passed: false, recordedAt: '2026-09-02T12:00:00Z',
+      id: 'finished-with',
+      variant: 'with-skill',
+      quality: 0.2,
+      passed: false,
+      recordedAt: '2026-09-02T12:00:00Z',
     });
     const gate = evaluateSkillPromotion(root, skill.name, skill.hash);
     expect(gate.reasons).toContain('1 recorded regression case(s) remain open.');
-    expect(listOpenSkillRegressionSources(root, skill.name, skill.hash)
-      .map((source) => source.id)).toContain('finished-with');
+    expect(
+      listOpenSkillRegressionSources(root, skill.name, skill.hash).map((source) => source.id),
+    ).toContain('finished-with');
   }, 20_000);
 });

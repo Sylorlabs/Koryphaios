@@ -578,50 +578,50 @@ export class ProcessSupervisor {
       (this.sessionStartsInFlight.get(options.sessionId) ?? 0) + 1,
     );
     try {
-    const id = `ext-${nanoid(10)}`;
-    const now = Date.now();
-    const classification: ProcessClassification = {
-      provenance: 'agent-external-cli',
-      supervision: 'external-detached',
-      isBackground: true,
-    };
-    const persisted: PersistedProcess = {
-      id,
-      name: options.name,
-      command: options.command,
-      commandReplayable: preparePersistedProcessCommand(options.command).replayable,
-      cwd: process.cwd(),
-      pid: 0,
-      sessionId: options.sessionId,
-      status: 'detached',
-      ...classification,
-      terminalReason: 'external-handle-unavailable',
-      restartCount: 0,
-      maxRestarts: 0,
-      restartPolicy: 'never',
-      createdAt: now,
-      updatedAt: now,
-      endedAt: now,
-      metadata: JSON.stringify({ external: true, outputFile: options.outputFile }),
-    };
-    await persistProcess(persisted);
-    await logProcessEvent(id, 'external_detached', {
-      command: options.command,
-      reason: 'No authoritative OS process handle was provided',
-    });
-    this.emitLifecycle({
-      type: 'exited',
-      id,
-      name: persisted.name,
-      command: persisted.command,
-      sessionId: persisted.sessionId,
-      pid: 0,
-      status: 'detached',
-      ...classification,
-      terminalReason: 'external-handle-unavailable',
-      willRestart: false,
-    });
-    return id;
+      const id = `ext-${nanoid(10)}`;
+      const now = Date.now();
+      const classification: ProcessClassification = {
+        provenance: 'agent-external-cli',
+        supervision: 'external-detached',
+        isBackground: true,
+      };
+      const persisted: PersistedProcess = {
+        id,
+        name: options.name,
+        command: options.command,
+        commandReplayable: preparePersistedProcessCommand(options.command).replayable,
+        cwd: process.cwd(),
+        pid: 0,
+        sessionId: options.sessionId,
+        status: 'detached',
+        ...classification,
+        terminalReason: 'external-handle-unavailable',
+        restartCount: 0,
+        maxRestarts: 0,
+        restartPolicy: 'never',
+        createdAt: now,
+        updatedAt: now,
+        endedAt: now,
+        metadata: JSON.stringify({ external: true, outputFile: options.outputFile }),
+      };
+      await persistProcess(persisted);
+      await logProcessEvent(id, 'external_detached', {
+        command: options.command,
+        reason: 'No authoritative OS process handle was provided',
+      });
+      this.emitLifecycle({
+        type: 'exited',
+        id,
+        name: persisted.name,
+        command: persisted.command,
+        sessionId: persisted.sessionId,
+        pid: 0,
+        status: 'detached',
+        ...classification,
+        terminalReason: 'external-handle-unavailable',
+        willRestart: false,
+      });
+      return id;
     } finally {
       const remaining = (this.sessionStartsInFlight.get(options.sessionId) ?? 1) - 1;
       if (remaining > 0) this.sessionStartsInFlight.set(options.sessionId, remaining);
@@ -942,9 +942,7 @@ export class ProcessSupervisor {
   async writeInput(id: string, input: string): Promise<boolean> {
     const supervised = this.processes.get(id);
     const stdin = supervised?.proc?.stdin as
-      | { write(data: string): unknown; flush?(): Promise<void> }
-      | null
-      | undefined;
+      { write(data: string): unknown; flush?(): Promise<void> } | null | undefined;
     if (!stdin || !supervised || supervised.status !== 'running') return false;
     try {
       stdin.write(input);

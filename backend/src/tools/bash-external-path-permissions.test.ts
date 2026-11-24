@@ -43,10 +43,11 @@ function context(
 test('YOLO manager Bash can use an outside working directory', async () => {
   const project = root('project');
   const outside = root('outside');
-  const result = await new BashTool().run(
-    context(project, 'yolo'),
-    { id: 'yolo-outside', name: 'bash', input: { command: 'pwd', workingDirectory: outside } },
-  );
+  const result = await new BashTool().run(context(project, 'yolo'), {
+    id: 'yolo-outside',
+    name: 'bash',
+    input: { command: 'pwd', workingDirectory: outside },
+  });
 
   expect(result.isError).toBe(false);
   expect(result.output).toContain(outside);

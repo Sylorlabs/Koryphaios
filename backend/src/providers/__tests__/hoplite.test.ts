@@ -4,8 +4,16 @@ import { PROVIDER_AUTH_MODES, PROVIDER_ENV_VARS, providerSupport } from '@koryph
 import { buildAuthHeaders, PROVIDER_BASE_URLS } from '../api-endpoints';
 import { getProviderDisplay } from '../provider-display';
 import { PROVIDER_CONFIGS } from '../provider-configs';
-import { HopliteProvider, HOPLITE_DELEGATION_NOT_AVAILABLE, hopliteSpeedForRequest } from '../hoplite';
-import { HOPLITE_DEFAULT_MODEL_ID, HOPLITE_FAST_TIER_MODEL_IDS, HOPLITE_MODELS } from '../hoplite-models';
+import {
+  HopliteProvider,
+  HOPLITE_DELEGATION_NOT_AVAILABLE,
+  hopliteSpeedForRequest,
+} from '../hoplite';
+import {
+  HOPLITE_DEFAULT_MODEL_ID,
+  HOPLITE_FAST_TIER_MODEL_IDS,
+  HOPLITE_MODELS,
+} from '../hoplite-models';
 import { HopliteClient } from '../hoplite-client';
 import { ProviderRegistry } from '../registry';
 import { getProviderHarnessCapabilities } from '../provider-harness';

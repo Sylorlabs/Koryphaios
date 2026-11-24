@@ -202,9 +202,7 @@ describe('FinOps full-task fixtures', () => {
     });
     expect(commitmentStarter.commitmentDecision.reasons).toEqual(['<reason-code>']);
     const readme = readFileSync(join(commitmentRoot, 'README.md'), 'utf8');
-    expect(readme).toContain(
-      'maxSafeNewCommitHourly = uncoveredWorstHourly * utilizationFloor',
-    );
+    expect(readme).toContain('maxSafeNewCommitHourly = uncoveredWorstHourly * utilizationFloor');
     expect(readme).toContain(
       'commitCoverage = hypothetical new commitment / observed eligible usage',
     );
@@ -215,9 +213,7 @@ describe('FinOps full-task fixtures', () => {
     expect(readme).toContain('provider-proposal-above-safe-bound');
     expect(readme).toContain('pending-usage-optimization');
     expect(readme).toContain('noncancellable-term');
-    expect(readme).toContain(
-      'monitoring.status must be exactly hypothetical-not-purchased',
-    );
+    expect(readme).toContain('monitoring.status must be exactly hypothetical-not-purchased');
     expect(readme).toContain(
       'negativePath and recovery must each be descriptive strings (at least 20 characters)',
     );

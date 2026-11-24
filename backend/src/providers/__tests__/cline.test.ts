@@ -164,7 +164,9 @@ describe('ClineProvider model discovery', () => {
   });
 
   it('reports vision and attachments only from real input modalities', async () => {
-    installRoutes({ catalog: [catalogRow({ architecture: { input_modalities: ['text', 'image'] } })] });
+    installRoutes({
+      catalog: [catalogRow({ architecture: { input_modalities: ['text', 'image'] } })],
+    });
     const [vision] = (await discovered()).listModels();
     expect(vision!.vision).toBe(true);
     expect(vision!.supportsAttachments).toBe(true);
@@ -406,7 +408,9 @@ describe('ClineProvider credential verification through the registry', () => {
     for (const baseUrl of ['', '   ', CLINE_API_BASE_URL]) {
       const registry = new ProviderRegistry({
         server: { port: 3001, host: '127.0.0.1' },
-        providers: { cline: { name: 'cline', apiKey: 'sk-synthetic-key', baseUrl, disabled: false } },
+        providers: {
+          cline: { name: 'cline', apiKey: 'sk-synthetic-key', baseUrl, disabled: false },
+        },
       } as never);
       const result = await registry.verifyConnection('cline');
       expect(result, `baseUrl=${JSON.stringify(baseUrl)}`).toEqual({ success: true });

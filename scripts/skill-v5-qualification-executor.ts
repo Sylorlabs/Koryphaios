@@ -106,9 +106,11 @@ export function skillEvalExecutorModel(
     // then fails with no change to the skill. A declared id keeps one evidence identity.
     // `KORY_SKILL_EVAL_MODEL` is the provider-neutral name, since the executor can now run
     // against any provider block the operator has configured.
-    return env.KORY_SKILL_EVAL_MODEL?.trim() ||
+    return (
+      env.KORY_SKILL_EVAL_MODEL?.trim() ||
       env.KORY_SKILL_EVAL_LOGFARE_MODEL?.trim() ||
-      'deepseek-v4.1-flash-1017';
+      'deepseek-v4.1-flash-1017'
+    );
   }
   if (mode === 'kory-cli-agentic') {
     // The operator named one primary subject and one fallback. Pinning it here keeps the
@@ -192,23 +194,23 @@ export function selectSkillEvalExecutor(
             : mode === 'logfare-text-patch'
               ? 'logfare'
               : mode === 'opencode-text-patch' || mode === 'opencode-stateless-text-patch'
-              ? 'opencode'
-              : mode === 'local-llama-text-patch'
-                ? 'local-llama'
-              : mode === 'native-stateless-text-patch'
-                ? 'native-cli'
-                : mode === 'opencode-logfare-agentic'
-                  // The agentic OpenCode path is provider-neutral: it stages whichever
-                  // provider block the operator selected, so the recorded provider is that
-                  // block's key rather than a channel name baked into this table.
-                  ? (dependencies.env.KORY_SKILL_EVAL_OPENCODE_PROVIDER?.trim() || 'logfare')
-                  : mode === 'kory-cli-agentic'
-                    // The Kory CLI subject is whatever provider/model the operator named; the
-                    // prefix of that id is the provider the run is recorded against.
-                    ? model.includes('/')
-                      ? model.slice(0, model.indexOf('/'))
-                      : 'logfare'
-                    : 'codex';
+                ? 'opencode'
+                : mode === 'local-llama-text-patch'
+                  ? 'local-llama'
+                  : mode === 'native-stateless-text-patch'
+                    ? 'native-cli'
+                    : mode === 'opencode-logfare-agentic'
+                      ? // The agentic OpenCode path is provider-neutral: it stages whichever
+                        // provider block the operator selected, so the recorded provider is that
+                        // block's key rather than a channel name baked into this table.
+                        dependencies.env.KORY_SKILL_EVAL_OPENCODE_PROVIDER?.trim() || 'logfare'
+                      : mode === 'kory-cli-agentic'
+                        ? // The Kory CLI subject is whatever provider/model the operator named; the
+                          // prefix of that id is the provider the run is recorded against.
+                          model.includes('/')
+                          ? model.slice(0, model.indexOf('/'))
+                          : 'logfare'
+                        : 'codex';
       if (executor.provider !== expectedProvider || executor.model !== model) {
         throw new Error(
           `Skill evaluation executor factory returned a different provider/model for ${mode}.`,
@@ -348,7 +350,8 @@ export function applySkillEvalExecutorReadiness(
         Boolean(row.materializerId) &&
         materializers.some(
           (materializer) =>
-            materializer.id === row.materializerId && typeof materializer.imageAttachments === 'function',
+            materializer.id === row.materializerId &&
+            typeof materializer.imageAttachments === 'function',
         );
       if (
         !deliversRecordedEvidence &&

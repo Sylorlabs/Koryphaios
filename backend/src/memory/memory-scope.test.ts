@@ -5,7 +5,9 @@ import { basename, join } from 'node:path';
 import { getMemoryScope, registerWorkspaceRoot } from './unified-memory';
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
 test('reports inherited workspace memory and preserves an existing project-owned memory root', () => {
   const workspace = mkdtempSync(join(tmpdir(), 'knowledge-scope-'));

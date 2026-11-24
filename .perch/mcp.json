@@ -13,10 +13,7 @@
     "courtlistener": {
       "type": "stdio",
       "command": "npx",
-      "args": [
-        "-y",
-        "@iflow-mcp/blakeox-courtlistener-mcp"
-      ],
+      "args": ["-y", "@iflow-mcp/blakeox-courtlistener-mcp"],
       "env": {
         "COURTLISTENER_API_KEY": "8050df69cfb7e7bffccc541666020c00b127258e",
         "COURTLISTENER_TOKEN": "8050df69cfb7e7bffccc541666020c00b127258e"

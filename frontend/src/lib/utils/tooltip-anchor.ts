@@ -19,7 +19,8 @@ export function tooltipAnchorRect(target: HTMLElement): {
   const range = document.createRange();
   range.selectNodeContents(target);
   // jsdom's Range has no getBoundingClientRect; fall back to the element box.
-  const c = typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : null;
+  const c =
+    typeof range.getBoundingClientRect === 'function' ? range.getBoundingClientRect() : null;
   if (c && c.width > 0 && c.height > 0) {
     const left = Math.max(c.left, t.left);
     const right = Math.min(c.right, t.right);

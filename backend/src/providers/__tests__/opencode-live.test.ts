@@ -217,7 +217,13 @@ describe('OpenCode CLI — kory MCP bridge end to end', () => {
           if (typeof value === 'string') headers.set(key, value);
         }
         if (req.method === 'POST' && req.url === '/api/v1/mcp-bridge/catalog') {
-          const verified = verifySignedBridgeRequest(headers, 'mcp', 'POST', '/api/v1/mcp-bridge/catalog', parsed);
+          const verified = verifySignedBridgeRequest(
+            headers,
+            'mcp',
+            'POST',
+            '/api/v1/mcp-bridge/catalog',
+            parsed,
+          );
           if (!verified) {
             res.writeHead(401).end();
             return;
@@ -237,7 +243,13 @@ describe('OpenCode CLI — kory MCP bridge end to end', () => {
           return;
         }
         if (req.method === 'POST' && req.url === '/api/v1/mcp-bridge/execute') {
-          const verified = verifySignedBridgeRequest(headers, 'mcp', 'POST', '/api/v1/mcp-bridge/execute', parsed);
+          const verified = verifySignedBridgeRequest(
+            headers,
+            'mcp',
+            'POST',
+            '/api/v1/mcp-bridge/execute',
+            parsed,
+          );
           if (!verified) {
             res.writeHead(401).end();
             return;

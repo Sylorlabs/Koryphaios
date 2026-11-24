@@ -17,10 +17,7 @@ import {
   type ChatRunStatus,
   type CreateAgentChatInput,
 } from '../chat-control';
-import {
-  decideToolPermission,
-  resolveToolPermissionPolicy,
-} from '../permission-policy';
+import { decideToolPermission, resolveToolPermissionPolicy } from '../permission-policy';
 import { roleIncludesTool } from '../tool-roles';
 import type { ToolCallInput, ToolCallOutput, ToolContext } from '../registry';
 import type { SessionTurnCommandInput, SessionTurnSubmission } from '../../kory/manager';
@@ -87,8 +84,15 @@ function configure(): Harness {
     },
     createChat: async (input) => {
       state.created.push(input);
-      const created = await sessions.create('local-user', input.title, undefined, input.workingDirectory);
-      return (await sessions.update(created.id, { createdByAgent: input.createdByAgent })) ?? created;
+      const created = await sessions.create(
+        'local-user',
+        input.title,
+        undefined,
+        input.workingDirectory,
+      );
+      return (
+        (await sessions.update(created.id, { createdByAgent: input.createdByAgent })) ?? created
+      );
     },
     pollIntervalMs: 5,
   });
@@ -112,15 +116,28 @@ function ctxFor(sessionId: string, agentId = 'kory-manager'): ToolContext {
   return { sessionId, agentId, callerRole: 'manager', workingDirectory: '/tmp' };
 }
 
-function callFor(name: string, input: Record<string, unknown>, id = `call-${nanoid(6)}`): ToolCallInput {
+function callFor(
+  name: string,
+  input: Record<string, unknown>,
+  id = `call-${nanoid(6)}`,
+): ToolCallInput {
   return { id, name, input };
 }
 
-async function run(tool: { run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> }, ctx: ToolContext, call: ToolCallInput) {
+async function run(
+  tool: { run(ctx: ToolContext, call: ToolCallInput): Promise<ToolCallOutput> },
+  ctx: ToolContext,
+  call: ToolCallInput,
+) {
   return tool.run(ctx, call);
 }
 
-async function addMessage(sessionId: string, role: StoredMessage['role'], content: string, createdAt: number) {
+async function addMessage(
+  sessionId: string,
+  role: StoredMessage['role'],
+  content: string,
+  createdAt: number,
+) {
   const id = `m-${nanoid(10)}`;
   await messages.add(sessionId, { id, sessionId, role, content, createdAt });
   return id;
@@ -134,7 +151,11 @@ describe('create_chat', () => {
     const dir = projectDir('create');
     const caller = await chat('Planner', dir);
     const tool = new CreateChatTool();
-    const result = await run(tool, ctxFor(caller.id), callFor('create_chat', { title: 'Docs sweep' }));
+    const result = await run(
+      tool,
+      ctxFor(caller.id),
+      callFor('create_chat', { title: 'Docs sweep' }),
+    );
 
     expect(result.isError).toBe(false);
     expect(harness.created).toHaveLength(1);
@@ -188,7 +209,12 @@ describe('create_chat', () => {
     const result = await run(
       new CreateChatTool(),
       ctxFor(caller.id),
-      callFor('create_chat', { title: 'Child', initialMessage: 'Audit the parser', start: true, model: 'model-x' }),
+      callFor('create_chat', {
+        title: 'Child',
+        initialMessage: 'Audit the parser',
+        start: true,
+        model: 'model-x',
+      }),
     );
 
     expect(result.isError).toBe(false);
@@ -208,7 +234,13 @@ describe('create_chat', () => {
     const caller = await chat('Lead', projectDir('create-refused'));
     harness.nextSubmission = (input) => ({
       accepted: false,
-      result: { sessionId: input.sessionId, runId: '', status: 'rejected', phase: 'idle', reason: 'session_busy' },
+      result: {
+        sessionId: input.sessionId,
+        runId: '',
+        status: 'rejected',
+        phase: 'idle',
+        reason: 'session_busy',
+      },
     });
     const result = await run(
       new CreateChatTool(),
@@ -273,7 +305,13 @@ describe('send_to_chat', () => {
     const target = await chat('Target', dir);
     harness.nextSubmission = (input) => ({
       accepted: false,
-      result: { sessionId: input.sessionId, runId: '', status: 'rejected', phase: 'idle', reason: 'session_busy' },
+      result: {
+        sessionId: input.sessionId,
+        runId: '',
+        status: 'rejected',
+        phase: 'idle',
+        reason: 'session_busy',
+      },
     });
     const result = await run(
       new SendToChatTool(),
@@ -645,7 +683,11 @@ describe('search_chats', () => {
   test('an empty query is an error', async () => {
     harness = configure();
     const caller = await chat('Searcher', projectDir('search-empty'));
-    const result = await run(new SearchChatsTool(), ctxFor(caller.id), callFor('search_chats', { query: ' ' }));
+    const result = await run(
+      new SearchChatsTool(),
+      ctxFor(caller.id),
+      callFor('search_chats', { query: ' ' }),
+    );
     expect(result.isError).toBe(true);
   });
 });
@@ -658,7 +700,10 @@ describe('chat-control permission defaults', () => {
 
   test('writes ask the user in every mode except YOLO', () => {
     for (const mode of ['guarded', 'edits', 'ask', 'custom'] as const) {
-      const policy = resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, permissionMode: mode });
+      const policy = resolveToolPermissionPolicy({
+        ...DEFAULT_AGENT_SETTINGS,
+        permissionMode: mode,
+      });
       for (const tool of writeTools) {
         expect(decideToolPermission(policy, tool).action).toBe('ask');
       }

@@ -48,12 +48,12 @@ describe('Freebuck account reporting', () => {
       status: 'fresh',
       updatedAt: NOW,
       planType: 'Starter',
-       hours: {
-         balance: 30,
-         daily: { remaining: 24, limit: 30, resetsAt: Date.parse('2026-10-07T07:00:00Z') },
-         wallet: { balance: 6 },
-         prices: { 'm-fixture': 7 },
-         claimableGrantHours: 20,
+      hours: {
+        balance: 30,
+        daily: { remaining: 24, limit: 30, resetsAt: Date.parse('2026-10-07T07:00:00Z') },
+        wallet: { balance: 6 },
+        prices: { 'm-fixture': 7 },
+        claimableGrantHours: 20,
       },
     });
     expect(JSON.stringify(value)).not.toContain(TOKEN);
@@ -137,7 +137,7 @@ describe('Freebuck account reporting', () => {
     for (const path of [root, other]) {
       const result = await getFreebuffAccountSnapshot(path, false, deps);
       expect(result.status).toBe('unavailable');
-       expect(result.hours).toBeUndefined();
+      expect(result.hours).toBeUndefined();
     }
   });
   it('a denied credential lookup is unavailable and never leaks the error', async () => {

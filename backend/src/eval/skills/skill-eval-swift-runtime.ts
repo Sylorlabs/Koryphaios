@@ -37,7 +37,8 @@ function resolveDirectory(value: string, variable: 'DEVELOPER_DIR' | 'SDKROOT'):
   }
   if (
     variable === 'SDKROOT' &&
-    (!/^MacOSX.*\.sdk$/u.test(basename(directory)) || !existsSync(join(directory, 'SDKSettings.json')))
+    (!/^MacOSX.*\.sdk$/u.test(basename(directory)) ||
+      !existsSync(join(directory, 'SDKSettings.json')))
   )
     throw new Error('SDKROOT must name a macOS SDK directory with SDKSettings.json');
   return directory;

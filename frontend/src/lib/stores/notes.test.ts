@@ -56,7 +56,9 @@ describe('Notes request identity guards', () => {
     mocks.apiFetch.mockResolvedValueOnce(jsonResponse({ ok: true, data: note('alpha', 'Alpha') }));
     await notesStore.fetchNote('alpha');
     const current = notesStore.currentNote!;
-    mocks.apiFetch.mockResolvedValueOnce(jsonResponse({ ok: true, data: { kind: 'builtin', value: '💡' } }));
+    mocks.apiFetch.mockResolvedValueOnce(
+      jsonResponse({ ok: true, data: { kind: 'builtin', value: '💡' } }),
+    );
     expect(await notesStore.setNoteIcon('alpha', { kind: 'builtin', value: '💡' })).toBe(true);
     expect(notesStore.currentNote?.icon).toEqual({ kind: 'builtin', value: '💡' });
     expect(notesStore.currentNote?.revision).toBe(current.revision);
@@ -69,7 +71,12 @@ describe('Notes request identity guards', () => {
 
   it('ignores a late icon save after changing project', async () => {
     let finish!: (response: Response) => void;
-    mocks.apiFetch.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    mocks.apiFetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
     const pending = notesStore.setNoteIcon('alpha', { kind: 'builtin', value: '⭐' });
     projectStore.setProject('/notes-project-b');
     notesStore.beginProjectTransition();
@@ -477,14 +484,18 @@ describe('Notes recovery and history', () => {
   });
 });
 
-
 describe('note link resolution', () => {
   it('resolves folder paths and project source paths without choosing duplicate titles', async () => {
-    mocks.apiFetch.mockImplementation(async () => jsonResponse({ ok: true, data: [
-      { ...note('a', 'Guide'), folderPath: '/Findings' },
-      { ...note('b', 'Guide'), folderPath: '/Research' },
-      { ...note('c', 'notes-workspace'), sourcePath: 'docs/notes-workspace.md' },
-    ] }));
+    mocks.apiFetch.mockImplementation(async () =>
+      jsonResponse({
+        ok: true,
+        data: [
+          { ...note('a', 'Guide'), folderPath: '/Findings' },
+          { ...note('b', 'Guide'), folderPath: '/Research' },
+          { ...note('c', 'notes-workspace'), sourcePath: 'docs/notes-workspace.md' },
+        ],
+      }),
+    );
     await notesStore.fetchNotes();
     expect(await notesStore.resolveNoteTarget({ path: '/Research/Guide' })).toBe('b');
     expect(await notesStore.resolveNoteTarget({ path: 'docs/notes-workspace.md' })).toBe('c');
@@ -494,7 +505,12 @@ describe('note link resolution', () => {
 
   it('loads a cold catalog and ignores results after a project transition', async () => {
     let finish!: (response: Response) => void;
-    mocks.apiFetch.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    mocks.apiFetch.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    );
     const pending = notesStore.resolveNoteTarget({ path: '/Findings/Guide' });
     projectStore.setProject('/notes-project-b');
     notesStore.beginProjectTransition();

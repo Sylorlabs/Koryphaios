@@ -4,7 +4,7 @@
 
 _(Click the image above to view video of this lesson)_
 
-The [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol) is a powerful, standardized framework that optimizes communication between Large Language Models (LLMs) and external tools, applications, and data sources. 
+The [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol) is a powerful, standardized framework that optimizes communication between Large Language Models (LLMs) and external tools, applications, and data sources.
 This guide will walk you through the core concepts of MCP. You will learn about its client-server architecture, essential components, communication mechanics, and implementation best practices.
 
 - **Explicit User Consent**: All data access and operations require explicit user approval before execution. Users must clearly understand what data will be accessed and what actions will be performed, with granular control over permissions and authorizations.
@@ -18,7 +18,7 @@ This guide will walk you through the core concepts of MCP. You will learn about 
 #### Implementation Guidelines:
 
 - **Permission Management**: Implement fine-grained permission systems that allow users to control which servers, tools, and resources are accessible
-- **Authentication & Authorization**: Use secure authentication methods (OAuth, API keys) with proper token management and expiration  
+- **Authentication & Authorization**: Use secure authentication methods (OAuth, API keys) with proper token management and expiration
 - **Input Validation**: Validate all parameters and data inputs according to defined schemas to prevent injection attacks
 - **Audit Logging**: Maintain comprehensive logs of all operations for security monitoring and compliance
 
@@ -73,17 +73,16 @@ The MCP Protocol is an evolving standard using date-based versioning (YYYY-MM-DD
 In the Model Context Protocol (MCP), **Hosts** are AI applications that serve as the primary interface through which users interact with the protocol. Hosts coordinate and manage connections to multiple MCP servers by creating dedicated MCP clients for each server connection. Examples of Hosts include:
 
 - **AI Applications**: Claude Desktop, Visual Studio Code, Claude Code
-- **Development Environments**: IDEs and code editors with MCP integration  
+- **Development Environments**: IDEs and code editors with MCP integration
 - **Custom Applications**: Purpose-built AI agents and tools
 
 **Hosts** are applications that coordinate AI model interactions. They:
 
 - **Orchestrate AI Models**: Execute or interact with LLMs to generate responses and coordinate AI workflows
 - **Manage Client Connections**: Create and maintain one MCP client per MCP server connection
-- **Control User Interface**: Handle conversation flow, user interactions, and response presentation  
+- **Control User Interface**: Handle conversation flow, user interactions, and response presentation
 - **Enforce Security**: Control permissions, security constraints, and authentication
 - **Handle User Consent**: Manage user approval for data sharing and tool execution
-
 
 ### 2. Clients
 
@@ -117,13 +116,13 @@ Servers in the Model Context Protocol (MCP) provide three core **primitives** th
 
 MCP servers can expose any combination of the following three core primitives:
 
-#### Resources 
+#### Resources
 
 **Resources** are data sources that provide contextual information to AI applications. They represent static or dynamic content that can enhance model understanding and decision-making:
 
 - **Contextual Data**: Structured information and context for AI model consumption
 - **Knowledge Bases**: Document repositories, articles, manuals, and research papers
-- **Local Data Sources**: Files, databases, and local system information  
+- **Local Data Sources**: Files, databases, and local system information
 - **External Data**: API responses, web services, and remote system data
 - **Dynamic Content**: Real-time data that updates based on external conditions
 
@@ -169,16 +168,16 @@ Example tool definition:
 
 ```typescript
 server.tool(
-  "search_products", 
+  'search_products',
   {
-    query: z.string().describe("Search query for products"),
-    category: z.string().optional().describe("Product category filter"),
-    max_results: z.number().default(10).describe("Maximum results to return")
-  }, 
+    query: z.string().describe('Search query for products'),
+    category: z.string().optional().describe('Product category filter'),
+    max_results: z.number().default(10).describe('Maximum results to return'),
+  },
   async (params) => {
     // Execute search and return structured results
     return await productService.search(params);
-  }
+  },
 );
 ```
 
@@ -209,7 +208,7 @@ Sampling is initiated through the `sampling/complete` method, where servers send
 
 Roots are discovered through the `roots/list` method, with clients sending `notifications/roots/list_changed` when roots change.
 
-### Elicitation  
+### Elicitation
 
 **Elicitation** enables servers to request additional information or confirmation from users through the client interface:
 
@@ -237,26 +236,26 @@ Logging messages are sent to clients to provide transparency into server operati
 
 The Model Context Protocol (MCP) defines a structured flow of information between hosts, clients, servers, and models. Understanding this flow helps clarify how user requests are processed and how external tools and data are integrated into model responses.
 
-- **Host Initiates Connection**  
+- **Host Initiates Connection**
   The host application (such as an IDE or chat interface) establishes a connection to an MCP server, typically via STDIO, WebSocket, or another supported transport.
 
-- **Capability Negotiation**  
+- **Capability Negotiation**
   The client (embedded in the host) and the server exchange information about their supported features, tools, resources, and protocol versions. This ensures both sides understand what capabilities are available for the session.
 
-- **User Request**  
+- **User Request**
   The user interacts with the host (e.g., enters a prompt or command). The host collects this input and passes it to the client for processing.
 
-- **Resource or Tool Use**  
+- **Resource or Tool Use**
   - The client may request additional context or resources from the server (such as files, database entries, or knowledge base articles) to enrich the model's understanding.
   - If the model determines that a tool is needed (e.g., to fetch data, perform a calculation, or call an API), the client sends a tool invocation request to the server, specifying the tool name and parameters.
 
-- **Server Execution**  
+- **Server Execution**
   The server receives the resource or tool request, executes the necessary operations (such as running a function, querying a database, or retrieving a file), and returns the results to the client in a structured format.
 
-- **Response Generation**  
+- **Response Generation**
   The client integrates the server's responses (resource data, tool outputs, etc.) into the ongoing model interaction. The model uses this information to generate a comprehensive and contextually relevant response.
 
-- **Result Presentation**  
+- **Result Presentation**
   The host receives the final output from the client and presents it to the user, often including both the model's generated text and any results from tool executions or resource lookups.
 
 This flow enables MCP to support advanced, interactive, and context-aware AI applications by seamlessly connecting models with external tools and data sources.
@@ -295,7 +294,7 @@ The **Transport Layer** manages communication channels, message framing, and aut
    - Commonly used for local MCP server implementations
 
 2. **Streamable HTTP Transport**:
-   - Uses HTTP POST for client-to-server messages  
+   - Uses HTTP POST for client-to-server messages
    - Optional Server-Sent Events (SSE) for server-to-client streaming
    - Enables remote server communication across networks
    - Supports standard HTTP authentication (bearer tokens, API keys, custom headers)
@@ -341,32 +340,32 @@ public class WeatherServer
             name: "Weather MCP Server",
             version: "1.0.0"
         );
-        
+
         // Register our custom weather tool
-        server.AddTool<string, WeatherData>("weatherTool", 
+        server.AddTool<string, WeatherData>("weatherTool",
             description: "Gets current weather for a location",
             execute: async (location) => {
                 // Call weather API (simplified)
                 var weatherData = await GetWeatherDataAsync(location);
                 return weatherData;
             });
-        
+
         // Connect the server using stdio transport
         var transport = new StdioServerTransport();
         await server.ConnectAsync(transport);
-        
+
         Console.WriteLine("Weather MCP Server started");
-        
+
         // Keep the server running until process is terminated
         await Task.Delay(-1);
     }
-    
+
     private static async Task<WeatherData> GetWeatherDataAsync(string location)
     {
         // This would normally call a weather API
         // Simplified for demonstration
         await Task.Delay(100); // Simulate API call
-        return new WeatherData { 
+        return new WeatherData {
             Temperature = 72.5,
             Conditions = "Sunny",
             Location = location
@@ -400,27 +399,27 @@ public class WeatherMcpServer {
             .name("Weather MCP Server")
             .version("1.0.0")
             .build();
-            
+
         // Register a weather tool
         server.registerTool(McpToolDefinition.builder("weatherTool")
             .description("Gets current weather for a location")
             .parameter("location", String.class)
             .execute((ToolExecutionContext ctx) -> {
                 String location = ctx.getParameter("location", String.class);
-                
+
                 // Get weather data (simplified)
                 WeatherData data = getWeatherData(location);
-                
+
                 // Return formatted response
                 return ToolResponse.content(
-                    String.format("Temperature: %.1f°F, Conditions: %s, Location: %s", 
-                    data.getTemperature(), 
-                    data.getConditions(), 
+                    String.format("Temperature: %.1f°F, Conditions: %s, Location: %s",
+                    data.getTemperature(),
+                    data.getConditions(),
                     data.getLocation())
                 );
             })
             .build());
-        
+
         // Connect the server using stdio transport
         try (StdioServerTransport transport = new StdioServerTransport()) {
             server.connect(transport);
@@ -429,7 +428,7 @@ public class WeatherMcpServer {
             Thread.currentThread().join();
         }
     }
-    
+
     private static WeatherData getWeatherData(String location) {
         // Implementation would call a weather API
         // Simplified for example purposes
@@ -441,21 +440,21 @@ class WeatherData {
     private double temperature;
     private String conditions;
     private String location;
-    
+
     public WeatherData(double temperature, String conditions, String location) {
         this.temperature = temperature;
         this.conditions = conditions;
         this.location = location;
     }
-    
+
     public double getTemperature() {
         return temperature;
     }
-    
+
     public String getConditions() {
         return conditions;
     }
-    
+
     public String getLocation() {
         return location;
     }
@@ -469,6 +468,7 @@ This example uses fastmcp, so please ensure you install it first:
 ```python
 pip install fastmcp
 ```
+
 Code Sample:
 
 ```python
@@ -519,59 +519,59 @@ This example shows MCP server creation in JavaScript and how to register two wea
 
 ```javascript
 // Using the official Model Context Protocol SDK
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod"; // For parameter validation
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { z } from 'zod'; // For parameter validation
 
 // Create an MCP server
 const server = new McpServer({
-  name: "Weather MCP Server",
-  version: "1.0.0"
+  name: 'Weather MCP Server',
+  version: '1.0.0',
 });
 
 // Define a weather tool
 server.tool(
-  "weatherTool",
+  'weatherTool',
   {
-    location: z.string().describe("The location to get weather for")
+    location: z.string().describe('The location to get weather for'),
   },
   async ({ location }) => {
     // This would normally call a weather API
     // Simplified for demonstration
     const weatherData = await getWeatherData(location);
-    
+
     return {
       content: [
-        { 
-          type: "text", 
-          text: `Temperature: ${weatherData.temperature}°F, Conditions: ${weatherData.conditions}, Location: ${weatherData.location}` 
-        }
-      ]
+        {
+          type: 'text',
+          text: `Temperature: ${weatherData.temperature}°F, Conditions: ${weatherData.conditions}, Location: ${weatherData.location}`,
+        },
+      ],
     };
-  }
+  },
 );
 
 // Define a forecast tool
 server.tool(
-  "forecastTool",
+  'forecastTool',
   {
     location: z.string(),
-    days: z.number().default(3).describe("Number of days for forecast")
+    days: z.number().default(3).describe('Number of days for forecast'),
   },
   async ({ location, days }) => {
     // This would normally call a weather API
     // Simplified for demonstration
     const forecast = await getForecastData(location, days);
-    
+
     return {
       content: [
-        { 
-          type: "text", 
-          text: `${days}-day forecast for ${location}: ${JSON.stringify(forecast)}` 
-        }
-      ]
+        {
+          type: 'text',
+          text: `${days}-day forecast for ${location}: ${JSON.stringify(forecast)}`,
+        },
+      ],
     };
-  }
+  },
 );
 
 // Helper functions
@@ -579,8 +579,8 @@ async function getWeatherData(location) {
   // Simulate API call
   return {
     temperature: 72.5,
-    conditions: "Sunny",
-    location: location
+    conditions: 'Sunny',
+    location: location,
   };
 }
 
@@ -589,7 +589,7 @@ async function getForecastData(location, days) {
   return Array.from({ length: days }, (_, i) => ({
     day: i + 1,
     temperature: 70 + Math.floor(Math.random() * 10),
-    conditions: i % 2 === 0 ? "Sunny" : "Partly Cloudy"
+    conditions: i % 2 === 0 ? 'Sunny' : 'Partly Cloudy',
   }));
 }
 
@@ -597,7 +597,7 @@ async function getForecastData(location, days) {
 const transport = new StdioServerTransport();
 server.connect(transport).catch(console.error);
 
-console.log("Weather MCP Server started");
+console.log('Weather MCP Server started');
 ```
 
 This JavaScript example demonstrates how to create an MCP client that connects to a server, sends a prompt, and processes the response including any tool calls that were made.
@@ -606,17 +606,17 @@ This JavaScript example demonstrates how to create an MCP client that connects t
 
 MCP includes several built-in concepts and mechanisms for managing security and authorization throughout the protocol:
 
-1. **Tool Permission Control**:  
-  Clients can specify which tools a model is allowed to use during a session. This ensures that only explicitly authorized tools are accessible, reducing the risk of unintended or unsafe operations. Permissions can be configured dynamically based on user preferences, organizational policies, or the context of the interaction.
+1. **Tool Permission Control**:
+   Clients can specify which tools a model is allowed to use during a session. This ensures that only explicitly authorized tools are accessible, reducing the risk of unintended or unsafe operations. Permissions can be configured dynamically based on user preferences, organizational policies, or the context of the interaction.
 
-2. **Authentication**:  
-  Servers can require authentication before granting access to tools, resources, or sensitive operations. This may involve API keys, OAuth tokens, or other authentication schemes. Proper authentication ensures that only trusted clients and users can invoke server-side capabilities.
+2. **Authentication**:
+   Servers can require authentication before granting access to tools, resources, or sensitive operations. This may involve API keys, OAuth tokens, or other authentication schemes. Proper authentication ensures that only trusted clients and users can invoke server-side capabilities.
 
-3. **Validation**:  
-  Parameter validation is enforced for all tool invocations. Each tool defines the expected types, formats, and constraints for its parameters, and the server validates incoming requests accordingly. This prevents malformed or malicious input from reaching tool implementations and helps maintain the integrity of operations.
+3. **Validation**:
+   Parameter validation is enforced for all tool invocations. Each tool defines the expected types, formats, and constraints for its parameters, and the server validates incoming requests accordingly. This prevents malformed or malicious input from reaching tool implementations and helps maintain the integrity of operations.
 
-4. **Rate Limiting**:  
-  To prevent abuse and ensure fair usage of server resources, MCP servers can implement rate limiting for tool calls and resource access. Rate limits can be applied per user, per session, or globally, and help protect against denial-of-service attacks or excessive resource consumption.
+4. **Rate Limiting**:
+   To prevent abuse and ensure fair usage of server resources, MCP servers can implement rate limiting for tool calls and resource access. Rate limits can be applied per user, per session, or globally, and help protect against denial-of-service attacks or excessive resource consumption.
 
 By combining these mechanisms, MCP provides a secure foundation for integrating language models with external tools and data sources, while giving users and developers fine-grained control over access and usage.
 
@@ -627,35 +627,41 @@ MCP communication uses structured **JSON-RPC 2.0** messages to facilitate clear 
 ### Core Message Types:
 
 #### **Initialization Messages**
+
 - **`initialize` Request**: Establishes connection and negotiates protocol version and capabilities
-- **`initialize` Response**: Confirms supported features and server information  
+- **`initialize` Response**: Confirms supported features and server information
 - **`notifications/initialized`**: Signals that initialization is complete and the session is ready
 
 #### **Discovery Messages**
+
 - **`tools/list` Request**: Discovers available tools from the server
 - **`resources/list` Request**: Lists available resources (data sources)
 - **`prompts/list` Request**: Retrieves available prompt templates
 
-#### **Execution Messages**  
+#### **Execution Messages**
+
 - **`tools/call` Request**: Executes a specific tool with provided parameters
 - **`resources/read` Request**: Retrieves content from a specific resource
 - **`prompts/get` Request**: Fetches a prompt template with optional parameters
 
 #### **Client-side Messages**
+
 - **`sampling/complete` Request**: Server requests LLM completion from the client
 - **`elicitation/request`**: Server requests user input through the client interface
 - **Logging Messages**: Server sends structured log messages to the client
 
 #### **Notification Messages**
+
 - **`notifications/tools/list_changed`**: Server notifies client of tool changes
-- **`notifications/resources/list_changed`**: Server notifies client of resource changes  
+- **`notifications/resources/list_changed`**: Server notifies client of resource changes
 - **`notifications/prompts/list_changed`**: Server notifies client of prompt changes
 
 ### Message Structure:
 
 All MCP messages follow JSON-RPC 2.0 format with:
+
 - **Request Messages**: Include `id`, `method`, and optional `params`
-- **Response Messages**: Include `id` and either `result` or `error`  
+- **Response Messages**: Include `id` and either `result` or `error`
 - **Notification Messages**: Include `method` and optional `params` (no `id` or response expected)
 
 This structured communication ensures reliable, traceable, and extensible interactions supporting advanced scenarios like real-time updates, tool chaining, and robust error handling.
@@ -686,11 +692,11 @@ Tasks wrap standard MCP requests to enable asynchronous execution patterns for o
 ## Exercise
 
 Design a simple MCP tool that would be useful in your domain. Define:
+
 1. What the tool would be named
 2. What parameters it would accept
 3. What output it would return
 4. How a model might use this tool to solve user problems
-
 
 ---
 

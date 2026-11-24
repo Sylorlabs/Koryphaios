@@ -34,14 +34,17 @@ export const IMAGEGEN_RUNTIME_BLOCKER =
   'Image generation runtime is unavailable (needs KORY_SKILL_EVAL_LOGFARE_API_KEY and sips for JPEG to PNG conversion)';
 
 export function imagegenApiKey(): string | null {
-  const key = process.env.KORY_SKILL_EVAL_LOGFARE_API_KEY?.trim() || process.env.KORY_LOGFARE_API_KEY?.trim();
+  const key =
+    process.env.KORY_SKILL_EVAL_LOGFARE_API_KEY?.trim() || process.env.KORY_LOGFARE_API_KEY?.trim();
   return key ? key : null;
 }
 
 export function imagegenRuntimeReadiness(): readonly string[] {
   const blockers: string[] = [];
-  if (!imagegenApiKey()) blockers.push(`${IMAGEGEN_RUNTIME_BLOCKER}: no API key in the environment`);
-  if (!existsSync('/usr/bin/sips')) blockers.push(`${IMAGEGEN_RUNTIME_BLOCKER}: /usr/bin/sips is missing`);
+  if (!imagegenApiKey())
+    blockers.push(`${IMAGEGEN_RUNTIME_BLOCKER}: no API key in the environment`);
+  if (!existsSync('/usr/bin/sips'))
+    blockers.push(`${IMAGEGEN_RUNTIME_BLOCKER}: /usr/bin/sips is missing`);
   return blockers;
 }
 
@@ -94,7 +97,9 @@ export function decodePng(buffer: Buffer): DecodedImage {
     }
   }
   if (bitDepth !== 8 || interlace !== 0 || (colorType !== 2 && colorType !== 6)) {
-    throw new Error(`unsupported PNG (bitDepth ${bitDepth}, colourType ${colorType}, interlace ${interlace})`);
+    throw new Error(
+      `unsupported PNG (bitDepth ${bitDepth}, colourType ${colorType}, interlace ${interlace})`,
+    );
   }
   const channels = colorType === 6 ? 4 : 3;
   const raw = inflateSync(Buffer.concat(idat));
@@ -112,10 +117,18 @@ export function decodePng(buffer: Buffer): DecodedImage {
       const value = line[index];
       let result: number;
       switch (filter) {
-        case 0: result = value; break;
-        case 1: result = value + left; break;
-        case 2: result = value + up; break;
-        case 3: result = value + ((left + up) >> 1); break;
+        case 0:
+          result = value;
+          break;
+        case 1:
+          result = value + left;
+          break;
+        case 2:
+          result = value + up;
+          break;
+        case 3:
+          result = value + ((left + up) >> 1);
+          break;
         case 4: {
           const p = left + up - upLeft;
           const pa = Math.abs(p - left);
@@ -124,7 +137,8 @@ export function decodePng(buffer: Buffer): DecodedImage {
           result = value + (pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft);
           break;
         }
-        default: throw new Error(`unknown PNG filter ${filter}`);
+        default:
+          throw new Error(`unknown PNG filter ${filter}`);
       }
       current[index] = result & 0xff;
     }
@@ -315,18 +329,22 @@ export async function generateImage(request: {
       const encoded = body.data?.[0]?.b64_json;
       if (!response.ok || !encoded) {
         const detail =
-          typeof body.error === 'string' ? body.error : body.error?.message ?? 'no image data';
+          typeof body.error === 'string' ? body.error : (body.error?.message ?? 'no image data');
         lastError = new Error(`image service returned ${response.status}: ${detail}`);
         // 4xx other than rate limiting is a prompt or parameter problem, not a
         // transient one, so it is reported instead of retried.
-        if (response.status >= 400 && response.status < 500 && response.status !== 429) throw lastError;
+        if (response.status >= 400 && response.status < 500 && response.status !== 429)
+          throw lastError;
         continue;
       }
       const bytes = Buffer.from(encoded, 'base64');
       return { image: decodePng(convertToPng(bytes)), bytes, rawBase64: encoded };
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      if (/^image service returned 4(0[0-9]|[1-9][0-9])/u.test(lastError.message) && !/429/u.test(lastError.message)) {
+      if (
+        /^image service returned 4(0[0-9]|[1-9][0-9])/u.test(lastError.message) &&
+        !/429/u.test(lastError.message)
+      ) {
         throw lastError;
       }
     }
@@ -344,7 +362,9 @@ function convertToPng(jpeg: Buffer): Buffer {
       maxBuffer: 1_000_000,
     });
     if (result.status !== 0 || !existsSync(out)) {
-      throw new Error(`sips could not convert the image: ${String(result.stderr ?? '').slice(0, 200)}`);
+      throw new Error(
+        `sips could not convert the image: ${String(result.stderr ?? '').slice(0, 200)}`,
+      );
     }
     return readFileSync(out);
   } finally {
@@ -407,12 +427,23 @@ const SCENARIO_2_STARTER: ImageSpec = {
   model: IMAGEGEN_SIZING_MODEL,
   identity: 'kory mark',
   assets: [
-    { id: 'avatar', description: 'round avatar of the mark', variants: [{ seed: 1, prompt: 'kory mark avatar', size: '512x512' }] },
-    { id: 'hero', description: 'wide hero image of the mark', variants: [{ seed: 1, prompt: 'kory mark hero', size: '1536x512' }] },
-    { id: 'footer-card', description: 'small footer card', variants: [{ seed: 1, prompt: 'kory mark footer card', size: '512x256' }] },
+    {
+      id: 'avatar',
+      description: 'round avatar of the mark',
+      variants: [{ seed: 1, prompt: 'kory mark avatar', size: '512x512' }],
+    },
+    {
+      id: 'hero',
+      description: 'wide hero image of the mark',
+      variants: [{ seed: 1, prompt: 'kory mark hero', size: '1536x512' }],
+    },
+    {
+      id: 'footer-card',
+      description: 'small footer card',
+      variants: [{ seed: 1, prompt: 'kory mark footer card', size: '512x256' }],
+    },
   ],
 };
-
 
 /** Measurements observed by the fixture author on the live service. They are
  * shipped so a candidate can see the shape of a passing and a failing result
@@ -423,30 +454,60 @@ const IMAGEGEN_EXAMPLES = {
     {
       label: 'passing',
       model: 'flux-2-klein-4b',
-      prompt: 'flat vector illustration, solid warm off-white #F2EFE9 background, one solid orange #E8552D geometric mark centred, generous empty margins all around, no text, no gradient, no shadow, no texture, no green',
+      prompt:
+        'flat vector illustration, solid warm off-white #F2EFE9 background, one solid orange #E8552D geometric mark centred, generous empty margins all around, no text, no gradient, no shadow, no texture, no green',
       seed: 101,
-      measurements: { paletteColors95: 3, backgroundShare: 0.95, accentShare: 0.047, cornerSpread: 8, subjectBorderShare: 0.0, forbiddenShare: 0.0 },
+      measurements: {
+        paletteColors95: 3,
+        backgroundShare: 0.95,
+        accentShare: 0.047,
+        cornerSpread: 8,
+        subjectBorderShare: 0.0,
+        forbiddenShare: 0.0,
+      },
     },
     {
       label: 'fails-palette-and-layout',
       model: 'flux-2-klein-4b',
       prompt: 'a product hero image',
       seed: 72,
-      measurements: { paletteColors95: 245, backgroundShare: 0.07, accentShare: 0.0, cornerSpread: 7, subjectBorderShare: 0.98, forbiddenShare: 0.0 },
+      measurements: {
+        paletteColors95: 245,
+        backgroundShare: 0.07,
+        accentShare: 0.0,
+        cornerSpread: 7,
+        subjectBorderShare: 0.98,
+        forbiddenShare: 0.0,
+      },
     },
     {
       label: 'fails-accent',
       model: 'flux-2-klein-4b',
       prompt: 'a product hero image',
       seed: 73,
-      measurements: { paletteColors95: 24, backgroundShare: 0.69, accentShare: 0.0, cornerSpread: 3, subjectBorderShare: 0.01, forbiddenShare: 0.0 },
+      measurements: {
+        paletteColors95: 24,
+        backgroundShare: 0.69,
+        accentShare: 0.0,
+        cornerSpread: 3,
+        subjectBorderShare: 0.01,
+        forbiddenShare: 0.0,
+      },
     },
     {
       label: 'fails-on-a-latency-tuned-model',
       model: 'sdxl-lightning',
-      prompt: 'flat vector illustration, solid warm off-white #F2EFE9 background, one solid orange #E8552D circle centred, generous empty margins, no text, no gradient, no shadow, no texture, no green',
+      prompt:
+        'flat vector illustration, solid warm off-white #F2EFE9 background, one solid orange #E8552D circle centred, generous empty margins, no text, no gradient, no shadow, no texture, no green',
       seed: 501,
-      measurements: { paletteColors95: 802, backgroundShare: 0.21, accentShare: 0.309, cornerSpread: 6, subjectBorderShare: 0.79, forbiddenShare: 0.0 },
+      measurements: {
+        paletteColors95: 802,
+        backgroundShare: 0.21,
+        accentShare: 0.309,
+        cornerSpread: 6,
+        subjectBorderShare: 0.79,
+        forbiddenShare: 0.0,
+      },
       note: 'The same prompt, seed and canvas on flux-2-klein-4b measured palette=5, background=0.90, border=0.00. A model that follows colour words is not a model that follows flatness.',
     },
   ],
@@ -565,7 +626,11 @@ function writeSpec(destination: string, scenario: 1 | 2): void {
     join(destination, 'brief', 'brand.json'),
     `${JSON.stringify(
       {
-        palette: { background: IMAGEGEN_BRAND.background, accent: IMAGEGEN_BRAND.accent, forbidden: IMAGEGEN_BRAND.forbidden },
+        palette: {
+          background: IMAGEGEN_BRAND.background,
+          accent: IMAGEGEN_BRAND.accent,
+          forbidden: IMAGEGEN_BRAND.forbidden,
+        },
         identity: IMAGEGEN_BRAND.identity,
         canvas: '1024x1024',
         allowedModels: [...IMAGEGEN_MODELS],
@@ -576,8 +641,14 @@ function writeSpec(destination: string, scenario: 1 | 2): void {
       2,
     )}\n`,
   );
-  writeFileSync(join(destination, 'generation', 'spec.json'), `${JSON.stringify(scenario === 1 ? SCENARIO_1_STARTER : SCENARIO_2_STARTER, null, 2)}\n`);
-  writeFileSync(join(destination, 'brief', 'examples.json'), `${JSON.stringify(IMAGEGEN_EXAMPLES, null, 2)}\n`);
+  writeFileSync(
+    join(destination, 'generation', 'spec.json'),
+    `${JSON.stringify(scenario === 1 ? SCENARIO_1_STARTER : SCENARIO_2_STARTER, null, 2)}\n`,
+  );
+  writeFileSync(
+    join(destination, 'brief', 'examples.json'),
+    `${JSON.stringify(IMAGEGEN_EXAMPLES, null, 2)}\n`,
+  );
   writeFileSync(join(destination, 'tools', 'check-spec.mjs'), CHECK_SPEC_MJS, { mode: 0o755 });
   writeFileSync(join(destination, 'README.md'), IMAGEGEN_README);
 }
@@ -713,7 +784,13 @@ export async function runImagegenScenario(root: string, scenario: 1 | 2): Promis
   if (!spec) {
     return {
       passed: false,
-      checks: [{ id: 'contract', passed: false, detail: 'generation/spec.json is missing or is not valid JSON' }],
+      checks: [
+        {
+          id: 'contract',
+          passed: false,
+          detail: 'generation/spec.json is missing or is not valid JSON',
+        },
+      ],
       evidence: 'no spec',
     };
   }
@@ -730,8 +807,12 @@ export async function runImagegenScenario(root: string, scenario: 1 | 2): Promis
       variants.length >= 1 &&
       variants.length <= 2 &&
       new Set(seeds).size === seeds.length &&
-      variants.every((variant) => typeof variant.seed === 'number' && variant.prompt.length >= 20) &&
-      variants.every((variant) => canvasDeclared(variant) && sizeHonoured(model, declaredSize(variant)));
+      variants.every(
+        (variant) => typeof variant.seed === 'number' && variant.prompt.length >= 20,
+      ) &&
+      variants.every(
+        (variant) => canvasDeclared(variant) && sizeHonoured(model, declaredSize(variant)),
+      );
     checks.push({
       id: 'contract',
       passed: shapeOk,
@@ -745,7 +826,8 @@ export async function runImagegenScenario(root: string, scenario: 1 | 2): Promis
         passed: renderedOk,
         detail: summarise(rendered),
       });
-      const best = rendered.find((entry) => !entry.error && layoutConforms(entry.measurements)) ?? rendered[0];
+      const best =
+        rendered.find((entry) => !entry.error && layoutConforms(entry.measurements)) ?? rendered[0];
       checks.push({
         id: 'palette',
         passed: best.measurements.paletteColors95 <= IMAGEGEN_CONSTRAINTS.paletteColors95,
@@ -776,13 +858,27 @@ export async function runImagegenScenario(root: string, scenario: 1 | 2): Promis
   } else {
     const requiredIds = ['hero', 'avatar', 'footer-card'];
     const ids = assets.map((asset) => asset.id);
-    const identityOk = typeof spec.identity === 'string' && spec.identity.trim() === IMAGEGEN_BRAND.identity;
+    const identityOk =
+      typeof spec.identity === 'string' && spec.identity.trim() === IMAGEGEN_BRAND.identity;
     const shapeOk =
       modelAllowed &&
       requiredIds.every((id) => ids.includes(id)) &&
-      assets.every((asset) => (asset.variants ?? []).length >= 1 && (asset.variants ?? []).length <= 2) &&
-      assets.every((asset) => new Set((asset.variants ?? []).map((variant) => variant.seed)).size === (asset.variants ?? []).length) &&
-      assets.every((asset) => (asset.variants ?? []).every((variant) => variant.prompt.length >= 20 && canvasDeclared(variant) && sizeHonoured(model, declaredSize(variant))));
+      assets.every(
+        (asset) => (asset.variants ?? []).length >= 1 && (asset.variants ?? []).length <= 2,
+      ) &&
+      assets.every(
+        (asset) =>
+          new Set((asset.variants ?? []).map((variant) => variant.seed)).size ===
+          (asset.variants ?? []).length,
+      ) &&
+      assets.every((asset) =>
+        (asset.variants ?? []).every(
+          (variant) =>
+            variant.prompt.length >= 20 &&
+            canvasDeclared(variant) &&
+            sizeHonoured(model, declaredSize(variant)),
+        ),
+      );
     checks.push({
       id: 'contract',
       passed: shapeOk && identityOk,
@@ -791,7 +887,9 @@ export async function runImagegenScenario(root: string, scenario: 1 | 2): Promis
 
     const identityInEveryPrompt =
       assets.length > 0 &&
-      assets.every((asset) => (asset.variants ?? []).every((variant) => variant.prompt.includes(IMAGEGEN_BRAND.identity)));
+      assets.every((asset) =>
+        (asset.variants ?? []).every((variant) => variant.prompt.includes(IMAGEGEN_BRAND.identity)),
+      );
     checks.push({
       id: 'identity-reuse',
       passed: identityInEveryPrompt,
@@ -805,16 +903,27 @@ export async function runImagegenScenario(root: string, scenario: 1 | 2): Promis
       renderedByAsset.set(asset.id, await renderVariants(model, asset.variants ?? []));
       evidence.push(`${asset.id}: ${summarise(renderedByAsset.get(asset.id) ?? [])}`);
     }
-    const allRendered = requiredIds.every((id) => (renderedByAsset.get(id) ?? []).some((entry) => !entry.error));
+    const allRendered = requiredIds.every((id) =>
+      (renderedByAsset.get(id) ?? []).some((entry) => !entry.error),
+    );
     checks.push({
       id: 'render-all',
       passed: allRendered,
-      detail: requiredIds.map((id) => `${id}:${(renderedByAsset.get(id) ?? []).some((entry) => !entry.error) ? 'rendered' : 'failed'}`).join(' '),
+      detail: requiredIds
+        .map(
+          (id) =>
+            `${id}:${(renderedByAsset.get(id) ?? []).some((entry) => !entry.error) ? 'rendered' : 'failed'}`,
+        )
+        .join(' '),
     });
 
     const bestOf = (id: string): RenderedVariant | undefined => {
       const rows = renderedByAsset.get(id) ?? [];
-      return rows.find((entry) => !entry.error && layoutConforms(entry.measurements)) ?? rows.find((entry) => !entry.error) ?? rows[0];
+      return (
+        rows.find((entry) => !entry.error && layoutConforms(entry.measurements)) ??
+        rows.find((entry) => !entry.error) ??
+        rows[0]
+      );
     };
     const hero = bestOf('hero');
     const avatar = bestOf('avatar');
@@ -822,16 +931,30 @@ export async function runImagegenScenario(root: string, scenario: 1 | 2): Promis
 
     checks.push({
       id: 'palette',
-      passed: requiredIds.every((id) => (bestOf(id)?.measurements.paletteColors95 ?? 9999) <= IMAGEGEN_CONSTRAINTS.paletteColors95),
-      detail: requiredIds.map((id) => `${id}=${bestOf(id)?.measurements.paletteColors95 ?? 'n/a'}`).join(' ') + ` (limit ${IMAGEGEN_CONSTRAINTS.paletteColors95})`,
+      passed: requiredIds.every(
+        (id) =>
+          (bestOf(id)?.measurements.paletteColors95 ?? 9999) <=
+          IMAGEGEN_CONSTRAINTS.paletteColors95,
+      ),
+      detail:
+        requiredIds
+          .map((id) => `${id}=${bestOf(id)?.measurements.paletteColors95 ?? 'n/a'}`)
+          .join(' ') + ` (limit ${IMAGEGEN_CONSTRAINTS.paletteColors95})`,
     });
     checks.push({
       id: 'accent',
       passed: requiredIds.every((id) => {
         const measurements = bestOf(id)?.measurements;
-        return Boolean(measurements) && measurements!.accentShare >= IMAGEGEN_CONSTRAINTS.accentShare && measurements!.forbiddenShare <= IMAGEGEN_CONSTRAINTS.forbiddenShare;
+        return (
+          Boolean(measurements) &&
+          measurements!.accentShare >= IMAGEGEN_CONSTRAINTS.accentShare &&
+          measurements!.forbiddenShare <= IMAGEGEN_CONSTRAINTS.forbiddenShare
+        );
       }),
-      detail: requiredIds.map((id) => `${id}=${(bestOf(id)?.measurements.accentShare ?? 0).toFixed(3)}`).join(' ') + ` (min ${IMAGEGEN_CONSTRAINTS.accentShare})`,
+      detail:
+        requiredIds
+          .map((id) => `${id}=${(bestOf(id)?.measurements.accentShare ?? 0).toFixed(3)}`)
+          .join(' ') + ` (min ${IMAGEGEN_CONSTRAINTS.accentShare})`,
     });
     checks.push({
       id: 'composition-hero',
@@ -840,7 +963,9 @@ export async function runImagegenScenario(root: string, scenario: 1 | 2): Promis
     });
     checks.push({
       id: 'composition-avatar',
-      passed: Boolean(avatar) && !avatar!.error &&
+      passed:
+        Boolean(avatar) &&
+        !avatar!.error &&
         avatar!.measurements.backgroundShare >= 0.25 &&
         avatar!.measurements.backgroundShare <= 0.85 &&
         Math.abs(avatar!.measurements.subjectCentroidX - 0.5) <= 0.2 &&
@@ -851,7 +976,11 @@ export async function runImagegenScenario(root: string, scenario: 1 | 2): Promis
     });
     checks.push({
       id: 'composition-card',
-      passed: Boolean(card) && !card!.error && card!.measurements.subjectCentroidY >= 0.55 && card!.measurements.subjectBorderShare <= IMAGEGEN_CONSTRAINTS.borderShare,
+      passed:
+        Boolean(card) &&
+        !card!.error &&
+        card!.measurements.subjectCentroidY >= 0.55 &&
+        card!.measurements.subjectBorderShare <= IMAGEGEN_CONSTRAINTS.borderShare,
       detail: card
         ? `centroidY=${card.measurements.subjectCentroidY.toFixed(2)} (min 0.55) border=${card.measurements.subjectBorderShare.toFixed(2)}`
         : 'footer-card was not rendered',
@@ -904,11 +1033,13 @@ export const IMAGEGEN_SCORERS: readonly SkillEvalDeterministicScorer[] = [
   {
     id: 'image-generation-practice/brand-hero-variants-scorer@1',
     scenarioIds: [IMAGEGEN_SCENARIO_1],
-    score: async ({ workingDirectory }) => imagegenScore(await runImagegenScenario(workingDirectory, 1)),
+    score: async ({ workingDirectory }) =>
+      imagegenScore(await runImagegenScenario(workingDirectory, 1)),
   },
   {
     id: 'image-generation-practice/brand-asset-set-scorer@1',
     scenarioIds: [IMAGEGEN_SCENARIO_2],
-    score: async ({ workingDirectory }) => imagegenScore(await runImagegenScenario(workingDirectory, 2)),
+    score: async ({ workingDirectory }) =>
+      imagegenScore(await runImagegenScenario(workingDirectory, 2)),
   },
 ];

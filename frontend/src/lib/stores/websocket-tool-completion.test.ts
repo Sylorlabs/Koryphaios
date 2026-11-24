@@ -69,7 +69,12 @@ function receive(
   wsStore.connection!.onmessage!(
     new MessageEvent('message', {
       data: JSON.stringify({
-        type, payload, sessionId, timestamp: sequence * 100, epoch: 1, sequence,
+        type,
+        payload,
+        sessionId,
+        timestamp: sequence * 100,
+        epoch: 1,
+        sequence,
       }),
     }),
   );
@@ -90,7 +95,11 @@ describe('realtime command completion', () => {
   });
 
   it('updates one row through streamed input and completion in the chat and agent thread', () => {
-    receive('stream.tool_call', { agentId: 'kory-manager', toolCall: { ...toolCall, input: {} } }, 1);
+    receive(
+      'stream.tool_call',
+      { agentId: 'kory-manager', toolCall: { ...toolCall, input: {} } },
+      1,
+    );
     const feedId = feedStore.feed[0].id;
     const threadId = agentStore.getAgentThreadEntries(state.activeSessionId, 'kory-manager')[0].id;
     receive('stream.tool_call', { agentId: 'kory-manager', toolCall }, 2);
@@ -113,13 +122,22 @@ describe('realtime command completion', () => {
   });
 
   it('keeps a Critic spawn in the rail while using one persistent evaluation link', () => {
-    receive('agent.spawned', {
-      agent: {
-        id: 'critic-1', name: 'Critic', role: 'critic', domain: 'critic',
-        provider: 'anthropic', model: 'claude-test', glowColor: 'var(--color-accent)',
+    receive(
+      'agent.spawned',
+      {
+        agent: {
+          id: 'critic-1',
+          name: 'Critic',
+          role: 'critic',
+          domain: 'critic',
+          provider: 'anthropic',
+          model: 'claude-test',
+          glowColor: 'var(--color-accent)',
+        },
+        task: 'Review the delegated work',
       },
-      task: 'Review the delegated work',
-    }, 1);
+      1,
+    );
 
     expect(agentStore.getAgent(state.activeSessionId, 'critic-1')).toMatchObject({
       identity: { id: 'critic-1', role: 'critic', name: 'Critic' },
@@ -127,10 +145,14 @@ describe('realtime command completion', () => {
     });
     expect(feedStore.feed).toHaveLength(0);
 
-    receive('stream.tool_call', {
-      agentId: 'kory-manager',
-      toolCall: { id: 'review-critic-1', name: 'critic_review', input: { agentId: 'critic-1' } },
-    }, 2);
+    receive(
+      'stream.tool_call',
+      {
+        agentId: 'kory-manager',
+        toolCall: { id: 'review-critic-1', name: 'critic_review', input: { agentId: 'critic-1' } },
+      },
+      2,
+    );
 
     expect(feedStore.feed).toHaveLength(1);
     expect(feedStore.feed[0]).toMatchObject({
@@ -164,8 +186,15 @@ describe('realtime command completion', () => {
     expect(feedStore.feed[0]).toMatchObject({ type: 'tool_result', metadata: { toolResult } });
   });
 
-  it.each([...NOTE_TOOL_NAMES, 'read_file', 'write_file', 'apply_patch', 'grep', 'web_fetch', 'create_checklist'])
-  ('updates %s in place and absorbs late start events', (name) => {
+  it.each([
+    ...NOTE_TOOL_NAMES,
+    'read_file',
+    'write_file',
+    'apply_patch',
+    'grep',
+    'web_fetch',
+    'create_checklist',
+  ])('updates %s in place and absorbs late start events', (name) => {
     const call = { id: 'tool-1', name, input: { title: 'Research', noteId: 'n1' } };
     const result = { ...toolResult, callId: call.id, name };
     receive('stream.tool_call', { agentId: 'kory-manager', toolCall: { ...call, input: {} } }, 1);
@@ -176,10 +205,19 @@ describe('realtime command completion', () => {
     receive('stream.tool_call', { agentId: 'kory-manager', toolCall: call }, 5);
 
     expect(feedStore.feed).toHaveLength(1);
-    expect(feedStore.feed[0]).toMatchObject({ id, type: 'tool_result', timestamp: 300, metadata: { toolCall: call, toolResult: result } });
+    expect(feedStore.feed[0]).toMatchObject({
+      id,
+      type: 'tool_result',
+      timestamp: 300,
+      metadata: { toolCall: call, toolResult: result },
+    });
     const thread = agentStore.getAgentThreadEntries(state.activeSessionId, 'kory-manager');
     expect(thread).toHaveLength(1);
-    expect(thread[0]).toMatchObject({ type: 'tool_result', timestamp: 300, metadata: { toolCall: call, toolResult: result } });
+    expect(thread[0]).toMatchObject({
+      type: 'tool_result',
+      timestamp: 300,
+      metadata: { toolCall: call, toolResult: result },
+    });
     expect(feedStore.groupedFeed).toHaveLength(1);
     if (name === 'search_notes' || name === 'recall_notes') {
       expect(feedStore.groupedFeed[0].type).toBe('tool_result');
@@ -190,11 +228,19 @@ describe('realtime command completion', () => {
     const call = { id: 'shared-id', name: 'read_note', input: { title: 'Research' } };
     const result = { ...toolResult, callId: call.id, name: call.name };
     receive('stream.tool_call', { agentId: 'worker-a', toolCall: call }, 1);
-    receive('stream.tool_call', { agentId: 'worker-b', toolCall: { ...call, input: { title: 'Findings' } } }, 2);
+    receive(
+      'stream.tool_call',
+      { agentId: 'worker-b', toolCall: { ...call, input: { title: 'Findings' } } },
+      2,
+    );
     receive('stream.tool_result', { agentId: 'worker-a', toolResult: result }, 3);
     expect(feedStore.feed).toHaveLength(2);
     expect(feedStore.feed[0]).toMatchObject({ agentId: 'worker-a', type: 'tool_result' });
-    expect(feedStore.feed[1]).toMatchObject({ agentId: 'worker-b', type: 'tool_call', metadata: { toolCall: { input: { title: 'Findings' } } } });
+    expect(feedStore.feed[1]).toMatchObject({
+      agentId: 'worker-b',
+      type: 'tool_call',
+      metadata: { toolCall: { input: { title: 'Findings' } } },
+    });
     receive('stream.tool_result', { agentId: 'worker-b', toolResult: result }, 4);
     expect(feedStore.feed.map((row) => row.type)).toEqual(['tool_result', 'tool_result']);
   });
@@ -204,7 +250,12 @@ describe('realtime command completion', () => {
     const id = feedStore.feed[0].id;
     receive('stream.tool_call', { agentId: 'kory-manager', toolCall }, 2);
     expect(feedStore.feed).toHaveLength(1);
-    expect(feedStore.feed[0]).toMatchObject({ id, type: 'tool_result', timestamp: 100, metadata: { toolCall, toolResult } });
+    expect(feedStore.feed[0]).toMatchObject({
+      id,
+      type: 'tool_result',
+      timestamp: 100,
+      metadata: { toolCall, toolResult },
+    });
     expect(agentStore.getAgentThreadEntries(state.activeSessionId, 'kory-manager')).toHaveLength(1);
   });
 });

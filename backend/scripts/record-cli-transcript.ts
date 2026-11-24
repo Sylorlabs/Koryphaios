@@ -30,7 +30,10 @@ import type { Provider, StreamRequest } from '../src/providers/types';
 type RecordableProvider = 'codex' | 'claude' | 'opencode';
 
 /** Which spawn is the turn itself. Model probes and version checks are not recorded. */
-const TURN_MATCHERS: Record<RecordableProvider, (command: string, args: readonly string[]) => boolean> = {
+const TURN_MATCHERS: Record<
+  RecordableProvider,
+  (command: string, args: readonly string[]) => boolean
+> = {
   codex: (_command, args) => args.includes('exec'),
   claude: (_command, args) => args.includes('--include-partial-messages'),
   opencode: (_command, args) => args[0] === 'acp',
@@ -49,15 +52,18 @@ function parseArgs(argv: string[]): Options {
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i];
     const value = argv[i + 1];
-    if (!key?.startsWith('--') || value === undefined) fail(`expected --flag value pairs, got "${key}"`);
+    if (!key?.startsWith('--') || value === undefined)
+      fail(`expected --flag value pairs, got "${key}"`);
     values.set(key.slice(2), value);
   }
   const provider = values.get('provider') as RecordableProvider | undefined;
-  if (!provider || !(provider in TURN_MATCHERS)) fail('--provider must be codex, claude or opencode');
+  if (!provider || !(provider in TURN_MATCHERS))
+    fail('--provider must be codex, claude or opencode');
   const name = values.get('name');
   const model = values.get('model');
   const prompt = values.get('prompt');
-  if (!name || !/^[a-z0-9-]+$/.test(name)) fail('--name is required (lowercase letters, digits, dashes)');
+  if (!name || !/^[a-z0-9-]+$/.test(name))
+    fail('--name is required (lowercase letters, digits, dashes)');
   if (!model) fail('--model is required');
   if (!prompt) fail('--prompt is required');
   return {
@@ -85,10 +91,7 @@ function cliVersion(binary: string): string {
   }
 }
 
-function buildProvider(
-  provider: RecordableProvider,
-  spawnChild: typeof spawn,
-): Provider {
+function buildProvider(provider: RecordableProvider, spawnChild: typeof spawn): Provider {
   const config = { name: provider } as ProviderConfig;
   switch (provider) {
     case 'codex':
@@ -135,11 +138,20 @@ async function main(): Promise<void> {
     fail('the adapter never spawned the turn process; nothing was recorded');
   }
 
-  const outDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'providers', 'replay', 'fixtures');
+  const outDir = join(
+    dirname(fileURLToPath(import.meta.url)),
+    '..',
+    'src',
+    'providers',
+    'replay',
+    'fixtures',
+  );
   mkdirSync(outDir, { recursive: true });
   const outPath = join(outDir, `${options.provider}-${options.name}.jsonl`);
   writeFileSync(outPath, serializeTranscript(transcript));
-  console.log(`wrote ${outPath} (${transcript.frames.length} frames). Review it before committing.`);
+  console.log(
+    `wrote ${outPath} (${transcript.frames.length} frames). Review it before committing.`,
+  );
 }
 
 await main();

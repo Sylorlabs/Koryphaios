@@ -19,9 +19,9 @@ import type { HopliteSpeed } from './hoplite-client';
  *  selection (including off) omits the field so the platform default applies.
  *  Exported for the delegation request builder — Hoplite's adapter is inert
  *  this release, but the mapping is where `speed` enters when it is wired. */
-export function hopliteSpeedForRequest(request: Pick<StreamRequest, 'speedTier'>):
-    | HopliteSpeed
-    | undefined {
+export function hopliteSpeedForRequest(
+  request: Pick<StreamRequest, 'speedTier'>,
+): HopliteSpeed | undefined {
   return request.speedTier === 'fast' ? 'fast' : undefined;
 }
 

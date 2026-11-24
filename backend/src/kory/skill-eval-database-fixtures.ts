@@ -50,10 +50,13 @@ function artifactHasEvidence(
   report: { artifact: unknown | null; text: string },
   patterns: readonly RegExp[],
 ): boolean {
-  return Boolean(report.artifact) && patterns.every((pattern) => {
-    pattern.lastIndex = 0;
-    return pattern.test(report.text);
-  });
+  return (
+    Boolean(report.artifact) &&
+    patterns.every((pattern) => {
+      pattern.lastIndex = 0;
+      return pattern.test(report.text);
+    })
+  );
 }
 
 function runPython(root: string, source: string): { passed: boolean; evidence: string } {
@@ -446,9 +449,13 @@ const mysqlIndexScorer: SkillEvalDeterministicScorer = {
       /write|storage/u,
       /postgres/u,
     ]);
-    const runtime = structure && bounded
-      ? runMySqlOnlineIndexRuntime(workingDirectory)
-      : { passed: false, evidence: 'runtime skipped because online-DDL shape or evidence contract failed' };
+    const runtime =
+      structure && bounded
+        ? runMySqlOnlineIndexRuntime(workingDirectory)
+        : {
+            passed: false,
+            evidence: 'runtime skipped because online-DDL shape or evidence contract failed',
+          };
     const passed = structure && bounded && runtime.passed;
     return {
       passed,
@@ -527,9 +534,13 @@ test('hidden: implementation exposes canonical lock ordering independent of dire
       /balance|ledger/u,
       /sqlite/u,
     ]);
-    const runtime = hidden.passed && reg && bounded
-      ? runMySqlDeadlockRuntime(workingDirectory)
-      : { passed: false, evidence: 'runtime skipped because transfer/regression/evidence contract failed' };
+    const runtime =
+      hidden.passed && reg && bounded
+        ? runMySqlDeadlockRuntime(workingDirectory)
+        : {
+            passed: false,
+            evidence: 'runtime skipped because transfer/regression/evidence contract failed',
+          };
     const passed = hidden.passed && reg && bounded && runtime.passed;
     return {
       passed,
@@ -787,9 +798,13 @@ test('hidden: duplicate id and stale remove are explicit',()=>{const s=new Mongo
       /explain|index/u,
       /redis/u,
     ]);
-    const runtime = hidden.passed && reg && bounded
-      ? runMongoAtomicUpdateRuntime()
-      : { passed: false, evidence: 'runtime skipped because atomic-update/regression/evidence contract failed' };
+    const runtime =
+      hidden.passed && reg && bounded
+        ? runMongoAtomicUpdateRuntime()
+        : {
+            passed: false,
+            evidence: 'runtime skipped because atomic-update/regression/evidence contract failed',
+          };
     const passed = hidden.passed && reg && bounded && runtime.passed;
     return {
       passed,
@@ -847,9 +862,10 @@ const mongoIndexScorer: SkillEvalDeterministicScorer = {
       /tenant|skew/u,
       /growth|concern/u,
     ]);
-    const runtime = hidden.passed && bounded
-      ? runMongoIndexRuntime(workingDirectory)
-      : { passed: false, evidence: 'runtime skipped because index/evidence contract failed' };
+    const runtime =
+      hidden.passed && bounded
+        ? runMongoIndexRuntime(workingDirectory)
+        : { passed: false, evidence: 'runtime skipped because index/evidence contract failed' };
     const passed = hidden.passed && bounded && runtime.passed;
     return {
       passed,

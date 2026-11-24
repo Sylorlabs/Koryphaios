@@ -42,9 +42,9 @@ describe('autonomy limits', () => {
     // The composer's Worktree preset writes this project default, so a PUT
     // patch must keep it rather than silently falling back to `auto`.
     expect(DEFAULT_AGENT_SETTINGS.worktreeMode).toBe('auto');
-    expect(
-      mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { worktreeMode: 'never' }).worktreeMode,
-    ).toBe('never');
+    expect(mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { worktreeMode: 'never' }).worktreeMode).toBe(
+      'never',
+    );
     expect(
       mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { permissionMode: 'unsafe-value' }).permissionMode,
     ).toBe('guarded');
@@ -328,7 +328,10 @@ describe('per-chat agent overrides', () => {
         [{ enableCritic: true }, 'always'],
         [{ agentSettings: { criticGateEnabled: false } }, 'off'],
         [{ agentSettings: { criticGateEnabled: true } }, 'always'],
-        [{ enableCritic: false, agentSettings: { criticMode: 'auto', criticGateEnabled: false } }, 'auto'],
+        [
+          { enableCritic: false, agentSettings: { criticMode: 'auto', criticGateEnabled: false } },
+          'auto',
+        ],
       ] as const) {
         writeFileSync(join(root, 'koryphaios.json'), JSON.stringify(config));
         const settings = loadAgentSettings(root);
@@ -338,15 +341,21 @@ describe('per-chat agent overrides', () => {
       const settings = mergeAgentSettings(loadAgentSettings(root), { criticMode: 'auto' });
       saveAgentSettings(root, settings);
       expect(loadAgentSettings(root).criticMode).toBe('auto');
-      expect(JSON.parse(readFileSync(join(root, 'koryphaios.json'), 'utf8')).agentSettings.criticMode).toBe('auto');
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      expect(
+        JSON.parse(readFileSync(join(root, 'koryphaios.json'), 'utf8')).agentSettings.criticMode,
+      ).toBe('auto');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('resolves mode patches and chat legacy overrides without overriding other chats', () => {
     const auto = mergeAgentSettings(DEFAULT_AGENT_SETTINGS, { criticMode: 'auto' });
     expect(mergeAgentSettings(auto, { criticMode: 'invalid' }).criticMode).toBe('auto');
     expect(mergeAgentSettings(auto, { criticGateEnabled: true }).criticMode).toBe('always');
-    expect(mergeAgentSettings(auto, { criticMode: 'off', criticGateEnabled: true }).criticGateEnabled).toBe(false);
+    expect(
+      mergeAgentSettings(auto, { criticMode: 'off', criticGateEnabled: true }).criticGateEnabled,
+    ).toBe(false);
     expect(applySessionAgentOverrides(auto, { criticGateEnabled: false }).criticMode).toBe('off');
     expect(applySessionAgentOverrides(auto, { criticMode: 'always' }).criticMode).toBe('always');
     expect(applySessionAgentOverrides(auto, {}).criticMode).toBe('auto');
@@ -440,12 +449,12 @@ describe('per-chat agent overrides', () => {
 
     it('session overrides prefer worktreeMode but still accept the legacy boolean', () => {
       const base = { ...DEFAULT_AGENT_SETTINGS };
-      expect(
-        applySessionAgentOverrides(base, { worktreeMode: 'never' }).worktreeMode,
-      ).toBe('never');
-      expect(
-        applySessionAgentOverrides(base, { worktreeIsolation: false }).worktreeMode,
-      ).toBe('never');
+      expect(applySessionAgentOverrides(base, { worktreeMode: 'never' }).worktreeMode).toBe(
+        'never',
+      );
+      expect(applySessionAgentOverrides(base, { worktreeIsolation: false }).worktreeMode).toBe(
+        'never',
+      );
       expect(
         applySessionAgentOverrides(base, {
           worktreeMode: 'always',
@@ -461,9 +470,7 @@ describe('per-chat agent overrides', () => {
       try {
         writeFileSync(join(root, 'koryphaios.json'), JSON.stringify({}));
         setSessionAgentOverrides('chat-yolo-write', { permissionMode: 'yolo' });
-        expect(loadAgentSettingsForSession(root, 'chat-yolo-write').permissionMode).toBe(
-          'yolo',
-        );
+        expect(loadAgentSettingsForSession(root, 'chat-yolo-write').permissionMode).toBe('yolo');
       } finally {
         resetSessionAgentOverridesCache();
         rmSync(root, { recursive: true, force: true });
@@ -484,15 +491,9 @@ describe('per-chat agent overrides', () => {
 
 describe('inter-agent messaging permissions', () => {
   it('defaults to the preset table per permission mode', () => {
-    expect(
-      resolveMessagingPermission({ permissionMode: 'yolo' }, 'subAgent'),
-    ).toBe('allow');
-    expect(
-      resolveMessagingPermission({ permissionMode: 'guarded' }, 'manager'),
-    ).toBe('allow');
-    expect(
-      resolveMessagingPermission({ permissionMode: 'guarded' }, 'subAgent'),
-    ).toBe('ask');
+    expect(resolveMessagingPermission({ permissionMode: 'yolo' }, 'subAgent')).toBe('allow');
+    expect(resolveMessagingPermission({ permissionMode: 'guarded' }, 'manager')).toBe('allow');
+    expect(resolveMessagingPermission({ permissionMode: 'guarded' }, 'subAgent')).toBe('ask');
     expect(resolveMessagingPermission({ permissionMode: 'ask' }, 'manager')).toBe('ask');
     expect(resolveMessagingPermission({ permissionMode: 'custom' }, 'subAgent')).toBe('ask');
   });

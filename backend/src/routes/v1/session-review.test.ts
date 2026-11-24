@@ -21,13 +21,15 @@ const { sessionReviewRoutes } = await import('./session-review');
 const app = new Elysia().onError(errorHandler).use(sessionReviewRoutes);
 const sessions = new SessionStore();
 const source = join(root, 'source');
-const startSessionTurn = mock(async (_input: { sourceCommandId: string; userMessage: string; source: string }) => ({
-  accepted: true as const,
-  sessionId: 'x',
-  runId: 'run',
-  userMessageId: 'msg',
-  completion: Promise.resolve({}),
-}));
+const startSessionTurn = mock(
+  async (_input: { sourceCommandId: string; userMessage: string; source: string }) => ({
+    accepted: true as const,
+    sessionId: 'x',
+    runId: 'run',
+    userMessageId: 'msg',
+    completion: Promise.resolve({}),
+  }),
+);
 let token = '';
 let chatId = '';
 let chatPath = '';
@@ -47,7 +49,10 @@ beforeAll(async () => {
   git(source, 'config', 'user.name', 'Route Test');
   git(source, 'config', 'user.email', 'route@example.test');
   git(source, 'config', 'commit.gpgsign', 'false');
-  writeFileSync(join(source, 'notes.txt'), Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n') + '\n');
+  writeFileSync(
+    join(source, 'notes.txt'),
+    Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n') + '\n',
+  );
   git(source, 'add', '.');
   git(source, 'commit', '-m', 'Initial');
   const workspace = await createSessionWorkspace(source, {
@@ -135,7 +140,12 @@ describe('session review routes', () => {
     expect(bad.status).not.toBe(200);
 
     const created = await (
-      await call('POST', `/${chatId}/review-comments`, { filePath: 'notes.txt', line: 5, side: 'old', body: 'gone soon' })
+      await call('POST', `/${chatId}/review-comments`, {
+        filePath: 'notes.txt',
+        line: 5,
+        side: 'old',
+        body: 'gone soon',
+      })
     ).json();
     const id = created.data.comment.id;
     const resolved = await (await call('POST', `/${chatId}/review-comments/${id}/resolve`)).json();
@@ -147,7 +157,9 @@ describe('session review routes', () => {
   test('hunk listing and stage act on the chat checkout, refusing a stale revision', async () => {
     writeFileSync(
       join(chatPath, 'notes.txt'),
-      Array.from({ length: 30 }, (_, i) => (i === 9 ? 'line 10 edited' : `line ${i + 1}`)).join('\n') + '\n',
+      Array.from({ length: 30 }, (_, i) => (i === 9 ? 'line 10 edited' : `line ${i + 1}`)).join(
+        '\n',
+      ) + '\n',
     );
     const listed = await (await call('GET', `/${chatId}/git/hunks?file=notes.txt`)).json();
     expect(listed.data.hunks).toHaveLength(1);
@@ -168,7 +180,11 @@ describe('session review routes', () => {
       revision: listed.data.revision,
     });
     expect(staged.status).toBe(200);
-    expect((await staged.json()).data).toMatchObject({ action: 'stage', file: 'notes.txt', staged: false });
+    expect((await staged.json()).data).toMatchObject({
+      action: 'stage',
+      file: 'notes.txt',
+      staged: false,
+    });
     expect(readFileSync(join(chatPath, 'notes.txt'), 'utf8')).toContain('line 10 edited');
   });
 

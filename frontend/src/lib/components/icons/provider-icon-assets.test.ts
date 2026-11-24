@@ -6,7 +6,10 @@ import { EXISTING_PROVIDER_ICON_PATHS } from './provider-icon-assets';
 describe('provider icon assets', () => {
   it('ships the standalone Reflection symbol at the backend iconPath', () => {
     expect(EXISTING_PROVIDER_ICON_PATHS.has('/provider-icons/reflection.svg')).toBe(true);
-    const source = readFileSync(join(process.cwd(), 'static/provider-icons/reflection.svg'), 'utf8');
+    const source = readFileSync(
+      join(process.cwd(), 'static/provider-icons/reflection.svg'),
+      'utf8',
+    );
     const svg = new DOMParser().parseFromString(source, 'image/svg+xml');
     expect(svg.querySelector('parsererror')).toBeNull();
     expect(svg.documentElement.getAttribute('viewBox')).toBe('0 0 170.36 82.5');

@@ -50,15 +50,7 @@ describe('offline CLI compatibility evidence', () => {
   }
 
   it('does not infer CLI compatibility for SDK/API providers or unknown aliases', () => {
-    for (const name of [
-      'kimicode',
-      'kilocode',
-      'codebuff',
-      'openai',
-      'Claude',
-      'unknown',
-      '',
-    ]) {
+    for (const name of ['kimicode', 'kilocode', 'codebuff', 'openai', 'Claude', 'unknown', '']) {
       expect(getCliAdapterCompatibility(name)).toBeUndefined();
     }
     expect(getCliAdapterCompatibility('codex-auth')?.binary).toBe('codex');

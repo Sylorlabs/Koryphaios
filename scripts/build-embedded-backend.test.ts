@@ -83,14 +83,12 @@ describe('desktop embedded backend build', () => {
       'process.env.KORYPHAIOS_BACKEND_BUILD_HASH': JSON.stringify(options.bundleHash),
     });
     // No relay URL still carries the build hash on its own.
-    expect(
-      embeddedBackendBuildConfig({ ...options, relayUrl: undefined }).define,
-    ).toEqual({
+    expect(embeddedBackendBuildConfig({ ...options, relayUrl: undefined }).define).toEqual({
       'process.env.KORYPHAIOS_BACKEND_BUILD_HASH': JSON.stringify(options.bundleHash),
     });
-    expect(
-      embeddedBackendBuildConfig({ ...options, bundleHash: undefined }).define,
-    ).toEqual({ 'process.env.RELAY_URL': JSON.stringify(options.relayUrl) });
+    expect(embeddedBackendBuildConfig({ ...options, bundleHash: undefined }).define).toEqual({
+      'process.env.RELAY_URL': JSON.stringify(options.relayUrl),
+    });
   });
 
   test('genuine host compile embeds immutable current helper contracts; raw compile stays fail-closed', async () => {

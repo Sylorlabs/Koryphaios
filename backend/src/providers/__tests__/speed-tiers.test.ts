@@ -35,10 +35,7 @@ describe('VENDOR_SPEED_TIER_RULES', () => {
 
 describe('foldVendorSpeedTiers', () => {
   it('folds minimax-m2.7 + minimax-m2.7-highspeed into one model', () => {
-    const out = foldVendorSpeedTiers([
-      model('minimax-m2.7'),
-      model('minimax-m2.7-highspeed'),
-    ]);
+    const out = foldVendorSpeedTiers([model('minimax-m2.7'), model('minimax-m2.7-highspeed')]);
     expect(out).toHaveLength(1);
     expect(out[0].id).toBe('minimax-m2.7');
     expect(out[0].speedTiers).toEqual([

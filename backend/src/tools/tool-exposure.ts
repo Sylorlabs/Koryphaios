@@ -42,7 +42,8 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   ask_user:
     'Ask the human whenever you are unsure; waits for the answer. params: question, options (2-4 short strings; a custom-answer box is always shown)',
   rename_session: 'Rename this chat as its topic evolves. params: title (3-6 descriptive words)',
-  fork_chat: 'Fork a chat into a new one from a finished point (default: latest). Original is unchanged. params: sessionId, messageId, title',
+  fork_chat:
+    'Fork a chat into a new one from a finished point (default: latest). Original is unchanged. params: sessionId, messageId, title',
   request_manager_relay: 'Relay a message to the manager on another agent behalf.',
   send_agent_message: 'Send a message to another agent. params: body',
   fetch_context: 'Pull previously pruned context back into the window. params: id, query',
@@ -58,9 +59,11 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   'analyze-error': 'Explain one already-detected error. params: errorId',
   'detect-errors': 'Scan a source tree for errors. params: source, language, files',
   'suggest-fixes': 'Propose fixes for a detected error. params: errorId',
-  delegate_to_worker: 'Delegate to a local specialist worker. params: task, domain, model, wait, compare',
+  delegate_to_worker:
+    'Delegate to a local specialist worker. params: task, domain, model, wait, compare',
   wait_for_agents: 'Join background workers started with wait:false. params: agentIds, timeoutSec',
-  manage_agents: 'List or control spawned workers. params: action, agentId, message, model, reasoningLevel, keepRecent',
+  manage_agents:
+    'List or control spawned workers. params: action, agentId, message, model, reasoningLevel, keepRecent',
   ghost_commit: 'Commit work-in-progress locally. params: label',
   commit_and_create_pr: 'Commit, push, and open a pull request. params: taskDescription',
   git_inspect:
@@ -104,7 +107,8 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   record_work_note: 'Log a work session. params: title, summary, status',
   manage_mcp_server: 'Add, remove, or configure an MCP server. params: action, name',
   list_mcp_tools: 'Discover custom MCP tools and their full schemas. params: server_name?',
-  invoke_mcp_tool: 'Call a discovered custom MCP tool, including tools added mid-turn. params: server_name, tool_name, arguments',
+  invoke_mcp_tool:
+    'Call a discovered custom MCP tool, including tools added mid-turn. params: server_name, tool_name, arguments',
   shell_manage: 'List, kill, or read a background shell process. params: action, processId',
   batch_edit: 'Apply several file edits in one call. params: files',
   edit_file: 'params: path, old_str, new_str',
@@ -215,9 +219,7 @@ export async function validateToolInputAgainstSchema(
   schema: Record<string, unknown>,
   input: unknown,
 ): Promise<ToolInputValidation> {
-  const validateOnce = async (
-    candidate: unknown,
-  ): Promise<ToolInputValidation> => {
+  const validateOnce = async (candidate: unknown): Promise<ToolInputValidation> => {
     try {
       const wrapped = fromJsonSchema(schema) as unknown as {
         '~standard': {
@@ -252,11 +254,7 @@ export async function validateToolInputAgainstSchema(
   if (direct.valid) return direct;
   // One rescue pass for stringified array parameters; if the coerced form
   // still fails, report the original error so the guidance stays truthful.
-  if (
-    input &&
-    typeof input === 'object' &&
-    !Array.isArray(input)
-  ) {
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
     const coerced = coerceStringifiedArrayInputs(schema, input as Record<string, unknown>);
     if (coerced) {
       const retried = await validateOnce(coerced);

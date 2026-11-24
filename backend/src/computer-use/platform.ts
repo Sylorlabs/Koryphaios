@@ -323,7 +323,11 @@ export function createComputerPlatformAdapter(
     return response.targets.map(target);
   }
   /** Re-resolve a step's window and rebuild only the fields the native helper accepts. */
-  async function stepRequest(step: unknown, cache: Map<string, ComputerTarget>, signal?: AbortSignal): Promise<ComputerAction> {
+  async function stepRequest(
+    step: unknown,
+    cache: Map<string, ComputerTarget>,
+    signal?: AbortSignal,
+  ): Promise<ComputerAction> {
     if (!object(step) || typeof step.kind !== 'string') throw new Error('Invalid queue step');
     const kind = step.kind;
     if (kind === 'wait') {
@@ -345,7 +349,12 @@ export function createComputerPlatformAdapter(
     const elementId = typeof step.elementId === 'string' ? step.elementId : undefined;
     if (kind === 'type') {
       if (!boundedString(step.text, 16384)) throw new Error('Invalid queue text');
-      return { kind: 'type', target: current, ...(elementId ? { elementId } : {}), text: step.text };
+      return {
+        kind: 'type',
+        target: current,
+        ...(elementId ? { elementId } : {}),
+        text: step.text,
+      };
     }
     if (kind === 'key') {
       if (!boundedString(step.key, 64)) throw new Error('Invalid queue key');
@@ -353,7 +362,12 @@ export function createComputerPlatformAdapter(
     }
     if (kind === 'scroll') {
       if (!Number.isFinite(step.delta)) throw new Error('Invalid queue scroll');
-      return { kind: 'scroll', target: current, ...(elementId ? { elementId } : {}), delta: step.delta as number };
+      return {
+        kind: 'scroll',
+        target: current,
+        ...(elementId ? { elementId } : {}),
+        delta: step.delta as number,
+      };
     }
     if (kind === 'drag') {
       if (!Array.isArray(step.path) || step.path.length < 1 || step.path.length > 512)
@@ -366,7 +380,9 @@ export function createComputerPlatformAdapter(
       return { kind: 'drag', target: current, ...(elementId ? { elementId } : {}), path };
     }
     const coords =
-      Number.isFinite(step.x) && Number.isFinite(step.y) ? { x: step.x as number, y: step.y as number } : {};
+      Number.isFinite(step.x) && Number.isFinite(step.y)
+        ? { x: step.x as number, y: step.y as number }
+        : {};
     const button = step.button === 'right' || step.button === 'middle' ? step.button : undefined;
     return {
       kind: kind as 'click' | 'doubleClick' | 'move',
@@ -382,7 +398,11 @@ export function createComputerPlatformAdapter(
     signal?: AbortSignal,
   ): Promise<ComputerActionResult> {
     signal?.throwIfAborted();
-    if (!Array.isArray(action.steps) || action.steps.length === 0 || action.steps.length > MAX_QUEUE_STEPS)
+    if (
+      !Array.isArray(action.steps) ||
+      action.steps.length === 0 ||
+      action.steps.length > MAX_QUEUE_STEPS
+    )
       throw new Error(`A queue needs 1 to ${MAX_QUEUE_STEPS} steps`);
     const cache = new Map<string, ComputerTarget>();
     const steps: ComputerAction[] = [];
@@ -441,8 +461,10 @@ export function createComputerPlatformAdapter(
           available: response.available,
           capabilities: response.available ? response.capabilities : [],
           limitations: response.limitations,
-          ...(Array.isArray(response.actions) && response.actions.every((a) => typeof a === 'string' && ACTIONS.has(a))
-            ? { actions: response.actions } : {}),
+          ...(Array.isArray(response.actions) &&
+          response.actions.every((a) => typeof a === 'string' && ACTIONS.has(a))
+            ? { actions: response.actions }
+            : {}),
         } as ComputerPlatformStatus;
       } catch (error) {
         return {
@@ -488,19 +510,55 @@ export function createComputerPlatformAdapter(
         action.kind === 'listElements'
           ? { kind: 'listElements', target: current }
           : action.kind === 'click'
-            ? { kind: 'click', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), ...(action.x !== undefined ? { x: action.x, y: action.y } : {}), ...(action.button ? { button: action.button } : {}) }
+            ? {
+                kind: 'click',
+                target: current,
+                ...(action.elementId ? { elementId: action.elementId } : {}),
+                ...(action.x !== undefined ? { x: action.x, y: action.y } : {}),
+                ...(action.button ? { button: action.button } : {}),
+              }
             : action.kind === 'doubleClick'
-              ? { kind: 'doubleClick', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), ...(action.x !== undefined ? { x: action.x, y: action.y } : {}) }
+              ? {
+                  kind: 'doubleClick',
+                  target: current,
+                  ...(action.elementId ? { elementId: action.elementId } : {}),
+                  ...(action.x !== undefined ? { x: action.x, y: action.y } : {}),
+                }
               : action.kind === 'move'
-                ? { kind: 'move', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), ...(action.x !== undefined ? { x: action.x, y: action.y } : {}) }
+                ? {
+                    kind: 'move',
+                    target: current,
+                    ...(action.elementId ? { elementId: action.elementId } : {}),
+                    ...(action.x !== undefined ? { x: action.x, y: action.y } : {}),
+                  }
                 : action.kind === 'drag'
-                  ? { kind: 'drag', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), path: action.path }
+                  ? {
+                      kind: 'drag',
+                      target: current,
+                      ...(action.elementId ? { elementId: action.elementId } : {}),
+                      path: action.path,
+                    }
                   : action.kind === 'type'
-                    ? { kind: 'type', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), text: action.text }
+                    ? {
+                        kind: 'type',
+                        target: current,
+                        ...(action.elementId ? { elementId: action.elementId } : {}),
+                        text: action.text,
+                      }
                     : action.kind === 'key'
-                      ? { kind: 'key', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), key: action.key }
+                      ? {
+                          kind: 'key',
+                          target: current,
+                          ...(action.elementId ? { elementId: action.elementId } : {}),
+                          key: action.key,
+                        }
                       : action.kind === 'scroll'
-                        ? { kind: 'scroll', target: current, ...(action.elementId ? { elementId: action.elementId } : {}), delta: action.delta }
+                        ? {
+                            kind: 'scroll',
+                            target: current,
+                            ...(action.elementId ? { elementId: action.elementId } : {}),
+                            delta: action.delta,
+                          }
                         : // Placement returned above, so the remaining kinds need only their target.
                           ({ kind: action.kind, target: current } as ComputerAction);
       // Directed delivery is a delivery detail, not a new native instruction shape.

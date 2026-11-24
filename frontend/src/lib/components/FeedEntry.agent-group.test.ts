@@ -83,8 +83,7 @@ function renderGroup(isExpanded: boolean, onToggleGroup = vi.fn()) {
   return {
     ...result,
     onToggleGroup,
-    summary: () =>
-      result.container.querySelector<HTMLElement>('.agent-group-scroll span.truncate'),
+    summary: () => result.container.querySelector<HTMLElement>('.agent-group-scroll span.truncate'),
   };
 }
 
@@ -122,19 +121,25 @@ describe('sub-agent group rows never dump raw logs into the feed', () => {
     expect(scroller!.className).toContain('overflow-y-auto');
   });
 
-  it.each([false, true])('opens the Critic chat with an explicit button (expanded=%s)', async (expanded) => {
-    const navigate = vi.fn();
-    window.addEventListener(OPEN_AGENT_THREAD_EVENT, navigate);
-    try {
-      const { onToggleGroup } = renderGroup(expanded);
-      await fireEvent.click(screen.getByRole('button', { name: 'Open Critic chat' }));
-      expect(navigate).toHaveBeenCalledTimes(1);
-      expect(navigate.mock.calls[0][0].detail).toEqual({ sessionId: 'session-1', agentId: 'worker-1' });
-      expect(onToggleGroup).not.toHaveBeenCalled();
-    } finally {
-      window.removeEventListener(OPEN_AGENT_THREAD_EVENT, navigate);
-    }
-  });
+  it.each([false, true])(
+    'opens the Critic chat with an explicit button (expanded=%s)',
+    async (expanded) => {
+      const navigate = vi.fn();
+      window.addEventListener(OPEN_AGENT_THREAD_EVENT, navigate);
+      try {
+        const { onToggleGroup } = renderGroup(expanded);
+        await fireEvent.click(screen.getByRole('button', { name: 'Open Critic chat' }));
+        expect(navigate).toHaveBeenCalledTimes(1);
+        expect(navigate.mock.calls[0][0].detail).toEqual({
+          sessionId: 'session-1',
+          agentId: 'worker-1',
+        });
+        expect(onToggleGroup).not.toHaveBeenCalled();
+      } finally {
+        window.removeEventListener(OPEN_AGENT_THREAD_EVENT, navigate);
+      }
+    },
+  );
 
   it('renders no sub-agent rows at all while collapsed, and toggles on click', async () => {
     const onToggleGroup = vi.fn();

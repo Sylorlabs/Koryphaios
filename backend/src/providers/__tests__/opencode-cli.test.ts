@@ -19,7 +19,12 @@ const CATALOG_JSON = JSON.stringify({
       providerID: 'opencode',
       name: 'Pulse Alpha Free',
       package: '@opencode/ai/providers/openai-compatible',
-      capabilities: { tools: true, input: ['text', 'image', 'pdf'], output: ['text'], temperature: true },
+      capabilities: {
+        tools: true,
+        input: ['text', 'image', 'pdf'],
+        output: ['text'],
+        temperature: true,
+      },
       variants: [
         { id: 'low', settings: { reasoningEffort: 'low' } },
         { id: 'high', settings: { reasoningEffort: 'High' } },
@@ -55,7 +60,12 @@ const CATALOG_JSON = JSON.stringify({
       time: { released: 1 },
       cost: [
         { input: 5, output: 25, cache: { read: 0.5, write: 6.25 } },
-        { tier: { type: 'context', size: 200000 }, input: 10, output: 37.5, cache: { read: 1, write: 12.5 } },
+        {
+          tier: { type: 'context', size: 200000 },
+          input: 10,
+          output: 37.5,
+          cache: { read: 1, write: 12.5 },
+        },
       ],
       status: 'active',
       enabled: true,

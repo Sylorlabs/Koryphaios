@@ -88,7 +88,9 @@ test('materializes a returned bundle for review without applying it', () => {
   const result = materializeDelegatedWork(origin, bundle);
   expect(result.directory).toContain('.koryphaios/incoming/transfer-1');
   expect(existsSync(join(result.directory, 'changes.patch'))).toBe(true);
-  expect(readFileSync(join(result.directory, 'TRANSFER.md'), 'utf8')).toContain('Nothing was committed or pushed');
+  expect(readFileSync(join(result.directory, 'TRANSFER.md'), 'utf8')).toContain(
+    'Nothing was committed or pushed',
+  );
   expect(readFileSync(join(result.directory, 'files', 'untracked.txt'), 'utf8')).toBe('hello\n');
   // The origin checkout is untouched until the user applies the patch.
   expect(readFileSync(join(origin, 'app.ts'), 'utf8')).toBe('one\n');

@@ -351,12 +351,8 @@ describe('OnboardingWalkthrough', () => {
     expect(screen.getByRole('radio', { name: /Adaptive/ })).toBeVisible();
     await fireEvent.click(screen.getByRole('button', { name: 'Light' }));
     expect(mocks.setModePreset).toHaveBeenCalledWith('light', 'light');
-    expect(
-      screen.getByRole('button', { name: 'Edit dark mode primary accent' }),
-    ).toBeVisible();
-    expect(
-      screen.getByRole('button', { name: 'Edit dark mode secondary accent' }),
-    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Edit dark mode primary accent' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Edit dark mode secondary accent' })).toBeVisible();
 
     await fireEvent.click(screen.getByRole('button', { name: /^Continue/ }));
     expect(screen.getByRole('heading', { name: 'How should Kory work with you?' })).toBeVisible();
@@ -378,10 +374,7 @@ describe('OnboardingWalkthrough', () => {
     expect(screen.getByText('Critic', { exact: true })).toBeVisible();
     await fireEvent.click(screen.getByRole('combobox', { name: 'Critic mode' }));
     await fireEvent.click(screen.getByRole('option', { name: /^Auto/ }));
-    expect(mocks.saveSettings).toHaveBeenCalledWith(
-      { criticMode: 'auto' },
-      { quietSuccess: true },
-    );
+    expect(mocks.saveSettings).toHaveBeenCalledWith({ criticMode: 'auto' }, { quietSuccess: true });
     await fireEvent.click(screen.getByRole('button', { name: /^YOLO/ }));
     expect(mocks.saveSettings).toHaveBeenCalledWith(
       { permissionMode: 'yolo' },
@@ -477,9 +470,7 @@ describe('OnboardingWalkthrough', () => {
     await fireEvent.click(
       screen.getByRole('checkbox', { name: 'Select chat Refactor alpha router' }),
     );
-    await fireEvent.click(
-      screen.getByRole('checkbox', { name: 'Select chat Fix beta migration' }),
-    );
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Select chat Fix beta migration' }));
 
     expect(screen.getByText(/2 chats selected/)).toBeVisible();
     expect(screen.getByText(/across 2 projects and 2 providers/)).toBeVisible();

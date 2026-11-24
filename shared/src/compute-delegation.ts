@@ -142,8 +142,13 @@ export function describeReturnedWork(bundle: DelegatedWorkBundle): string {
     '',
     'Untracked files are copied under `files/`; copy them into place after review.',
   ];
-  if (bundle.truncated) lines.push('', '**Truncated:** the bundle hit a safety bound. Inspect the target chat for the rest.');
-  if (bundle.notes.length) lines.push('', '## Notes', '', ...bundle.notes.map((note) => `- ${note}`));
+  if (bundle.truncated)
+    lines.push(
+      '',
+      '**Truncated:** the bundle hit a safety bound. Inspect the target chat for the rest.',
+    );
+  if (bundle.notes.length)
+    lines.push('', '## Notes', '', ...bundle.notes.map((note) => `- ${note}`));
   if (bundle.summary.trim()) lines.push('', '## Target summary', '', bundle.summary.trim());
   return `${lines.join('\n')}\n`;
 }

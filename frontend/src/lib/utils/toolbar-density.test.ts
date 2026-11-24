@@ -49,8 +49,7 @@ function toolbar(rowWidth: number, items: Item[], { grouped = 0 } = {}) {
   for (const { el, spec } of elements) {
     Object.defineProperty(el, 'offsetWidth', { get: () => widthOf(el, spec) });
     Object.defineProperty(el, 'offsetHeight', { get: () => (widthOf(el, spec) ? 36 : 0) });
-    el.getBoundingClientRect = () =>
-      ({ top: layout().get(el) ?? 0, height: 36 }) as DOMRect;
+    el.getBoundingClientRect = () => ({ top: layout().get(el) ?? 0, height: 36 }) as DOMRect;
   }
   Object.defineProperty(group, 'offsetWidth', { get: () => 10 });
   Object.defineProperty(group, 'offsetHeight', { get: () => 36 });

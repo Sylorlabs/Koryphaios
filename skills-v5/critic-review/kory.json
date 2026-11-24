@@ -5,25 +5,15 @@
   "skillKind": "verification",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "verification"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["verification"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 3600,
-  "broader": [
-    "verification"
-  ],
+  "broader": ["verification"],
   "facets": [],
   "requires": [],
   "conflicts": [],
-  "activation": [
-    "independent review",
-    "review this answer",
-    "check these claims"
-  ],
+  "activation": ["independent review", "review this answer", "check these claims"],
   "excludes": [],
   "evidence": [
     "Request-to-evidence assessment",
@@ -50,33 +40,19 @@
         "id": "critic-review-ambiguous-1",
         "prompt": "We have a passing build and a written handoff note. Check the note before the client sees it, but also re-run the suite if you think the numbers are stale.",
         "expectedSelection": true,
-        "expectedSkills": [
-          "verification"
-        ],
+        "expectedSkills": ["verification"],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "verification"
-        ],
-        "tags": [
-          "ambiguous",
-          "hierarchy-boundary"
-        ]
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
       },
       {
         "id": "critic-review-ambiguous-2",
         "prompt": "Review the answer the other agent produced and verify it against the acceptance criteria yourself.",
         "expectedSelection": true,
-        "expectedSkills": [
-          "verification"
-        ],
+        "expectedSkills": ["verification"],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "verification"
-        ],
-        "tags": [
-          "ambiguous",
-          "hierarchy-boundary"
-        ]
+        "adjacentSkills": ["verification"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
       },
       {
         "id": "critic-review-ambiguous-3",
@@ -84,13 +60,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "verification",
-          "usability-evaluation"
-        ],
-        "tags": [
-          "ambiguous"
-        ]
+        "adjacentSkills": ["verification", "usability-evaluation"],
+        "tags": ["ambiguous"]
       }
     ],
     "adversarial": [
@@ -100,13 +71,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "implementation"
-        ],
-        "tags": [
-          "adversarial",
-          "quoted-instruction"
-        ]
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "quoted-instruction"]
       },
       {
         "id": "critic-review-adversarial-2",
@@ -115,10 +81,7 @@
         "expectedSkills": [],
         "forbiddenSkills": [],
         "adjacentSkills": [],
-        "tags": [
-          "adversarial",
-          "historical-only"
-        ]
+        "tags": ["adversarial", "historical-only"]
       },
       {
         "id": "critic-review-adversarial-3",
@@ -127,10 +90,7 @@
         "expectedSkills": [],
         "forbiddenSkills": [],
         "adjacentSkills": [],
-        "tags": [
-          "adversarial",
-          "negated"
-        ]
+        "tags": ["adversarial", "negated"]
       }
     ]
   },

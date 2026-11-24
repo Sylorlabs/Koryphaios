@@ -17,7 +17,9 @@ function linearChannel(channel: number): number {
 }
 
 function luminance(rgb: [number, number, number]): number {
-  return 0.2126 * linearChannel(rgb[0]) + 0.7152 * linearChannel(rgb[1]) + 0.0722 * linearChannel(rgb[2]);
+  return (
+    0.2126 * linearChannel(rgb[0]) + 0.7152 * linearChannel(rgb[1]) + 0.0722 * linearChannel(rgb[2])
+  );
 }
 
 /**

@@ -18,7 +18,10 @@
 import { serverLog } from '../logger';
 import { deriveSessionTurnCommandIdentity } from './session-run-store';
 import type { SessionTurnSubmission } from '../kory/manager';
-import { RESTART_RESUME_SOURCE_PREFIX, type SessionRunCoordinator } from './session-run-coordinator';
+import {
+  RESTART_RESUME_SOURCE_PREFIX,
+  type SessionRunCoordinator,
+} from './session-run-coordinator';
 
 export interface RestartResumeAdmissionResult {
   admitted: number;

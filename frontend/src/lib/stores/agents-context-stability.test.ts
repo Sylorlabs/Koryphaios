@@ -82,7 +82,11 @@ describe('context window denominator stability', () => {
   it('treats legacy Antigravity receipts as estimates rather than measured window occupancy', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
-    updateUsage(sessionId, 'kory-manager', liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }));
+    updateUsage(
+      sessionId,
+      'kory-manager',
+      liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }),
+    );
     expect(getContextUsage()).toMatchObject({
       used: AGY_BOUNDED_USED,
       max: 262_144,
@@ -104,7 +108,10 @@ describe('context window denominator stability', () => {
     // that estimate carries contextKnown:false. It previously zeroed the
     // denominator, so the bar flipped to "model window not reported" for the
     // whole turn and then snapped back.
-    updateUsage(sessionId, 'kory-manager', liveUsage({
+    updateUsage(
+      sessionId,
+      'kory-manager',
+      liveUsage({
         tokensIn: 400_000,
         tokensOut: 0,
         tokensUsed: 400_000,
@@ -112,7 +119,8 @@ describe('context window denominator stability', () => {
         contextWindow: undefined,
         contextKnown: false,
         breakdown: undefined,
-      }));
+      }),
+    );
 
     expect(manager()).toMatchObject({ contextMax: 262_144, contextKnown: true });
     expect(getContextUsage()).toMatchObject({ used: 120_900, max: 262_144, isReliable: true });
@@ -140,7 +148,11 @@ describe('context window denominator stability', () => {
     expect(manager()).toMatchObject({ contextMax: 0, contextKnown: false });
 
     // Provider discovery landed between the picker render and the turn.
-    updateUsage(sessionId, 'kory-manager', liveUsage({ usageKnown: false, tokensUsed: 0, tokensIn: 0, tokensOut: 0 }));
+    updateUsage(
+      sessionId,
+      'kory-manager',
+      liveUsage({ usageKnown: false, tokensUsed: 0, tokensIn: 0, tokensOut: 0 }),
+    );
 
     expect(manager()).toMatchObject({ contextMax: 262_144, contextKnown: true });
     // Still no occupancy from a non-authoritative event.
@@ -155,7 +167,11 @@ describe('context window denominator stability', () => {
     // A real provider report that says "I have no window" is authoritative and
     // must be honored, otherwise the bar would claim a window the provider
     // never reported.
-    updateUsage(sessionId, 'kory-manager', liveUsage({ contextWindow: undefined, contextKnown: false }));
+    updateUsage(
+      sessionId,
+      'kory-manager',
+      liveUsage({ contextWindow: undefined, contextKnown: false }),
+    );
 
     expect(manager()).toMatchObject({ contextMax: 0, contextKnown: false });
     expect(getContextUsage()).toMatchObject({ reason: 'context_unknown', isReliable: false });
@@ -166,7 +182,11 @@ describe('context window denominator stability', () => {
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
     updateUsage(sessionId, 'kory-manager', liveUsage());
 
-    updateUsage(sessionId, 'kory-manager', liveUsage({ usageKnown: false, tokensIn: 400_000, tokensOut: 0, tokensUsed: 400_000 }));
+    updateUsage(
+      sessionId,
+      'kory-manager',
+      liveUsage({ usageKnown: false, tokensIn: 400_000, tokensOut: 0, tokensUsed: 400_000 }),
+    );
 
     expect(getContextUsage()).toMatchObject({ used: 120_900, max: 262_144, isReliable: true });
   });
@@ -355,7 +375,11 @@ describe('manager session binding', () => {
     // later stream.usage failing the provenance guard until the user touched
     // the model picker.
     bindManagerSession(first);
-    updateUsage(first, 'kory-manager', liveUsage({ tokensIn: 130_000, tokensOut: 900, tokensUsed: 130_900 }));
+    updateUsage(
+      first,
+      'kory-manager',
+      liveUsage({ tokensIn: 130_000, tokensOut: 900, tokensUsed: 130_900 }),
+    );
 
     expect(getContextUsage()).toMatchObject({ used: 130_900, isReliable: true });
   });
@@ -442,7 +466,11 @@ describe('manager session binding', () => {
     // Pending telemetry is not displayed before its route has been checked.
     expect(getContextUsage()).toMatchObject({ used: 0, isReliable: false });
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
-    expect(getContextUsage()).toMatchObject({ used: AGY_BOUNDED_USED, max: 262_144, estimated: true });
+    expect(getContextUsage()).toMatchObject({
+      used: AGY_BOUNDED_USED,
+      max: 262_144,
+      estimated: true,
+    });
   });
 
   it('does not adopt pending replay for a different selected route or a discarded branch', () => {
@@ -462,18 +490,31 @@ describe('manager session binding', () => {
   it('saved agent threads cannot replace the selected manager route or its context composition', async () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
-    updateUsage(sessionId, 'kory-manager', liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }));
+    updateUsage(
+      sessionId,
+      'kory-manager',
+      liveUsage({ provider: 'antigravity', cachedInputTokens: 100_000 }),
+    );
     vi.mocked(apiFetch).mockResolvedValue({ ok: true } as Response);
-    vi.mocked(parseJsonResponse).mockResolvedValue({ ok: true, data: [{
-      agent: { ...manager().identity, provider: 'google', model: 'old-model' }, status: 'idle',
-    }] });
+    vi.mocked(parseJsonResponse).mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          agent: { ...manager().identity, provider: 'google', model: 'old-model' },
+          status: 'idle',
+        },
+      ],
+    });
     await agentStore.loadAgentThreads(sessionId);
     expect(manager().identity).toMatchObject({ provider: 'antigravity', model: 'minimax-m3' });
     // A catalog refresh requests the same selection again. It must not look
     // like a model switch just because an old thread identity loaded.
     beginManagerContextPreview(sessionId, 'antigravity', 'minimax-m3', 262_144);
     expect(getContextUsage()).toMatchObject({
-      used: AGY_BOUNDED_USED, max: 262_144, breakdown: BREAKDOWN, cachedInputTokens: 100_000,
+      used: AGY_BOUNDED_USED,
+      max: 262_144,
+      breakdown: BREAKDOWN,
+      cachedInputTokens: 100_000,
     });
   });
 });

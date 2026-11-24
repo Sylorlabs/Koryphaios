@@ -27,7 +27,9 @@ vi.mock('$lib/stores/websocket.svelte', () => ({
   wsStore: {
     agents: new Map(),
     markAgentStopped: vi.fn(),
-    get agentThreadVersion() { return 0; },
+    get agentThreadVersion() {
+      return 0;
+    },
     getAgentThreadFeed: () => [],
     loadAgentThreadMessages: vi.fn(),
   },
@@ -37,7 +39,9 @@ vi.mock('$lib/stores/agents.svelte', () => ({
   agentStore: {
     getAgent: (sessionId: string, agentId: string) => agentRecords.get(`${sessionId}::${agentId}`),
     getSessionAgents: (sessionId: string) =>
-      [...agentRecords.values()].filter((a) => (a as { sessionId: string }).sessionId === sessionId),
+      [...agentRecords.values()].filter(
+        (a) => (a as { sessionId: string }).sessionId === sessionId,
+      ),
     closeAgentCard: vi.fn(),
     reopenAgentCard: vi.fn(),
   },
@@ -99,10 +103,9 @@ describe('agent rail close', () => {
     await rail.closeAgent('w1');
 
     // The original bug: a relative '/api/...' that never left the app origin.
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:3001/api/agent/w1/cancel',
-      { method: 'POST' },
-    );
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:3001/api/agent/w1/cancel', {
+      method: 'POST',
+    });
     expect(agentStore.closeAgentCard).toHaveBeenCalledWith('s1', 'w1');
   });
 

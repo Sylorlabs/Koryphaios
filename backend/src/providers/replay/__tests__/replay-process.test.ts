@@ -5,9 +5,19 @@
 import { describe, expect, test } from 'bun:test';
 import { once } from 'node:events';
 import { startReplay } from '../replay-process';
-import { jsonSubsetMatches, parseTranscript, TranscriptFormatError, type Transcript } from '../transcript';
+import {
+  jsonSubsetMatches,
+  parseTranscript,
+  TranscriptFormatError,
+  type Transcript,
+} from '../transcript';
 
-const header = { provider: 'test', cliVersion: 'test', recordedAt: '2026-01-01T00:00:00.000Z', argv: ['test'] };
+const header = {
+  provider: 'test',
+  cliVersion: 'test',
+  recordedAt: '2026-01-01T00:00:00.000Z',
+  argv: ['test'],
+};
 
 function transcript(frames: Transcript['frames']): Transcript {
   return { header, frames };
@@ -105,12 +115,12 @@ describe('transcript format', () => {
     expect(() => parseTranscript(JSON.stringify({ t: 0, stream: 'exit', code: 0 }))).toThrow(
       TranscriptFormatError,
     );
-    expect(() => parseTranscript(`${JSON.stringify(header)}\n{"t":0,"stream":"tty","data":""}`)).toThrow(
-      /stream must be/,
-    );
-    expect(() => parseTranscript(`${JSON.stringify(header)}\n{"t":0,"stream":"exit","code":"0"}`)).toThrow(
-      /integer code/,
-    );
+    expect(() =>
+      parseTranscript(`${JSON.stringify(header)}\n{"t":0,"stream":"tty","data":""}`),
+    ).toThrow(/stream must be/);
+    expect(() =>
+      parseTranscript(`${JSON.stringify(header)}\n{"t":0,"stream":"exit","code":"0"}`),
+    ).toThrow(/integer code/);
     expect(() =>
       parseTranscript(
         `${JSON.stringify(header)}\n{"t":5,"stream":"stdout","data":""}\n{"t":2,"stream":"stdout","data":""}`,

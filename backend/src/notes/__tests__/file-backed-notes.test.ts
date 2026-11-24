@@ -2,13 +2,7 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from '
 
 setDefaultTimeout(60000);
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getDb, initDb } from '../../db';
@@ -38,15 +32,15 @@ function storedRow(id: string) {
   return (
     getDb()
       .query<
-      {
-        content: string;
-        content_hash: string | null;
-        content_bytes: number | null;
-        aliases: string;
-        has_refs: number;
-      },
-      [string]
-    >('SELECT content, content_hash, content_bytes, aliases, has_refs FROM notes WHERE id = ?')
+        {
+          content: string;
+          content_hash: string | null;
+          content_bytes: number | null;
+          aliases: string;
+          has_refs: number;
+        },
+        [string]
+      >('SELECT content, content_hash, content_bytes, aliases, has_refs FROM notes WHERE id = ?')
       .get(id) ?? null
   );
 }
@@ -225,8 +219,7 @@ describe('notes storage compaction', () => {
     const orphanId = projectDocumentId(project, 'gone.md');
     const trackedOrphanId = projectDocumentId(project, 'tracked-gone.md');
     const docId = projectDocumentId(project, 'alpha.md');
-    const run = (sql: string, params: unknown[]) =>
-      db.prepare(sql).run(...(params as never[]));
+    const run = (sql: string, params: unknown[]) => db.prepare(sql).run(...(params as never[]));
     run(
       `INSERT OR IGNORE INTO notes (id, title, content, folder_path, tags, revision, created_at, updated_at)
        VALUES (?, ?, '', '/Project', '[]', 1, 1, 1)`,
@@ -280,8 +273,9 @@ describe('notes storage compaction', () => {
 
     // Mirror row and everything hanging off it is gone; the file was untouched.
     expect(
-      db.query<{ c: number }, [string]>('SELECT COUNT(*) AS c FROM notes WHERE id = ?').get(mirrorId)!
-        .c,
+      db
+        .query<{ c: number }, [string]>('SELECT COUNT(*) AS c FROM notes WHERE id = ?')
+        .get(mirrorId)!.c,
     ).toBe(0);
     expect(
       db
@@ -293,14 +287,13 @@ describe('notes storage compaction', () => {
 
     // Untracked + missing source is hard-deleted; tracked keeps its row.
     expect(
-      db.query<{ c: number }, [string]>('SELECT COUNT(*) AS c FROM notes WHERE id = ?').get(orphanId)!
-        .c,
+      db
+        .query<{ c: number }, [string]>('SELECT COUNT(*) AS c FROM notes WHERE id = ?')
+        .get(orphanId)!.c,
     ).toBe(0);
     expect(
       db
-        .query<{ c: number }, [string]>(
-          'SELECT COUNT(*) AS c FROM notes WHERE id = ?',
-        )
+        .query<{ c: number }, [string]>('SELECT COUNT(*) AS c FROM notes WHERE id = ?')
         .get(trackedOrphanId)!.c,
     ).toBe(1);
     expect(report.purgedOrphanRows).toBeGreaterThan(0);
@@ -355,8 +348,7 @@ describe('notes storage compaction', () => {
 
   test('startNotesCompaction defers its first batch and yields between batches', async () => {
     const db = getDb();
-    const run = (sql: string, params: unknown[]) =>
-      db.prepare(sql).run(...(params as never[]));
+    const run = (sql: string, params: unknown[]) => db.prepare(sql).run(...(params as never[]));
     // >2 delete chunks of ignored-directory mirrors (BATCH_PURGE is 50).
     for (let i = 0; i < 450; i++) {
       const id = projectDocumentId(project, `.worktrees/flood/doc-${i}.md`);
@@ -368,9 +360,7 @@ describe('notes storage compaction', () => {
     }
     const countFloods = () =>
       db
-        .query<{ c: number }, []>(
-          `SELECT COUNT(*) AS c FROM notes WHERE title LIKE 'flood-%'`,
-        )
+        .query<{ c: number }, []>(`SELECT COUNT(*) AS c FROM notes WHERE title LIKE 'flood-%'`)
         .get()!.c;
     // Any earlier compaction in this file left the state machine done; reset it
     // so this test observes a fresh run regardless of test order.

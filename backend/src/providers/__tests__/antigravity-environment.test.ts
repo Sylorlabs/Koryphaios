@@ -28,11 +28,16 @@ for (const scenario of [
     writeFileSync(userConfig, 'user-config-sentinel');
     const bridge = join(root, 'bridge.js');
     const probeMarker = join(root, 'probed');
-    writeFileSync(bridge, `
+    writeFileSync(
+      bridge,
+      `
       require('node:fs').writeFileSync(${JSON.stringify(probeMarker)}, 'ready');
       console.log(JSON.stringify({ ready: true, toolCount: 1 }));
-    `);
-    writeFileSync(join(bin, 'agy'), `#!${process.execPath}
+    `,
+    );
+    writeFileSync(
+      join(bin, 'agy'),
+      `#!${process.execPath}
 const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2);
@@ -62,7 +67,9 @@ if (args.includes('--help')) {
     console.log(JSON.stringify({ event: 'result', result: { status: 'SUCCESS' } }));
   });
 }
-`, { mode: 0o700 });
+`,
+      { mode: 0o700 },
+    );
     const modulePath = (name: string) => JSON.stringify(join(import.meta.dir, '..', name));
     const runner = `
       import { mock } from 'bun:test';
@@ -88,7 +95,7 @@ if (args.includes('--help')) {
         for await (const event of provider.streamResponse({
           model: 'gemini-test', messages: [{ role: 'user', content: 'Environment fixture' }],
           sessionId: 'fixture-session', workingDirectory: ${JSON.stringify(workspace)},
-          sandbox: ${scenario.sandbox ? "{ filesystemIsolation: true, allowNetwork: false, allowEdits: false }" : 'undefined'},
+          sandbox: ${scenario.sandbox ? '{ filesystemIsolation: true, allowNetwork: false, allowEdits: false }' : 'undefined'},
         })) events.push(event);
         console.log('RECEIPT=' + JSON.stringify({ events, wrapOptions, profile }));
       };
@@ -102,19 +109,30 @@ if (args.includes('--help')) {
       const result = spawnSync(process.execPath, ['--no-env-file', '-e', runner], {
         cwd: root,
         env: {
-          PATH: `${bin}:${process.env.PATH}`, HOME: home, USERPROFILE: home, TMPDIR: root,
-          KORY_MCP_BRIDGE_COMMAND: process.execPath, KORY_MCP_BRIDGE_SCRIPT: bridge,
-          KORY_HOOK_BRIDGE_SCRIPT: bridge, KORY_BACKEND_URL: 'http://fixture.invalid',
-          GEMINI_DIR: join(home, '.gemini'), ANTIGRAVITY_HOME: home,
-          UNRELATED_SECRET: 'synthetic-secret', AWS_SECRET_ACCESS_KEY: 'synthetic-aws',
+          PATH: `${bin}:${process.env.PATH}`,
+          HOME: home,
+          USERPROFILE: home,
+          TMPDIR: root,
+          KORY_MCP_BRIDGE_COMMAND: process.execPath,
+          KORY_MCP_BRIDGE_SCRIPT: bridge,
+          KORY_HOOK_BRIDGE_SCRIPT: bridge,
+          KORY_BACKEND_URL: 'http://fixture.invalid',
+          GEMINI_DIR: join(home, '.gemini'),
+          ANTIGRAVITY_HOME: home,
+          UNRELATED_SECRET: 'synthetic-secret',
+          AWS_SECRET_ACCESS_KEY: 'synthetic-aws',
         },
-        encoding: 'utf8', timeout: 10_000,
+        encoding: 'utf8',
+        timeout: 10_000,
       });
       expect(result.status).toBe(0);
       const line = result.stdout.split('\n').find((value) => value.startsWith('RECEIPT='));
       expect(line).toBeDefined();
       const { events, wrapOptions, profile } = JSON.parse(line!.slice('RECEIPT='.length));
-      expect(events.map((event: { type: string }) => event.type)).toEqual(['content_delta', 'complete']);
+      expect(events.map((event: { type: string }) => event.type)).toEqual([
+        'content_delta',
+        'complete',
+      ]);
       const receipt = JSON.parse(events[0].content);
       const expectedHome = managed;
       expect(receipt.env.HOME).toBe(expectedHome);
@@ -127,7 +145,9 @@ if (args.includes('--help')) {
       expect(receipt.settings.permissions.deny).toContain('command(*)');
       expect(receipt.settings.permissions.deny).toContain('write_file(*)');
       expect(receipt.settings.permissions.allow).toContain('mcp(kory/*)');
-      expect(receipt.hasMcp && receipt.hasHooks && receipt.hasHookGrant && receipt.preflightRan).toBe(true);
+      expect(
+        receipt.hasMcp && receipt.hasHooks && receipt.hasHookGrant && receipt.preflightRan,
+      ).toBe(true);
       expect(receipt.mcp.type).toBe('stdio');
       expect(receipt.sandbox).toBe(true);
       expect(readFileSync(userConfig, 'utf8')).toBe('user-config-sentinel');
@@ -141,9 +161,12 @@ if (args.includes('--help')) {
         expect(jailHome).toBeDefined();
         expect(receipt.env.TMPDIR).toBe(join(jailHome, '.tmp'));
         for (const [key, suffix] of Object.entries({
-          XDG_CONFIG_HOME: '.config', XDG_DATA_HOME: '.local/share',
-          XDG_CACHE_HOME: '.cache', XDG_STATE_HOME: '.local/state',
-        })) expect(receipt.env[key]).toBe(join(jailHome, suffix));
+          XDG_CONFIG_HOME: '.config',
+          XDG_DATA_HOME: '.local/share',
+          XDG_CACHE_HOME: '.cache',
+          XDG_STATE_HOME: '.local/state',
+        }))
+          expect(receipt.env[key]).toBe(join(jailHome, suffix));
         expect(profile).toContain('(deny file-write*)');
         expect(profile).toContain('Library/Keychains');
       } else expect(wrapOptions).toBeUndefined();

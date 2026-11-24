@@ -133,7 +133,9 @@ export async function readFileHunks(
   const args = [...DIFF_ARGS, ...(staged ? ['--cached'] : []), '--', path];
   const result = await git.exec(args);
   if (result.outputLimitExceeded) {
-    throw new ValidationError('This diff is too large to act on by hunk. Stage or revert the file instead.');
+    throw new ValidationError(
+      'This diff is too large to act on by hunk. Stage or revert the file instead.',
+    );
   }
   if (!result.success) {
     throw new ValidationError(`Could not read this file’s diff. ${boundedDetail(result.stderr)}`);
@@ -189,7 +191,9 @@ export async function applyHunkAction(
     }
     const hunk = current.hunks[input.hunkIndex];
     if (!hunk || hunk.header !== input.hunkHeader) {
-      throw new ConflictError('That hunk is no longer in the diff. Refresh the diff and try again.');
+      throw new ConflictError(
+        'That hunk is no longer in the diff. Refresh the diff and try again.',
+      );
     }
     const patch = buildHunkPatch(current.prelude, hunk);
     const flags = applyFlags(input.action);

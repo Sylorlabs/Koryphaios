@@ -24,7 +24,10 @@ export function withTimeoutSignal(signal: AbortSignal | undefined, timeoutMs: nu
       controller.abort(reason);
     } catch (err: unknown) {
       // already aborted
-      providerLog.debug({ err: err instanceof Error ? err.message : String(err) }, 'AbortController already aborted');
+      providerLog.debug(
+        { err: err instanceof Error ? err.message : String(err) },
+        'AbortController already aborted',
+      );
     }
   };
   signal.addEventListener('abort', () => abort(signal.reason), { once: true });
@@ -109,7 +112,8 @@ export async function withRetry<T>(
       // HTTP errors from various SDKs carry headers/status on the error object.
       // Narrow via record access — no `as any` needed.
       const errRecord = error as Record<string, unknown>;
-      const headers = ((errRecord?.response as Record<string, unknown> | undefined)?.headers ?? errRecord?.headers) as Record<string, unknown> & { get?: (key: string) => string | null };
+      const headers = ((errRecord?.response as Record<string, unknown> | undefined)?.headers ??
+        errRecord?.headers) as Record<string, unknown> & { get?: (key: string) => string | null };
       if (headers) {
         // Handle both Map-like and object-like headers
         const retryHeader =
@@ -142,9 +146,7 @@ export async function withRetry<T>(
         (error instanceof Error ? error.message : String(error))
           .toLowerCase()
           .includes('rate limit') ||
-        (error instanceof Error ? error.message : String(error))
-          .toLowerCase()
-          .includes('quota');
+        (error instanceof Error ? error.message : String(error)).toLowerCase().includes('quota');
 
       providerLog.warn(
         {

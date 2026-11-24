@@ -5,18 +5,11 @@
   "skillKind": "verification",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "verification",
-    "performance"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["verification", "performance"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 7600,
-  "broader": [
-    "verification"
-  ],
+  "broader": ["verification"],
   "facets": [],
   "requires": [],
   "conflicts": [],
@@ -66,13 +59,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "performance-testing"
-        ],
-        "tags": [
-          "ambiguous",
-          "gate-plus-harness"
-        ]
+        "adjacentSkills": ["performance-testing"],
+        "tags": ["ambiguous", "gate-plus-harness"]
       },
       {
         "id": "performance-verification-ambiguous-2",
@@ -80,13 +68,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "performance-debugging"
-        ],
-        "tags": [
-          "ambiguous",
-          "gate-plus-diagnosis"
-        ]
+        "adjacentSkills": ["performance-debugging"],
+        "tags": ["ambiguous", "gate-plus-diagnosis"]
       },
       {
         "id": "performance-verification-ambiguous-3",
@@ -94,13 +77,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "database-performance"
-        ],
-        "tags": [
-          "ambiguous",
-          "end-to-end-boundary"
-        ]
+        "adjacentSkills": ["database-performance"],
+        "tags": ["ambiguous", "end-to-end-boundary"]
       }
     ],
     "adversarial": [
@@ -110,13 +88,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "verification"
-        ],
-        "tags": [
-          "adversarial",
-          "quoted-decoy"
-        ]
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "quoted-decoy"]
       },
       {
         "id": "performance-verification-adversarial-2",
@@ -124,13 +97,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "performance-testing"
-        ],
-        "tags": [
-          "adversarial",
-          "explicit-negation"
-        ]
+        "adjacentSkills": ["performance-testing"],
+        "tags": ["adversarial", "explicit-negation"]
       },
       {
         "id": "performance-verification-adversarial-3",
@@ -138,13 +106,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "database-performance"
-        ],
-        "tags": [
-          "adversarial",
-          "concept-only"
-        ]
+        "adjacentSkills": ["database-performance"],
+        "tags": ["adversarial", "concept-only"]
       }
     ]
   },

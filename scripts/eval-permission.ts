@@ -29,15 +29,16 @@ async function bearerToken(baseUrl: string): Promise<string> {
 }
 
 /** Reads the project's current preset so a caller can restore it. */
-export async function readPermissionMode(port = process.env.KORYPHAIOS_PORT ?? '3001'): Promise<
-  string | undefined
-> {
+export async function readPermissionMode(
+  port = process.env.KORYPHAIOS_PORT ?? '3001',
+): Promise<string | undefined> {
   const baseUrl = baseUrlFor(port);
   const token = await bearerToken(baseUrl);
   const response = await fetch(`${baseUrl}/api/agent/settings`, {
     headers: { authorization: token },
   });
-  if (!response.ok) throw new Error(`Reading agent settings failed with ${String(response.status)}`);
+  if (!response.ok)
+    throw new Error(`Reading agent settings failed with ${String(response.status)}`);
   const body = (await response.json()) as { data?: { permissionMode?: string } };
   return body.data?.permissionMode;
 }

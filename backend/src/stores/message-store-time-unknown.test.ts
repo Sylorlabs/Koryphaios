@@ -24,14 +24,27 @@ describe('MessageStore timeUnknown', () => {
     const sessionId = await newSession('round-trip');
     const store = new MessageStore();
     await store.add(sessionId, {
-      id: 'tu-user', sessionId, role: 'user', content: 'When did I say this?', timeUnknown: true, createdAt: 2_000,
+      id: 'tu-user',
+      sessionId,
+      role: 'user',
+      content: 'When did I say this?',
+      timeUnknown: true,
+      createdAt: 2_000,
     });
     await store.add(sessionId, {
-      id: 'tu-known', sessionId, role: 'assistant', content: 'Known time.', createdAt: 3_000,
+      id: 'tu-known',
+      sessionId,
+      role: 'assistant',
+      content: 'Known time.',
+      createdAt: 3_000,
     });
 
     const [row] = await db.select().from(messages).where(eq(messages.id, 'tu-user')).limit(1);
-    const blocks = JSON.parse(row.content) as Array<{ type: string; text?: string; timeUnknown?: boolean }>;
+    const blocks = JSON.parse(row.content) as Array<{
+      type: string;
+      text?: string;
+      timeUnknown?: boolean;
+    }>;
     expect(blocks).toEqual([
       { type: 'text', text: 'When did I say this?' },
       { type: 'kory_message_meta', timeUnknown: true },
@@ -54,14 +67,26 @@ describe('MessageStore timeUnknown', () => {
   it('reads a row written by the CLI import path with the meta block after parts', async () => {
     const sessionId = await newSession('import-layout');
     const store = new MessageStore();
-    await store.add(sessionId, { id: 'seed', sessionId, role: 'user', content: 'seed', createdAt: 1_500 });
-    await db.update(messages).set({
-      content: JSON.stringify([
-        { type: 'text', text: 'Imported answer' },
-        { type: 'kory_transcript_parts', parts: [{ kind: 'text', text: 'Imported answer', startedAt: 1 }] },
-        { type: 'kory_message_meta', timeUnknown: true },
-      ]),
-    }).where(eq(messages.id, 'seed'));
+    await store.add(sessionId, {
+      id: 'seed',
+      sessionId,
+      role: 'user',
+      content: 'seed',
+      createdAt: 1_500,
+    });
+    await db
+      .update(messages)
+      .set({
+        content: JSON.stringify([
+          { type: 'text', text: 'Imported answer' },
+          {
+            type: 'kory_transcript_parts',
+            parts: [{ kind: 'text', text: 'Imported answer', startedAt: 1 }],
+          },
+          { type: 'kory_message_meta', timeUnknown: true },
+        ]),
+      })
+      .where(eq(messages.id, 'seed'));
     const stored = await store.getById(sessionId, 'seed');
     expect(stored?.content).toBe('Imported answer');
     expect(stored?.timeUnknown).toBe(true);

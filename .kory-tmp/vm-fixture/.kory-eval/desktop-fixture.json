@@ -7,10 +7,5 @@
   "nearNeighbor": "ios-swiftui",
   "facet": "application-security",
   "instructions": "Tauri v2 Rust command + native picker; enforce canonical root at use time and typed cancellation.",
-  "cannotSubstitute": [
-    "headless-browser",
-    "mock-ipc",
-    "unit-only-rust",
-    "synthetic-screenshot"
-  ]
+  "cannotSubstitute": ["headless-browser", "mock-ipc", "unit-only-rust", "synthetic-screenshot"]
 }

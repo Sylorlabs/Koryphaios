@@ -74,8 +74,7 @@ export const SEALED_EVIDENCE_SCENARIO_IDS = [
 ] as const;
 
 const scenarioIds = new Set<string>(SEALED_EVIDENCE_SCENARIO_IDS);
-const EXPERIMENTATION_AB_TESTING_SCENARIO_2 =
-  'experimentation-ab-testing-full-task-2-individual';
+const EXPERIMENTATION_AB_TESTING_SCENARIO_2 = 'experimentation-ab-testing-full-task-2-individual';
 // The planning task's verification discipline changed materially. Keep its
 // evaluator generation distinct so earlier sealed packets cannot qualify it.
 const PLANNING_SCENARIO_1 = 'planning-full-task-1-individual';
@@ -116,8 +115,11 @@ const PAIRED_ARTIFACT_OWNERSHIP_SCENARIO_IDS = new Set<string>([
 ]);
 const v1ScenarioIds = new Set<string>(
   SEALED_EVIDENCE_SCENARIO_IDS.filter(
-    (id) => !v2ScenarioIds.has(id) && !v3ScenarioIds.has(id) &&
-      !procurementVendorEvaluationScenarioIds.has(id) && !EXPLORATORY_SCENARIO_IDS.has(id) &&
+    (id) =>
+      !v2ScenarioIds.has(id) &&
+      !v3ScenarioIds.has(id) &&
+      !procurementVendorEvaluationScenarioIds.has(id) &&
+      !EXPLORATORY_SCENARIO_IDS.has(id) &&
       !PAIRED_ARTIFACT_OWNERSHIP_SCENARIO_IDS.has(id),
   ),
 );

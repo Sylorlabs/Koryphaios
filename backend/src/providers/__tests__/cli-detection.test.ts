@@ -155,7 +155,6 @@ describe('login detectors (deterministic via temp HOME)', () => {
     );
     expect(detectCodexCLILogin()).toBe(true);
   });
-
 });
 
 describe('canAutoEnable gate', () => {

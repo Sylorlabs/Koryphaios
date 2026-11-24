@@ -137,9 +137,7 @@ export function buildSiblingChatsPromptSection(args: {
   if (siblings.length === 0) return '';
   const now = args.now ?? Date.now();
   const lines = siblings.map((sibling) => {
-    const files = sibling.recentFiles.length
-      ? sibling.recentFiles.join(', ')
-      : 'nothing recorded';
+    const files = sibling.recentFiles.length ? sibling.recentFiles.join(', ') : 'nothing recorded';
     return `- ${sibling.title} (id ${sibling.id}) — ${sibling.busy ? 'busy' : 'idle'}, updated ${formatRelativeAge(sibling.updatedAt, now)}; ${sibling.isolation}; recently edited: ${files}`;
   });
   const guidance = worktreeMode === 'never' ? NEVER_GUIDANCE : AUTO_GUIDANCE;

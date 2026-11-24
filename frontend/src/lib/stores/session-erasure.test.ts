@@ -78,7 +78,9 @@ function seedGoal(value: Goal): void {
 }
 
 function seedWorker(sessionId: string, agentId: string): void {
-  agentStore.spawnAgent(sessionId, {
+  agentStore.spawnAgent(
+    sessionId,
+    {
       id: agentId,
       name: agentId,
       role: 'coder',
@@ -86,7 +88,9 @@ function seedWorker(sessionId: string, agentId: string): void {
       provider: 'openai',
       domain: 'frontend',
       glowColor: '',
-    }, 'test task');
+    },
+    'test task',
+  );
   agentStore.setAgentThreadFeed(sessionId, agentId, [
     {
       id: `thread-${agentId}`,
@@ -284,7 +288,12 @@ describe('deleting a chat that owns goal state', () => {
 
     const feedLoad = feedStore.loadFeedPersistence('one');
     notifySessionRemoved('one');
-    resolveFeed(response({ ok: true, data: { entries: [{ id: 'late', kind: 'client_error', text: 'late', timestamp: 1 }] } }));
+    resolveFeed(
+      response({
+        ok: true,
+        data: { entries: [{ id: 'late', kind: 'client_error', text: 'late', timestamp: 1 }] },
+      }),
+    );
 
     await expect(feedLoad).resolves.toBeNull();
     expect(feedStore.lastEntryForSession('one')).toBeUndefined();

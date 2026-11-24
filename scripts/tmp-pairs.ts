@@ -14,8 +14,14 @@ for (const skill of process.argv.slice(2)) {
   console.log(`\n### ${skill} comparisons=${groups.size}`);
   for (const k of keys) {
     const rows = groups.get(k)!;
-    const variants = rows.map(r=>`${r.variant}:${r.passed?'P':'F'}:${r.protocolVersion}`).join(' ');
-    const missing = rows.flatMap(r=>(r.artifacts ?? []).map((a:any)=>a.location)).filter(l=>!existsSync(l)).length;
-    console.log(`   ${k.slice(0,64)} [${variants}] missingArtifacts=${missing} contract=${rows[0].evaluationContractHash?.slice(0,8)}`);
+    const variants = rows
+      .map((r) => `${r.variant}:${r.passed ? 'P' : 'F'}:${r.protocolVersion}`)
+      .join(' ');
+    const missing = rows
+      .flatMap((r) => (r.artifacts ?? []).map((a: any) => a.location))
+      .filter((l) => !existsSync(l)).length;
+    console.log(
+      `   ${k.slice(0, 64)} [${variants}] missingArtifacts=${missing} contract=${rows[0].evaluationContractHash?.slice(0, 8)}`,
+    );
   }
 }

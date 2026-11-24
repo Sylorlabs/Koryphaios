@@ -17,15 +17,21 @@ import { join } from 'node:path';
 const source = join(import.meta.dir, 'kory-macos-window-helper.swift');
 if (!existsSync(source)) throw new Error(`Missing helper source at ${source}`);
 
-const requested = process.argv.find((argument) => argument.startsWith('--out='))?.slice('--out='.length);
+const requested = process.argv
+  .find((argument) => argument.startsWith('--out='))
+  ?.slice('--out='.length);
 const out = requested?.trim() || join(homedir(), '.koryphaios', 'bin', 'kory-macos-window-helper');
 mkdirSync(join(out, '..'), { recursive: true });
 
-const developerDir = process.env.DEVELOPER_DIR?.trim() ?? '/Applications/Xcode-beta.app/Contents/Developer';
+const developerDir =
+  process.env.DEVELOPER_DIR?.trim() ?? '/Applications/Xcode-beta.app/Contents/Developer';
 const moduleCache = mkdtempSync(join(tmpdir(), 'kory-helper-modc-'));
 try {
   execFileSync('/usr/bin/swiftc', ['-O', '-module-cache-path', moduleCache, source, '-o', out], {
-    env: { ...process.env, DEVELOPER_DIR: existsSync(developerDir) ? developerDir : process.env.DEVELOPER_DIR ?? '' },
+    env: {
+      ...process.env,
+      DEVELOPER_DIR: existsSync(developerDir) ? developerDir : (process.env.DEVELOPER_DIR ?? ''),
+    },
     stdio: ['ignore', 'inherit', 'inherit'],
   });
 } finally {

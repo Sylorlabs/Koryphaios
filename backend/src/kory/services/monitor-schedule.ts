@@ -86,7 +86,8 @@ function expandField(
 /** Parse a 5-field cron expression: minute hour day-of-month month day-of-week (local time). */
 export function parseCron(expression: string): CronFields {
   const fields = expression.trim().split(/\s+/);
-  if (fields.length !== 5) throw new Error('A cron schedule needs five fields: minute hour day month weekday');
+  if (fields.length !== 5)
+    throw new Error('A cron schedule needs five fields: minute hour day month weekday');
   const [m, h, dom, mon, dow] = fields as [string, string, string, string, string];
   return {
     minutes: expandField(m, 0, 59, 'minute'),
@@ -100,7 +101,13 @@ export function parseCron(expression: string): CronFields {
 }
 
 /** Local wall-clock instant for a calendar day and time; see the module note on gaps. */
-function localInstant(year: number, monthIndex: number, day: number, hour: number, minute: number): number {
+function localInstant(
+  year: number,
+  monthIndex: number,
+  day: number,
+  hour: number,
+  minute: number,
+): number {
   return new Date(year, monthIndex, day, hour, minute, 0, 0).getTime();
 }
 
@@ -130,7 +137,15 @@ export function nextRunAfter(schedule: MonitorSchedule, afterMs: number): number
       const weekdays = schedule.weekdays?.length ? new Set(schedule.weekdays) : null;
       return searchDays(afterMs, (date) => {
         if (weekdays && !weekdays.has(date.getDay())) return [];
-        return [localInstant(date.getFullYear(), date.getMonth(), date.getDate(), clock.hour, clock.minute)];
+        return [
+          localInstant(
+            date.getFullYear(),
+            date.getMonth(),
+            date.getDate(),
+            clock.hour,
+            clock.minute,
+          ),
+        ];
       });
     }
     case 'cron': {
@@ -142,7 +157,9 @@ export function nextRunAfter(schedule: MonitorSchedule, afterMs: number): number
         const instants: number[] = [];
         for (const hour of hours) {
           for (const minute of minutes) {
-            instants.push(localInstant(date.getFullYear(), date.getMonth(), date.getDate(), hour, minute));
+            instants.push(
+              localInstant(date.getFullYear(), date.getMonth(), date.getDate(), hour, minute),
+            );
           }
         }
         return instants.sort((a, b) => a - b);
@@ -171,7 +188,15 @@ function searchDays(afterMs: number, candidates: (date: Date) => number[]): numb
   const start = new Date(afterMs);
   const afterSlot = wallSlot(afterMs);
   for (let offset = 0; offset <= SEARCH_DAYS; offset++) {
-    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + offset, 12, 0, 0, 0);
+    const date = new Date(
+      start.getFullYear(),
+      start.getMonth(),
+      start.getDate() + offset,
+      12,
+      0,
+      0,
+      0,
+    );
     for (const at of candidates(date)) {
       if (at > afterMs && wallSlot(at) > afterSlot) return at;
     }
@@ -190,7 +215,8 @@ export function assertValidSchedule(schedule: MonitorSchedule, nowMs: number): v
   if (schedule.kind === 'daily') {
     if (!parseClockTime(schedule.time)) throw new Error('Time must be HH:MM on a 24-hour clock');
     for (const day of schedule.weekdays ?? []) {
-      if (!Number.isInteger(day) || day < 0 || day > 6) throw new Error('Weekdays are 0 (Sunday) to 6 (Saturday)');
+      if (!Number.isInteger(day) || day < 0 || day > 6)
+        throw new Error('Weekdays are 0 (Sunday) to 6 (Saturday)');
     }
     return;
   }
@@ -212,7 +238,13 @@ export function parseLocalDateTime(value: string): number | null {
   const trimmed = value.trim();
   const naive = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/.exec(trimmed);
   if (naive) {
-    const at = localInstant(Number(naive[1]), Number(naive[2]) - 1, Number(naive[3]), Number(naive[4]), Number(naive[5]));
+    const at = localInstant(
+      Number(naive[1]),
+      Number(naive[2]) - 1,
+      Number(naive[3]),
+      Number(naive[4]),
+      Number(naive[5]),
+    );
     return Number.isNaN(at) ? null : at;
   }
   const parsed = Date.parse(trimmed);

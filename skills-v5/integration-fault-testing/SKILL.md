@@ -23,7 +23,9 @@ Treat the task's own artifact list as a checklist, because that is exactly how i
 For an ambiguous-commit case the report has to carry the facts the check looks for, in words it looks for. A shape that satisfies it, with the field names a reader expects:
 
 ```json
-{ "proxy": {"tool": "toxiproxy", "version": "2.12.0"}, "dependency": {"protocol": "http", "endpoint": "POST /dispatch"},
+{
+  "proxy": { "tool": "toxiproxy", "version": "2.12.0" },
+  "dependency": { "protocol": "http", "endpoint": "POST /dispatch" },
   "ordering": "dependency committed the dispatch before the response path was cut",
   "callerResult": "uncertain: connection reset with no response received",
   "boundedRetry": "retry budget of 2 attempts with backoff",
@@ -32,7 +34,8 @@ For an ambiguous-commit case the report has to carry the facts the check looks f
   "durableCountAfterSameKeyReplay": "count: 1, exactly one dispatch exists",
   "freshKeyResult": "fresh key dispatch-0002 succeeded after recovery",
   "recovery": "removed the toxic and recovery verified",
-  "cleanup": "proxy torn down, dependency container stopped" }
+  "cleanup": "proxy torn down, dependency container stopped"
+}
 ```
 
 The phrases matter: `count: 1`, `exactly one dispatch`, `retry budget`, `remove the toxic`, `fresh key`. A report that says the test asserted those facts, instead of stating them, reads as missing evidence.

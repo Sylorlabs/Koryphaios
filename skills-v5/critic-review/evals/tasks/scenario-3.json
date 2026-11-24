@@ -70,10 +70,7 @@
         "details say what the evidence shows and what would make the claim true",
         "omissions are separated from contradicted claims"
       ],
-      "blindTo": [
-        "skill-variant",
-        "expected-outcome"
-      ]
+      "blindTo": ["skill-variant", "expected-outcome"]
     }
   ],
   "requiredEvidence": [

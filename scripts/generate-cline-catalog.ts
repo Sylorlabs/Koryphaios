@@ -74,10 +74,10 @@ async function main(): Promise<void> {
   mkdirSync(staging, { recursive: true });
   try {
     process.stdout.write(`Installing ${specifier} into a temp workspace …\n`);
-    const install = Bun.spawnSync(
-      ['bun', 'add', specifier, '--no-save', '--cwd', staging],
-      { stdout: 'inherit', stderr: 'inherit' },
-    );
+    const install = Bun.spawnSync(['bun', 'add', specifier, '--no-save', '--cwd', staging], {
+      stdout: 'inherit',
+      stderr: 'inherit',
+    });
     if (!install.success) {
       throw new Error(`Failed to install ${specifier} (exit ${install.exitCode})`);
     }
@@ -142,9 +142,10 @@ ${toggle.map((id) => `  '${id}',`).join('\n')}
  * models whose only reasoning control is the boolean `include_reasoning`.
  * An `effort` entry always wins: it is the finer control.
  */
-export function partitionReasoningModels(
-  models: Record<string, CatalogModel>,
-): { effort: Array<[string, string[]]>; toggle: string[] } {
+export function partitionReasoningModels(models: Record<string, CatalogModel>): {
+  effort: Array<[string, string[]]>;
+  toggle: string[];
+} {
   const effort: Array<[string, string[]]> = [];
   const toggle: string[] = [];
   for (const [id, model] of Object.entries(models)) {

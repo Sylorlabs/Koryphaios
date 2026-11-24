@@ -242,14 +242,16 @@ export function orderSkillsCoreFirst(
   const componentRank = (componentIndex: number): [number, string, number] => {
     const members = components[componentIndex]!;
     const representative = [...members].sort(compareSkillPriority)[0]!;
-    return [getSkillPriority(representative).priority, representative, firstIndex.get(representative)!];
+    return [
+      getSkillPriority(representative).priority,
+      representative,
+      firstIndex.get(representative)!,
+    ];
   };
   const compareComponents = (left: number, right: number): number => {
     const leftRank = componentRank(left);
     const rightRank = componentRank(right);
-    return (
-      compareSkillPriority(leftRank[1], rightRank[1]) || leftRank[2] - rightRank[2]
-    );
+    return compareSkillPriority(leftRank[1], rightRank[1]) || leftRank[2] - rightRank[2];
   };
 
   const ready = indegree
@@ -259,8 +261,8 @@ export function orderSkillsCoreFirst(
   const orderedNames: string[] = [];
   while (ready.length) {
     const componentIndex = ready.shift()!;
-    const members = components[componentIndex]!.slice().sort((left, right) =>
-      firstIndex.get(left)! - firstIndex.get(right)!,
+    const members = components[componentIndex]!.slice().sort(
+      (left, right) => firstIndex.get(left)! - firstIndex.get(right)!,
     );
     for (const name of members) orderedNames.push(...occurrences.get(name)!);
 

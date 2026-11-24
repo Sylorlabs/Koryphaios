@@ -38,7 +38,9 @@ function modelDef(overrides: Partial<ModelDef> = {}): ModelDef {
   } as ModelDef;
 }
 
-async function setLiveResolver(resolver: (id: string, provider: ProviderName) => ModelDef | undefined) {
+async function setLiveResolver(
+  resolver: (id: string, provider: ProviderName) => ModelDef | undefined,
+) {
   const models = await import('../../providers/models');
   models.registerLiveModelResolver(resolver);
 }
@@ -130,15 +132,7 @@ describe('EventEmitterService usage context metadata', () => {
   test('falls back to resolving the provider window when no effective window is supplied', async () => {
     await setLiveResolver(() => modelDef({ contextWindow: 285_000, contextVerified: true }));
 
-    service.emitUsageUpdate(
-      'session-default',
-      'kory-manager',
-      'm1',
-      'codex',
-      100_000,
-      500,
-      true,
-    );
+    service.emitUsageUpdate('session-default', 'kory-manager', 'm1', 'codex', 100_000, 500, true);
 
     expect(lastUsagePayload()).toMatchObject({
       contextWindow: 285_000,

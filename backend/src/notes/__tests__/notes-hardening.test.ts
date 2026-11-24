@@ -63,7 +63,10 @@ describe('long-form Notes hardening', () => {
     mkdirSync(join(project, 'skills', 'ui-review', 'references'), { recursive: true });
     mkdirSync(join(project, 'docs'), { recursive: true });
     writeFileSync(join(project, 'skills', 'ui-review', 'SKILL.md'), '# UI review instructions');
-    writeFileSync(join(project, 'skills', 'ui-review', 'references', 'checklist.md'), '# Skill reference');
+    writeFileSync(
+      join(project, 'skills', 'ui-review', 'references', 'checklist.md'),
+      '# Skill reference',
+    );
     writeFileSync(join(project, 'docs', 'skills-guide.md'), '# Ordinary project documentation');
     await syncProjectDocuments(project);
     const collection = await listNotes(undefined, project);

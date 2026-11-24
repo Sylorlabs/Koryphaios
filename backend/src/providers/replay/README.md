@@ -36,7 +36,9 @@ Line 1 is the header. Each later line is one frame.
 
 ```ts
 const transcript = loadTranscript(path);
-const spawnChild = createReplaySpawn((command, args) => (args.includes('exec') ? transcript : null));
+const spawnChild = createReplaySpawn((command, args) =>
+  args.includes('exec') ? transcript : null,
+);
 const provider = new CodexCliProvider({ name: 'codex' } as ProviderConfig, spawnChild as never);
 ```
 

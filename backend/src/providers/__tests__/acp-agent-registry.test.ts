@@ -99,7 +99,11 @@ describe('official registry fetch', () => {
     });
     expect(snapshot.ok).toBe(true);
     expect(snapshot.source).toBe('network');
-    expect(snapshot.entries.map((e) => e.id)).toEqual(['agoragentic-acp', 'uv-agent', 'binary-agent']);
+    expect(snapshot.entries.map((e) => e.id)).toEqual([
+      'agoragentic-acp',
+      'uv-agent',
+      'binary-agent',
+    ]);
     const npx = snapshot.entries[0]!;
     expect(npx.install.kind).toBe('npx');
     expect(npx.install.command).toBe('npx');
@@ -125,7 +129,10 @@ describe('official registry fetch', () => {
     const snapshot = await fetchAcpRegistry({
       force: true,
       fetchImpl: async () =>
-        new Response(null, { status: 302, headers: { location: 'https://evil.example.com/r.json' } }),
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://evil.example.com/r.json' },
+        }),
     });
     expect(snapshot.ok).toBe(false);
     expect(snapshot.error).toMatch(/redirect/);
@@ -184,7 +191,13 @@ describe('official registry fetch', () => {
       },
     });
     expect(ok.ok).toBe(true);
-    const cached = await fetchAcpRegistry({ now: () => now, fetchImpl: async () => { calls++; return jsonResponse(REGISTRY_PAYLOAD); } });
+    const cached = await fetchAcpRegistry({
+      now: () => now,
+      fetchImpl: async () => {
+        calls++;
+        return jsonResponse(REGISTRY_PAYLOAD);
+      },
+    });
     expect(cached.source).toBe('cache');
     expect(calls).toBe(1);
 
@@ -198,14 +211,24 @@ describe('official registry fetch', () => {
     });
     expect(calls).toBe(2);
     // Failure is negative-cached: the next call does not hit the network.
-    const negative = await fetchAcpRegistry({ now: () => now, fetchImpl: async () => { calls++; throw new TypeError('down'); } });
+    const negative = await fetchAcpRegistry({
+      now: () => now,
+      fetchImpl: async () => {
+        calls++;
+        throw new TypeError('down');
+      },
+    });
     expect(negative.ok).toBe(false);
     expect(calls).toBe(2);
   });
 
   it('keeps the last good entries when a later refresh fails', async () => {
     let now = 1_000_000;
-    await fetchAcpRegistry({ force: true, now: () => now, fetchImpl: async () => jsonResponse(REGISTRY_PAYLOAD) });
+    await fetchAcpRegistry({
+      force: true,
+      now: () => now,
+      fetchImpl: async () => jsonResponse(REGISTRY_PAYLOAD),
+    });
     now += 7 * 60 * 60 * 1000;
     const failed = await fetchAcpRegistry({
       force: true,
@@ -235,7 +258,13 @@ describe('PATH autodetect', () => {
       (bin) => (bin === 'alpha-bin' ? '/usr/local/bin/alpha-bin' : null),
     );
     expect(found).toEqual([
-      { id: 'alpha', label: 'Alpha', binaryPath: '/usr/local/bin/alpha-bin', args: ['acp'], argsVerified: false },
+      {
+        id: 'alpha',
+        label: 'Alpha',
+        binaryPath: '/usr/local/bin/alpha-bin',
+        args: ['acp'],
+        argsVerified: false,
+      },
     ]);
   });
 });
@@ -253,19 +282,33 @@ describe('agent definitions', () => {
   });
 
   it('refuses loader and runtime injection env names', () => {
-    for (const name of ['LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'NODE_OPTIONS', 'PATH', 'BUN_CONFIG']) {
+    for (const name of [
+      'LD_PRELOAD',
+      'DYLD_INSERT_LIBRARIES',
+      'NODE_OPTIONS',
+      'PATH',
+      'BUN_CONFIG',
+    ]) {
       expect(isRefusedAgentEnvName(name)).toBe(true);
-      expect(() => validateAcpAgentInput({ label: 'x', command: 'a', env: { [name]: '1' } })).toThrow(
-        AcpAgentValidationError,
-      );
+      expect(() =>
+        validateAcpAgentInput({ label: 'x', command: 'a', env: { [name]: '1' } }),
+      ).toThrow(AcpAgentValidationError);
     }
   });
 
   it('rejects relative command paths, bad ids and lowercase env names', () => {
-    expect(() => validateAcpAgentInput({ label: 'x', command: './agent' })).toThrow(AcpAgentValidationError);
-    expect(() => validateAcpAgentInput({ label: 'x', command: 'a', id: 'Bad Id' })).toThrow(AcpAgentValidationError);
-    expect(() => validateAcpAgentInput({ label: 'x', command: 'a', env: { lower: '1' } })).toThrow(AcpAgentValidationError);
-    expect(() => validateAcpAgentInput({ label: '', command: 'a' })).toThrow(AcpAgentValidationError);
+    expect(() => validateAcpAgentInput({ label: 'x', command: './agent' })).toThrow(
+      AcpAgentValidationError,
+    );
+    expect(() => validateAcpAgentInput({ label: 'x', command: 'a', id: 'Bad Id' })).toThrow(
+      AcpAgentValidationError,
+    );
+    expect(() => validateAcpAgentInput({ label: 'x', command: 'a', env: { lower: '1' } })).toThrow(
+      AcpAgentValidationError,
+    );
+    expect(() => validateAcpAgentInput({ label: '', command: 'a' })).toThrow(
+      AcpAgentValidationError,
+    );
   });
 
   it('slugifies labels into stable ids', () => {
@@ -282,13 +325,25 @@ describe('agent definitions', () => {
       protocolVersion: 1,
       agentName: 'x',
     });
-    expect(probe).toEqual({ ok: true, checkedAt: 5, models: ['m'], protocolVersion: 1, agentName: 'x' });
+    expect(probe).toEqual({
+      ok: true,
+      checkedAt: 5,
+      models: ['m'],
+      protocolVersion: 1,
+      agentName: 'x',
+    });
   });
 
   it('builds a child env from the allowlist plus bound secrets only', () => {
     const env = buildAcpChildEnv(
       { MY_TOKEN: 'secret' },
-      { PATH: '/bin', HOME: '/h', LC_ALL: 'C', OPENAI_API_KEY: 'leak', KORY_BRIDGE_AUTH_FILE: '/grant' },
+      {
+        PATH: '/bin',
+        HOME: '/h',
+        LC_ALL: 'C',
+        OPENAI_API_KEY: 'leak',
+        KORY_BRIDGE_AUTH_FILE: '/grant',
+      },
     );
     expect(env.PATH).toBe('/bin');
     expect(env.LC_ALL).toBe('C');
@@ -393,7 +448,11 @@ describe('agent lifecycle service', () => {
 
   it('skips the probe when asked and reports needs-probe', async () => {
     const { host } = makeHost();
-    const result = await addCustomAcpAgent(host, { label: 'Later', command: '/opt/later', probe: false }, { root });
+    const result = await addCustomAcpAgent(
+      host,
+      { label: 'Later', command: '/opt/later', probe: false },
+      { root },
+    );
     expect(result.status).toBe('needs-probe');
     expect(result.probe).toBeUndefined();
     expect(loadAcpProbeVerdicts(root)['later']).toBeUndefined();
@@ -411,7 +470,13 @@ describe('agent lifecycle service', () => {
     const { host, registered } = makeHost();
     await addCustomAcpAgent(
       host,
-      { label: 'Recheck', command: process.execPath, args: [scriptPath], env: { FAKE_ACP_STATE: join(root, 's.json'), FAKE_ACP_PROTOCOL: '9' }, probe: false },
+      {
+        label: 'Recheck',
+        command: process.execPath,
+        args: [scriptPath],
+        env: { FAKE_ACP_STATE: join(root, 's.json'), FAKE_ACP_PROTOCOL: '9' },
+        probe: false,
+      },
       { root },
     );
     // Re-probe with the stored env: still protocol 9, so the verdict fails.
@@ -431,7 +496,11 @@ describe('agent lifecycle service', () => {
 
   it('lists custom, autodetected and registry entries with status, even when the registry is down', async () => {
     const { host } = makeHost();
-    await addCustomAcpAgent(host, { label: 'Listed', command: '/opt/listed', registryId: 'agoragentic-acp', probe: false }, { root });
+    await addCustomAcpAgent(
+      host,
+      { label: 'Listed', command: '/opt/listed', registryId: 'agoragentic-acp', probe: false },
+      { root },
+    );
     const listing = await listAcpAgents({
       root,
       registryFetch: async () => ({
@@ -451,8 +520,15 @@ describe('agent lifecycle service', () => {
 
   it('marks registry entries as added when a custom agent references them', async () => {
     const { host } = makeHost();
-    await addCustomAcpAgent(host, { label: 'Linked', command: '/opt/linked', registryId: 'agoragentic-acp', probe: false }, { root });
-    const registry = await fetchAcpRegistry({ force: true, fetchImpl: async () => jsonResponse(REGISTRY_PAYLOAD) });
+    await addCustomAcpAgent(
+      host,
+      { label: 'Linked', command: '/opt/linked', registryId: 'agoragentic-acp', probe: false },
+      { root },
+    );
+    const registry = await fetchAcpRegistry({
+      force: true,
+      fetchImpl: async () => jsonResponse(REGISTRY_PAYLOAD),
+    });
     expect(registry.ok).toBe(true);
     const listing = await listAcpAgents({
       root,

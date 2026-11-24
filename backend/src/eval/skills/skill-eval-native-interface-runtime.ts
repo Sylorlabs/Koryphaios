@@ -41,10 +41,7 @@ export interface NativeInterfaceToolchain {
 export function nativeInterfaceToolchain(): NativeInterfaceToolchain {
   const developer =
     process.env.DEVELOPER_DIR?.trim() || '/Applications/Xcode-beta.app/Contents/Developer';
-  const swiftc = join(
-    developer,
-    'Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc',
-  );
+  const swiftc = join(developer, 'Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc');
   const sdk = join(developer, 'Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk');
   if (!existsSync(swiftc) || !existsSync(sdk)) {
     return {
@@ -506,10 +503,13 @@ function buildOperations(root: string): BuildOutcome {
   const built = spawnSync(
     toolchain.swiftc,
     [
-      '-sdk', toolchain.sdk,
-      '-target', 'arm64-apple-macos13.0',
+      '-sdk',
+      toolchain.sdk,
+      '-target',
+      'arm64-apple-macos13.0',
       '-O',
-      '-o', binary,
+      '-o',
+      binary,
       join(root, 'main.swift'),
       join(root, 'OperationsModel.swift'),
     ],
@@ -579,7 +579,9 @@ function insideBounds(report: CaptureReport): string[] {
     const w = element.width ?? 0;
     const h = element.height ?? 0;
     if (x < -0.01 || y < -0.01 || x + w > width + 0.01 || y + h > height + 0.01) {
-      outside.push(`${element.id ?? '?'} at ${x.toFixed(0)},${y.toFixed(0)} ${w.toFixed(0)}x${h.toFixed(0)}`);
+      outside.push(
+        `${element.id ?? '?'} at ${x.toFixed(0)},${y.toFixed(0)} ${w.toFixed(0)}x${h.toFixed(0)}`,
+      );
     }
   }
   return outside;
@@ -656,7 +658,10 @@ export const NATIVE_INTERFACE_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministi
         (report.elements ?? []).length >= 7 &&
         wide.pixels > 5_000;
       const platformContract =
-        built.ok && immutable && nativeOnly && liveWindow &&
+        built.ok &&
+        immutable &&
+        nativeOnly &&
+        liveWindow &&
         NATIVE_INTERFACE_REQUIRED_STATES.every((id) => typeof report?.states?.[id] === 'string');
       add(
         'desktop-native-platform-contract',
@@ -807,7 +812,10 @@ export const NATIVE_INTERFACE_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministi
         true,
       );
 
-      const artifact = readJsonArtifact<DesktopResult>(workingDirectory, 'verification/desktop-result.json');
+      const artifact = readJsonArtifact<DesktopResult>(
+        workingDirectory,
+        'verification/desktop-result.json',
+      );
       const matrix = artifact?.stateMatrix ?? {};
       const artifactAgrees = NATIVE_INTERFACE_REQUIRED_STATES.every(
         (id) => typeof matrix[id] === 'string' && matrix[id] === report?.states?.[id],

@@ -14,7 +14,9 @@ interface Recorded {
 
 function harness() {
   const recorded: Recorded[] = [];
-  const service = new TerminalService((sessionId, message) => recorded.push({ sessionId, message }));
+  const service = new TerminalService((sessionId, message) =>
+    recorded.push({ sessionId, message }),
+  );
   return { recorded, service };
 }
 
@@ -41,7 +43,9 @@ function outputOf(recorded: Recorded[], terminalId: string): Uint8Array {
 
 function exitOf(recorded: Recorded[], terminalId: string) {
   const exit = recorded.find(
-    (r) => r.message.type === 'terminal.exit' && (r.message.payload as { terminalId: string }).terminalId === terminalId,
+    (r) =>
+      r.message.type === 'terminal.exit' &&
+      (r.message.payload as { terminalId: string }).terminalId === terminalId,
   );
   return exit?.message.payload as { exitCode: number | null; signal: string | null } | undefined;
 }
@@ -62,7 +66,14 @@ describe('terminal PTY lifecycle', () => {
   test('spawns a shell and streams its output and exit', async () => {
     const { recorded, service } = harness();
     const table = newTable();
-    const term = service.create(table, { sessionId: 's1', scope: 'chat', cwd, cols: 80, rows: 24, ...sh('echo terminal-ok') });
+    const term = service.create(table, {
+      sessionId: 's1',
+      scope: 'chat',
+      cwd,
+      cols: 80,
+      rows: 24,
+      ...sh('echo terminal-ok'),
+    });
     await until(() => !term.isRunning);
     expect(Buffer.from(outputOf(recorded, term.id)).toString('utf8')).toContain('terminal-ok');
     expect(exitOf(recorded, term.id)).toMatchObject({ exitCode: 0, signal: null });
@@ -73,7 +84,11 @@ describe('terminal PTY lifecycle', () => {
     const { recorded, service } = harness();
     const table = newTable();
     const term = service.create(table, {
-      sessionId: 's1', scope: 'chat', cwd, cols: 80, rows: 24,
+      sessionId: 's1',
+      scope: 'chat',
+      cwd,
+      cols: 80,
+      rows: 24,
       ...sh('read line; stty size; exit 0'),
     });
     expect(service.resize(table, term.id, 120, 40)).toBe(true);
@@ -86,7 +101,15 @@ describe('terminal PTY lifecycle', () => {
   test('kill ends a running shell and reports the signal', async () => {
     const { recorded, service } = harness();
     const table = newTable();
-    const term = service.create(table, { sessionId: 's1', scope: 'chat', cwd, cols: 80, rows: 24, command: '/bin/sleep', args: ['30'] });
+    const term = service.create(table, {
+      sessionId: 's1',
+      scope: 'chat',
+      cwd,
+      cols: 80,
+      rows: 24,
+      command: '/bin/sleep',
+      args: ['30'],
+    });
     expect(term.isRunning).toBe(true);
     service.kill(table, term.id, 'SIGTERM');
     await until(() => !term.isRunning);
@@ -97,7 +120,15 @@ describe('terminal PTY lifecycle', () => {
   test('remove stops a running shell and forgets it', async () => {
     const { service } = harness();
     const table = newTable();
-    const term = service.create(table, { sessionId: 's1', scope: 'chat', cwd, cols: 80, rows: 24, command: '/bin/sleep', args: ['30'] });
+    const term = service.create(table, {
+      sessionId: 's1',
+      scope: 'chat',
+      cwd,
+      cols: 80,
+      rows: 24,
+      command: '/bin/sleep',
+      args: ['30'],
+    });
     service.remove(table, term.id);
     expect(table.has(term.id)).toBe(false);
     await until(() => !term.isRunning);
@@ -107,7 +138,11 @@ describe('terminal PTY lifecycle', () => {
     const { recorded, service } = harness();
     const table = newTable();
     const term = service.create(table, {
-      sessionId: 's1', scope: 'chat', cwd, cols: 80, rows: 24,
+      sessionId: 's1',
+      scope: 'chat',
+      cwd,
+      cols: 80,
+      rows: 24,
       ...sh("printf '\\377\\376A'"),
     });
     await until(() => !term.isRunning);
@@ -119,7 +154,15 @@ describe('terminal PTY lifecycle', () => {
   test('rejects input larger than the cap and non-text input', () => {
     const { service } = harness();
     const table = newTable();
-    const term = service.create(table, { sessionId: 's1', scope: 'chat', cwd, cols: 80, rows: 24, command: '/bin/sleep', args: ['30'] });
+    const term = service.create(table, {
+      sessionId: 's1',
+      scope: 'chat',
+      cwd,
+      cols: 80,
+      rows: 24,
+      command: '/bin/sleep',
+      args: ['30'],
+    });
     expect(() => service.write(table, term.id, 'x'.repeat(16 * 1024 + 1))).toThrow(ValidationError);
     expect(() => service.write(table, term.id, 42 as unknown as string)).toThrow(ValidationError);
     service.remove(table, term.id);
@@ -129,13 +172,37 @@ describe('terminal PTY lifecycle', () => {
     const { service } = harness();
     const table = newTable();
     expect(() =>
-      service.create(table, { sessionId: 's1', scope: 'chat', cwd: '/definitely/missing/kory-cwd', cols: 80, rows: 24, command: '/bin/sleep', args: ['1'] }),
+      service.create(table, {
+        sessionId: 's1',
+        scope: 'chat',
+        cwd: '/definitely/missing/kory-cwd',
+        cols: 80,
+        rows: 24,
+        command: '/bin/sleep',
+        args: ['1'],
+      }),
     ).toThrow(ValidationError);
     for (let i = 0; i < 8; i += 1) {
-      service.create(table, { sessionId: 's1', scope: 'chat', cwd, cols: 80, rows: 24, command: '/bin/sleep', args: ['30'] });
+      service.create(table, {
+        sessionId: 's1',
+        scope: 'chat',
+        cwd,
+        cols: 80,
+        rows: 24,
+        command: '/bin/sleep',
+        args: ['30'],
+      });
     }
     expect(() =>
-      service.create(table, { sessionId: 's1', scope: 'chat', cwd, cols: 80, rows: 24, command: '/bin/sleep', args: ['30'] }),
+      service.create(table, {
+        sessionId: 's1',
+        scope: 'chat',
+        cwd,
+        cols: 80,
+        rows: 24,
+        command: '/bin/sleep',
+        args: ['30'],
+      }),
     ).toThrow(ConflictError);
   });
 
@@ -146,7 +213,15 @@ describe('terminal PTY lifecycle', () => {
     try {
       const { service } = harness();
       const table = newTable();
-      const term = service.create(table, { sessionId: 's1', scope: 'chat', cwd, cols: 80, rows: 24, command: undefined, args: undefined } as never);
+      const term = service.create(table, {
+        sessionId: 's1',
+        scope: 'chat',
+        cwd,
+        cols: 80,
+        rows: 24,
+        command: undefined,
+        args: undefined,
+      } as never);
       expect(term.info().shell.startsWith('/bin/sh')).toBe(true);
       service.remove(table, term.id);
     } finally {
@@ -161,7 +236,11 @@ describe('scrollback restore', () => {
     const { recorded, service } = harness();
     const table = newTable();
     const term = service.create(table, {
-      sessionId: 's1', scope: 'chat', cwd, cols: 80, rows: 24,
+      sessionId: 's1',
+      scope: 'chat',
+      cwd,
+      cols: 80,
+      rows: 24,
       ...sh('echo one; echo two; echo three'),
     });
     await until(() => !term.isRunning);
@@ -209,7 +288,15 @@ describe('session isolation', () => {
     const { service } = harness();
     const chatA = newTable();
     const chatB = newTable();
-    const term = service.create(chatA, { sessionId: 'chat-a', scope: 'chat', cwd, cols: 80, rows: 24, command: '/bin/sleep', args: ['30'] });
+    const term = service.create(chatA, {
+      sessionId: 'chat-a',
+      scope: 'chat',
+      cwd,
+      cols: 80,
+      rows: 24,
+      command: '/bin/sleep',
+      args: ['30'],
+    });
     expect(() => service.get(chatB, term.id)).toThrow(NotFoundError);
     expect(() => service.write(chatB, term.id, 'echo nope\n')).toThrow(NotFoundError);
     expect(() => service.kill(chatB, term.id)).toThrow(NotFoundError);
@@ -221,7 +308,14 @@ describe('session isolation', () => {
   test('live output is published against the owning chat only', async () => {
     const { recorded, service } = harness();
     const table = newTable();
-    const term = service.create(table, { sessionId: 'chat-a', scope: 'chat', cwd, cols: 80, rows: 24, ...sh('echo hi') });
+    const term = service.create(table, {
+      sessionId: 'chat-a',
+      scope: 'chat',
+      cwd,
+      cols: 80,
+      rows: 24,
+      ...sh('echo hi'),
+    });
     await until(() => !term.isRunning);
     expect(recorded.length).toBeGreaterThan(0);
     expect(new Set(recorded.map((r) => r.sessionId))).toEqual(new Set(['chat-a']));
@@ -231,7 +325,15 @@ describe('session isolation', () => {
   test('deleting a chat disposes its terminals through SessionRuntime', async () => {
     const { service } = harness();
     const runtime = new SessionRuntime();
-    const term = service.create(runtime.terminals, { sessionId: 'chat-a', scope: 'chat', cwd, cols: 80, rows: 24, command: '/bin/sleep', args: ['30'] });
+    const term = service.create(runtime.terminals, {
+      sessionId: 'chat-a',
+      scope: 'chat',
+      cwd,
+      cols: 80,
+      rows: 24,
+      command: '/bin/sleep',
+      args: ['30'],
+    });
     expect(term).toBeInstanceOf(TerminalSession);
     runtime.dispose();
     expect(runtime.terminals.size).toBe(0);

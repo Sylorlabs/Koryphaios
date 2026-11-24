@@ -11,7 +11,9 @@ function load(): Set<string> {
     const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
     return new Set(
-      Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [],
+      Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === 'string')
+        : [],
     );
   } catch {
     return new Set();
@@ -36,7 +38,9 @@ function loadChats(): Set<string> {
     const raw = globalThis.localStorage?.getItem(PINNED_CHATS_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
     return new Set(
-      Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === 'string') : [],
+      Array.isArray(parsed)
+        ? parsed.filter((value): value is string => typeof value === 'string')
+        : [],
     );
   } catch {
     return new Set();

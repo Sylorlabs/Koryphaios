@@ -78,8 +78,7 @@ describe('ProviderRegistry auth modes', () => {
   test('a failed rotation preserves the active provider and all other provider keys', async () => {
     const registry = new ProviderRegistry(minimalConfig());
     expect(
-      (await registry.setCredentials('unorouter', { apiKey: 'synthetic-unorouter-good' }))
-        .success,
+      (await registry.setCredentials('unorouter', { apiKey: 'synthetic-unorouter-good' })).success,
     ).toBe(true);
     expect(
       (await registry.setCredentials('openai', { apiKey: 'synthetic-openai-good' })).success,

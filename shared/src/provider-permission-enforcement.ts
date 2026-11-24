@@ -39,8 +39,9 @@ const KORY_HOOKS: Record<string, string> = {
 
 /** CLI harnesses whose native tools run under the CLI's own policy. */
 const NATIVE: Record<string, string> = {
-  codebuddy: "CodeBuddy's native edit and write tools are pre-approved and run without Kory's check.",
-  cursor: "Cursor runs with --trust; its native tools are not checked by Kory.",
+  codebuddy:
+    "CodeBuddy's native edit and write tools are pre-approved and run without Kory's check.",
+  cursor: 'Cursor runs with --trust; its native tools are not checked by Kory.',
   grok: "Grok's built-in tools stay enabled and are not checked by Kory.",
   'gemini-cli': 'Gemini CLI cannot call Kory tools; its own tools follow its own policy.',
 };
@@ -80,7 +81,11 @@ export function providerPermissionEnforcement(
     };
   }
   if (!name) {
-    return { level: 'unverified', label: 'No model selected', detail: 'Choose a model to see who enforces this mode.' };
+    return {
+      level: 'unverified',
+      label: 'No model selected',
+      detail: 'Choose a model to see who enforces this mode.',
+    };
   }
   // API providers have no tools of their own: every tool call is a Kory tool.
   return {

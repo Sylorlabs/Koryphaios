@@ -51,27 +51,44 @@ describe('Antigravity host continuations', () => {
     { role: 'assistant', content: 'Proposed answer' },
   ];
   const repair: ProviderMessage = {
-    role: 'system', content: 'CRITIC REQUIRES REPAIR:\nVerify the claim and correct the answer.',
+    role: 'system',
+    content: 'CRITIC REQUIRES REPAIR:\nVerify the claim and correct the answer.',
   };
 
   test('resumes with Critic repair instructions without replaying the previous answer', () => {
     const scope = createCliAttachmentScope();
     try {
-      expect(buildAntigravityTurnPrompt([...history, repair], scope)).toBe(`System: ${repair.content}`);
-    } finally { scope.cleanup(); }
+      expect(buildAntigravityTurnPrompt([...history, repair], scope)).toBe(
+        `System: ${repair.content}`,
+      );
+    } finally {
+      scope.cleanup();
+    }
   });
 
   test('preserves ordered tool results, host continuations and user follow-ups', () => {
     const scope = createCliAttachmentScope();
     try {
-      expect(buildAntigravityTurnPrompt([...history,
-        { role: 'tool', content: 'Verification failed', tool_call_id: 'check' },
-        repair,
-        { role: 'user', content: 'Keep the original scope.' },
-      ], scope)).toBe(`Tool result: Verification failed\n\nSystem: ${repair.content}\n\nUser: Keep the original scope.`);
-      expect(buildAntigravityTurnPrompt([...history, { role: 'user', content: 'Next task' }], scope)).toBe('Next task');
+      expect(
+        buildAntigravityTurnPrompt(
+          [
+            ...history,
+            { role: 'tool', content: 'Verification failed', tool_call_id: 'check' },
+            repair,
+            { role: 'user', content: 'Keep the original scope.' },
+          ],
+          scope,
+        ),
+      ).toBe(
+        `Tool result: Verification failed\n\nSystem: ${repair.content}\n\nUser: Keep the original scope.`,
+      );
+      expect(
+        buildAntigravityTurnPrompt([...history, { role: 'user', content: 'Next task' }], scope),
+      ).toBe('Next task');
       expect(buildAntigravityTurnPrompt(history, scope)).toBe('');
-    } finally { scope.cleanup(); }
+    } finally {
+      scope.cleanup();
+    }
   });
 
   test('does not replay more history than the Antigravity CLI can hold', () => {
@@ -105,6 +122,8 @@ describe('Antigravity host continuations', () => {
       expect(prompt).toContain('kory__invoke_mcp_tool');
       expect(prompt).toContain('System: Earlier host instruction');
       expect(prompt).toContain(`Assistant: Proposed answer\n\nSystem: ${repair.content}`);
-    } finally { scope.cleanup(); }
+    } finally {
+      scope.cleanup();
+    }
   });
 });

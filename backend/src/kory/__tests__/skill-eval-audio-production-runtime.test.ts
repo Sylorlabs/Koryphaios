@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -40,7 +47,8 @@ function reports(root: string, id: (typeof scenarios)[number]): void {
   writeFileSync(
     join(root, '.kory-eval', 'verification.json'),
     JSON.stringify({
-      negativeFinding: 'Final-file loudness or ducking defect confirmed by decoding and measurement.',
+      negativeFinding:
+        'Final-file loudness or ducking defect confirmed by decoding and measurement.',
       recoveryEvidence: 'The corrected AAC is decoded and independently measured again.',
       subjectiveListening: 'unverified',
     }),
@@ -91,7 +99,9 @@ describe('audio-production V5 actual encoded media evaluation', () => {
           reports(root, id);
           const missingFiles = runAudioProductionRuntime(root, id);
           expect(missingFiles.passed).toBe(false);
-          expect(missingFiles.checks.find((check) => check.id === 'real-encoded-media-probe')?.passed).toBe(false);
+          expect(
+            missingFiles.checks.find((check) => check.id === 'real-encoded-media-probe')?.passed,
+          ).toBe(false);
 
           renderAudioProductionControl(root, id, 'positive');
           renderAudioProductionControl(root, id, 'negative');
@@ -100,19 +110,39 @@ describe('audio-production V5 actual encoded media evaluation', () => {
           const passing = runAudioProductionRuntime(root, id);
           expect(passing.checks.filter((check) => !check.passed)).toEqual([]);
           expect(passing.passed).toBe(true);
-          expect(passing.checks.find((check) => check.id === 'real-defective-encoded-negative-rejected')?.passed).toBe(true);
-          expect(passing.checks.find((check) => check.id === 'final-decoded-mono-and-small-speaker-proxy')?.passed).toBe(true);
+          expect(
+            passing.checks.find((check) => check.id === 'real-defective-encoded-negative-rejected')
+              ?.passed,
+          ).toBe(true);
+          expect(
+            passing.checks.find(
+              (check) => check.id === 'final-decoded-mono-and-small-speaker-proxy',
+            )?.passed,
+          ).toBe(true);
 
-          copyFileSync(join(root, '.kory-eval', 'negative.m4a'), join(root, '.kory-eval', 'final.m4a'));
+          copyFileSync(
+            join(root, '.kory-eval', 'negative.m4a'),
+            join(root, '.kory-eval', 'final.m4a'),
+          );
           const corruptedFinal = runAudioProductionRuntime(root, id);
           expect(corruptedFinal.passed).toBe(false);
           expect(corruptedFinal.checks.some((check) => !check.passed)).toBe(true);
 
-          appendFileSync(join(root, 'sources', 'music.wav'.replace('music', id === scenarios[0] ? 'interview-a' : 'music')), Buffer.from('source changed'));
+          appendFileSync(
+            join(
+              root,
+              'sources',
+              'music.wav'.replace('music', id === scenarios[0] ? 'interview-a' : 'music'),
+            ),
+            Buffer.from('source changed'),
+          );
           const altered = runAudioProductionRuntime(root, id);
           expect(altered.passed).toBe(false);
           expect(altered.checks).toEqual([
-            expect.objectContaining({ id: 'immutable-real-audio-source-provenance', passed: false }),
+            expect.objectContaining({
+              id: 'immutable-real-audio-source-provenance',
+              passed: false,
+            }),
           ]);
         } finally {
           rmSync(root, { recursive: true, force: true });
@@ -134,18 +164,34 @@ describe('audio-production V5 actual encoded media evaluation', () => {
         renderAudioProductionControl(root, id, 'positive');
         renderAudioProductionControl(root, id, 'recovered');
 
-        const render = spawnSync('ffmpeg', [
-          '-hide_banner', '-loglevel', 'error', '-y',
-          '-i', join(root, '.kory-eval', 'final.m4a'),
-          '-af', 'pan=stereo|c0=c0|c1=-1*c0',
-          '-c:a', 'aac', '-ar', '48000', '-b:a', '192k',
-          join(root, '.kory-eval', 'negative.m4a'),
-        ], { encoding: 'utf8' });
+        const render = spawnSync(
+          'ffmpeg',
+          [
+            '-hide_banner',
+            '-loglevel',
+            'error',
+            '-y',
+            '-i',
+            join(root, '.kory-eval', 'final.m4a'),
+            '-af',
+            'pan=stereo|c0=c0|c1=-1*c0',
+            '-c:a',
+            'aac',
+            '-ar',
+            '48000',
+            '-b:a',
+            '192k',
+            join(root, '.kory-eval', 'negative.m4a'),
+          ],
+          { encoding: 'utf8' },
+        );
         expect(render.status, render.stderr).toBe(0);
 
         const measured = runAudioProductionRuntime(root, id);
         expect(measured.passed).toBe(true);
-        const negative = measured.checks.find((check) => check.id === 'real-defective-encoded-negative-rejected');
+        const negative = measured.checks.find(
+          (check) => check.id === 'real-defective-encoded-negative-rejected',
+        );
         expect(negative?.passed).toBe(true);
         expect(negative?.detail).toContain('decoded-mono-and-small-speaker-proxy');
         expect(negative?.detail).not.toContain('post-encode-loudness');

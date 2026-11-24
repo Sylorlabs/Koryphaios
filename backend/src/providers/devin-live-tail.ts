@@ -121,11 +121,17 @@ export class DevinLiveTail {
     if (!db) return;
     try {
       this.lastNodeRow =
-        (db.query('SELECT MAX(row_id) AS m FROM message_nodes').get() as { m: number | null } | null)
-          ?.m ?? 0;
+        (
+          db.query('SELECT MAX(row_id) AS m FROM message_nodes').get() as {
+            m: number | null;
+          } | null
+        )?.m ?? 0;
       this.lastToolRow =
-        (db.query('SELECT MAX(rowid) AS m FROM tool_call_state').get() as { m: number | null } | null)
-          ?.m ?? 0;
+        (
+          db.query('SELECT MAX(rowid) AS m FROM tool_call_state').get() as {
+            m: number | null;
+          } | null
+        )?.m ?? 0;
     } catch (err) {
       providerLog.debug({ err: String(err) }, 'Devin live tail snapshot failed — tail disabled');
       this.close();
@@ -230,7 +236,12 @@ export class DevinLiveTail {
   drainFinal(): ProviderEvent[] {
     const events = this.drain();
     for (const [id, tool] of this.pendingTools) {
-      events.push({ type: 'tool_executed', toolCallId: id, toolName: tool.name, toolInput: tool.input });
+      events.push({
+        type: 'tool_executed',
+        toolCallId: id,
+        toolName: tool.name,
+        toolInput: tool.input,
+      });
       this.emittedToolKeys.add(toolEventKey(tool.name, tool.input));
       this.pendingTools.delete(id);
     }

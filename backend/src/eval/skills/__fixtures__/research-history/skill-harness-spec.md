@@ -26,8 +26,8 @@ Each SKILL.md is a markdown file with optional YAML frontmatter:
 
 ```markdown
 ---
-description: "One-line description for contextual activation"
-globs: ["**/*.test.ts", "**/*.spec.ts"]
+description: 'One-line description for contextual activation'
+globs: ['**/*.test.ts', '**/*.spec.ts']
 alwaysApply: false
 ---
 
@@ -47,11 +47,11 @@ Instruction content here. This is the body that gets loaded when the skill activ
 
 ### Frontmatter Fields
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `description` | string | yes | -- | One-line summary used for agent-requested activation |
-| `globs` | string[] | no | `[]` | File patterns that trigger activation |
-| `alwaysApply` | boolean | no | `false` | Whether to load on every interaction |
+| Field         | Type     | Required | Default | Description                                          |
+| ------------- | -------- | -------- | ------- | ---------------------------------------------------- |
+| `description` | string   | yes      | --      | One-line summary used for agent-requested activation |
+| `globs`       | string[] | no       | `[]`    | File patterns that trigger activation                |
+| `alwaysApply` | boolean  | no       | `false` | Whether to load on every interaction                 |
 
 ### Body Content
 
@@ -74,7 +74,7 @@ Skills activate based on their frontmatter configuration:
 
 ```yaml
 ---
-description: "Project-wide coding conventions"
+description: 'Project-wide coding conventions'
 alwaysApply: true
 ---
 ```
@@ -85,8 +85,8 @@ Loaded on every interaction. Use sparingly -- this adds to base context cost.
 
 ```yaml
 ---
-description: "Testing conventions and utilities"
-globs: ["**/*.test.ts", "**/*.spec.ts", "tests/**"]
+description: 'Testing conventions and utilities'
+globs: ['**/*.test.ts', '**/*.spec.ts', 'tests/**']
 ---
 ```
 
@@ -96,7 +96,7 @@ Loaded when the agent is working with files matching the glob patterns. The matc
 
 ```yaml
 ---
-description: "Database migration procedures and conventions"
+description: 'Database migration procedures and conventions'
 ---
 ```
 
@@ -158,23 +158,27 @@ To install a skill into a project:
 3. For tool-specific formats, generate the native representation:
 
 **Claude Code:**
+
 ```bash
 ln -s ../../.agent/skills/deploy .claude/skills/deploy
 ```
 
 **Codex:**
+
 ```bash
 skill-harness install-dir compose-skills --harness codex
 skill-harness check-dir compose-skills --harness codex
 ```
 
 **OpenCode:**
+
 ```bash
 skill-harness install-dir compose-skills --harness opencode
 skill-harness check-dir compose-skills --harness opencode
 ```
 
 **Generic portable layout:**
+
 ```bash
 skill-harness install-dir compose-skills --harness generic
 skill-harness check-dir compose-skills --harness generic
@@ -183,6 +187,7 @@ skill-harness check-dir compose-skills --harness generic
 For the bundled `compose-skills` package, `src/skill-harness/skills/compose-skills` is the canonical source tree. `install-dir compose-skills` and `check-dir compose-skills` use that tree by default and compare every file recursively, not only `SKILL.md`.
 
 **Cursor (generate .mdc):**
+
 ```
 ---
 description: "Deploy procedures and conventions"
@@ -194,8 +199,10 @@ alwaysApply: false
 ```
 
 **Copilot (merge into scoped instructions):**
+
 ```markdown
 ## Deploy (from .agent/skills/deploy)
+
 ...
 ```
 
@@ -257,10 +264,10 @@ The `Decision Boundary` must explicitly explain the one-skill-vs-many rationale:
 
 ## Relationship to Other Specs
 
-| Spec | Role in Skills |
-|------|---------------|
-| [agent-rules](https://github.com/btakita/agent-rules) | Rule content appears inline in SKILL.md body |
-| [agent-runbooks](https://github.com/btakita/agent-runbooks) | Procedures live in the skill's `runbooks/` directory |
+| Spec                                                        | Role in Skills                                                              |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [agent-rules](https://github.com/btakita/agent-rules)       | Rule content appears inline in SKILL.md body                                |
+| [agent-runbooks](https://github.com/btakita/agent-runbooks) | Procedures live in the skill's `runbooks/` directory                        |
 | [agent-memories](https://github.com/btakita/agent-memories) | Skills may generate memories during use; memories reference the skill scope |
 
 ## Agentic Contracts
@@ -295,11 +302,11 @@ When uninstalling skills, the agent promises to:
 
 Planned evaluations that verify the agentic contracts above. Each eval is a scenario the agent must handle correctly.
 
-| Eval | Contract | Description |
-|------|----------|-------------|
-| [install_idempotent](evals/install_idempotent.md) | Install | Installing a skill twice produces the same result -- no duplicates, no errors, identical output |
-| [environment_path_resolution](evals/environment_path_resolution.md) | Install | Each target environment resolves to its correct native path, including Claude Code and Codex skill directories |
-| [uninstall_cleanup](evals/uninstall_cleanup.md) | Uninstall | Uninstall removes the skill file and empty parent directories only |
-| bundled compose-skills install/check matrix | Install / Check | `install-dir` plus `check-dir` runs across Claude, Codex, OpenCode, and the generic `.agent/skills` layout |
-| compose-skills fixtures | Check / Compose | Bundled fixtures cover malformed plans, ambiguous one-skill-vs-many splits, and an agent-doc workflow decomposition example |
-| oversized workflow handoff fixture | Compose | End-to-end compose-skills example starts from a broad workflow prompt, decomposes it, and documents the `skill-creator` handoff boundary |
+| Eval                                                                | Contract        | Description                                                                                                                              |
+| ------------------------------------------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| [install_idempotent](evals/install_idempotent.md)                   | Install         | Installing a skill twice produces the same result -- no duplicates, no errors, identical output                                          |
+| [environment_path_resolution](evals/environment_path_resolution.md) | Install         | Each target environment resolves to its correct native path, including Claude Code and Codex skill directories                           |
+| [uninstall_cleanup](evals/uninstall_cleanup.md)                     | Uninstall       | Uninstall removes the skill file and empty parent directories only                                                                       |
+| bundled compose-skills install/check matrix                         | Install / Check | `install-dir` plus `check-dir` runs across Claude, Codex, OpenCode, and the generic `.agent/skills` layout                               |
+| compose-skills fixtures                                             | Check / Compose | Bundled fixtures cover malformed plans, ambiguous one-skill-vs-many splits, and an agent-doc workflow decomposition example              |
+| oversized workflow handoff fixture                                  | Compose         | End-to-end compose-skills example starts from a broad workflow prompt, decomposes it, and documents the `skill-creator` handoff boundary |

@@ -16,7 +16,7 @@ Preserve actual message IDs as LazyColumn keys and scroll anchors, tie avatar
 coroutines to composable lifecycle, and allow retry and navigation cleanup.
 The evaluator runs at 1.5x system font scale and checks native keyboard focus.
 
-Evaluator instrumentation is copied into an isolated build *after* candidate
+Evaluator instrumentation is copied into an isolated build _after_ candidate
 work completes. It is not a test file that the candidate supplies or edits.
 Native evidence comes from Gradle, installed APKs, fresh instrumentation
 processes and Android accessibility/Compose assertions. Android component

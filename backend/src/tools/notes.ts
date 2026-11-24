@@ -100,7 +100,10 @@ export const createNoteTool: Tool = {
     const input = call.input as Record<string, unknown>;
     const start = Date.now();
     try {
-      if (Array.isArray(input.tags) && input.tags.includes('canvas')) throw new Error('Use create_note_canvas for visual boards so its dedicated permission and validation apply.');
+      if (Array.isArray(input.tags) && input.tags.includes('canvas'))
+        throw new Error(
+          'Use create_note_canvas for visual boards so its dedicated permission and validation apply.',
+        );
       const note = await notesService.createNote(
         {
           title: String(input.title),
@@ -253,7 +256,13 @@ export const updateNoteTool: Tool = {
         };
       }
       const current = await notesService.getNote(id, ctx.workingDirectory);
-      if (current?.tags.includes('canvas') || (Array.isArray(input.tags) && input.tags.includes('canvas'))) throw new Error('Use patch_note_canvas for visual boards so its dedicated permission and revision validation apply.');
+      if (
+        current?.tags.includes('canvas') ||
+        (Array.isArray(input.tags) && input.tags.includes('canvas'))
+      )
+        throw new Error(
+          'Use patch_note_canvas for visual boards so its dedicated permission and revision validation apply.',
+        );
       const note = await notesService.updateNote(
         id,
         {
@@ -660,7 +669,9 @@ export const retrieveNoteContextTool: Tool = {
         // semantic failure is not permission to publish lexical fallback after
         // read access was revoked while a provider request was in flight.
         for (const name of ['retrieve_note_context', 'read_note']) {
-          const permission = checkNoteToolPermission(name, root, { mode: ctx.permissionPolicy?.mode });
+          const permission = checkNoteToolPermission(name, root, {
+            mode: ctx.permissionPolicy?.mode,
+          });
           const host = decideToolPermission(ctx.permissionPolicy, name);
           if (!permission.allowed) throw new Error(permission.reason);
           if (host.action === 'deny') throw new Error(host.reason);

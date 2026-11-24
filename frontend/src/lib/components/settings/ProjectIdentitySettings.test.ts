@@ -343,9 +343,9 @@ describe('ProjectIdentitySettings', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Square' }));
     await waitFor(() =>
       expect(
-        container.querySelector('[data-testid="stub-icon-editor"]')?.getAttribute(
-          'data-frame-shape',
-        ),
+        container
+          .querySelector('[data-testid="stub-icon-editor"]')
+          ?.getAttribute('data-frame-shape'),
       ).toBe('square'),
     );
 
@@ -366,10 +366,7 @@ describe('ProjectIdentitySettings', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'None' }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'None' })).toHaveAttribute(
-        'aria-pressed',
-        'true',
-      ),
+      expect(screen.getByRole('button', { name: 'None' })).toHaveAttribute('aria-pressed', 'true'),
     );
 
     await fireEvent.click(screen.getByRole('button', { name: 'Color only' }));

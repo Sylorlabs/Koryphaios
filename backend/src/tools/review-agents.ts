@@ -21,9 +21,11 @@ export class ManageReviewAgentsTool implements Tool {
       return { callId: call.id, name: this.name, output, isError: false, durationMs: 0 };
     } catch (error) {
       return {
-        callId: call.id, name: this.name,
+        callId: call.id,
+        name: this.name,
         output: error instanceof Error ? error.message : String(error),
-        isError: true, durationMs: 0,
+        isError: true,
+        durationMs: 0,
       };
     }
   }

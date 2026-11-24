@@ -86,7 +86,12 @@ function run(
   };
 }
 
-function checked(executable: string, args: string[], cwd?: string, binary = false): string | Buffer {
+function checked(
+  executable: string,
+  args: string[],
+  cwd?: string,
+  binary = false,
+): string | Buffer {
   const result = run(executable, args, { cwd, binary });
   if (result.status !== 0) {
     throw new Error(
@@ -173,11 +178,27 @@ function produceStem(
   noiseGain: number,
 ): void {
   const args = [
-    '-hide_banner', '-loglevel', 'error', '-y', '-i', voiceFile,
-    '-f', 'lavfi', '-i', `anoisesrc=color=pink:amplitude=${noiseGain}:sample_rate=48000:duration=${duration}`,
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    voiceFile,
+    '-f',
+    'lavfi',
+    '-i',
+    `anoisesrc=color=pink:amplitude=${noiseGain}:sample_rate=48000:duration=${duration}`,
     '-filter_complex',
     `[0:a]aresample=48000,volume=${speechGain},adelay=${delayMs},apad=whole_dur=${duration},atrim=duration=${duration}[voice];[voice][1:a]amix=inputs=2:duration=first:normalize=0,aresample=48000[a]`,
-    '-map', '[a]', '-ac', '1', '-ar', '48000', '-c:a', 'pcm_s24le', absolute(root, output),
+    '-map',
+    '[a]',
+    '-ac',
+    '1',
+    '-ar',
+    '48000',
+    '-c:a',
+    'pcm_s24le',
+    absolute(root, output),
   ];
   checked('ffmpeg', args, root);
 }
@@ -214,12 +235,14 @@ export function materializeAudioProductionFixture(root: string, id: Scenario): v
   writeFixtureFile(root, 'evidence/contract.json', JSON.stringify(SPECS[id], null, 2) + '\n');
   if (id === INTERVIEW) {
     const first = speak(
-      root, 'speaker-a',
+      root,
+      'speaker-a',
       'Our original interview was recorded near a busy office. The order process begins when the customer verifies their information, then confirms the delivery address.',
       available.voice,
     );
     const second = speak(
-      root, 'speaker-b',
+      root,
+      'speaker-b',
       'Exactly. We can still correct an order before dispatch. Tell the customer which changes will appear on the confirmation screen.',
       available.voice,
     );
@@ -227,21 +250,45 @@ export function materializeAudioProductionFixture(root: string, id: Scenario): v
     produceStem(root, second, 'sources/interview-b.wav', 18, 8500, 0.12, 0.012);
   } else {
     const source = speak(
-      root, 'narrator',
+      root,
+      'narrator',
       'Welcome to the quick start. First connect the cable and confirm the indicator turns green. Next open the settings and choose the current project. When the transfer finishes, review the final summary.',
       available.voice,
     );
-    produceStem(root, source, 'sources/narration.wav', 30, 0, 0.40, 0);
-    checked('ffmpeg', [
-      '-hide_banner', '-loglevel', 'error', '-y',
-      '-f', 'lavfi', '-i', 'sine=frequency=220:sample_rate=48000:duration=30',
-      '-f', 'lavfi', '-i', 'sine=frequency=330:sample_rate=48000:duration=30',
-      '-filter_complex', '[0:a]volume=0.65[a];[1:a]volume=0.25[b];[a][b]amix=inputs=2:duration=first:normalize=0[out]',
-      '-map', '[out]', '-ac', '1', '-ar', '48000', '-c:a', 'pcm_s24le',
-      absolute(root, 'sources/music.wav'),
-    ], root);
+    produceStem(root, source, 'sources/narration.wav', 30, 0, 0.4, 0);
+    checked(
+      'ffmpeg',
+      [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=220:sample_rate=48000:duration=30',
+        '-f',
+        'lavfi',
+        '-i',
+        'sine=frequency=330:sample_rate=48000:duration=30',
+        '-filter_complex',
+        '[0:a]volume=0.65[a];[1:a]volume=0.25[b];[a][b]amix=inputs=2:duration=first:normalize=0[out]',
+        '-map',
+        '[out]',
+        '-ac',
+        '1',
+        '-ar',
+        '48000',
+        '-c:a',
+        'pcm_s24le',
+        absolute(root, 'sources/music.wav'),
+      ],
+      root,
+    );
   }
-  const entries = Object.fromEntries(sourceFiles(id).map((file) => [file, hash(regular(root, file))]));
+  const entries = Object.fromEntries(
+    sourceFiles(id).map((file) => [file, hash(regular(root, file))]),
+  );
   writeFixtureFile(root, 'evidence/source-sha256.json', JSON.stringify(entries, null, 2) + '\n');
 }
 
@@ -262,11 +309,29 @@ export function renderAudioProductionControl(root: string, id: Scenario, variant
       : '[0:a]highpass=f=90[voice];[1:a]volume=0.06:enable=between(t\\,0\\,18),volume=0.38:enable=between(t\\,18\\,30)[bed];[voice][bed]amix=inputs=2:normalize=0:duration=first[m]';
   if (variant === 'negative' && id === INTERVIEW) {
     const input = regular(root, '.kory-eval/final.m4a');
-    checked('ffmpeg', [
-      '-hide_banner', '-loglevel', 'error', '-y', '-i', input,
-      '-af', 'volume=9dB', '-ac', '2', '-ar', '48000', '-c:a', 'aac',
-      '-b:a', '192k', outputFile(root, variant),
-    ], root);
+    checked(
+      'ffmpeg',
+      [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        '-y',
+        '-i',
+        input,
+        '-af',
+        'volume=9dB',
+        '-ac',
+        '2',
+        '-ar',
+        '48000',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '192k',
+        outputFile(root, variant),
+      ],
+      root,
+    );
     return;
   }
   const bedMix =
@@ -274,9 +339,21 @@ export function renderAudioProductionControl(root: string, id: Scenario, variant
       ? '[0:a]highpass=f=90[voice];[1:a]volume=0.8[bed];[voice][bed]amix=inputs=2:normalize=0:duration=first[m]'
       : mix;
   args.push(
-    '-filter_complex', `${bedMix};[m]loudnorm=I=-16:TP=-2:LRA=7,volume=2dB,aresample=48000,aformat=channel_layouts=stereo[out]`,
-    '-map', '[out]', '-t', String(SPECS[id].duration), '-ac', '2', '-ar', '48000',
-    '-c:a', 'aac', '-b:a', '192k', outputFile(root, variant),
+    '-filter_complex',
+    `${bedMix};[m]loudnorm=I=-16:TP=-2:LRA=7,volume=2dB,aresample=48000,aformat=channel_layouts=stereo[out]`,
+    '-map',
+    '[out]',
+    '-t',
+    String(SPECS[id].duration),
+    '-ac',
+    '2',
+    '-ar',
+    '48000',
+    '-c:a',
+    'aac',
+    '-b:a',
+    '192k',
+    outputFile(root, variant),
   );
   checked('ffmpeg', args, root);
 }
@@ -351,8 +428,18 @@ function toneAmplitude(samples: Float32Array, second: number, frequency: number)
 
 function loudness(path: string): { integrated: number; truePeak: number } {
   const measured = run('ffmpeg', [
-    '-hide_banner', '-nostats', '-i', path, '-map', '0:a:0', '-vn',
-    '-af', 'ebur128=peak=true', '-f', 'null', '-',
+    '-hide_banner',
+    '-nostats',
+    '-i',
+    path,
+    '-map',
+    '0:a:0',
+    '-vn',
+    '-af',
+    'ebur128=peak=true',
+    '-f',
+    'null',
+    '-',
   ]);
   if (measured.status !== 0) throw new Error(measured.error ?? measured.stderr.slice(-400));
   const integrated = [...measured.stderr.matchAll(/\bI:\s*(-?\d+(?:\.\d+)?)\s*LUFS/g)].at(-1);
@@ -362,10 +449,19 @@ function loudness(path: string): { integrated: number; truePeak: number } {
 }
 
 function probe(path: string): { codec: unknown; rate: number; channels: number; duration: number } {
-  const data = JSON.parse(String(checked('ffprobe', [
-    '-v', 'error', '-show_entries', 'stream=codec_name,sample_rate,channels:format=duration',
-    '-of', 'json', path,
-  ]))) as { streams?: Array<Record<string, unknown>>; format?: Record<string, unknown> };
+  const data = JSON.parse(
+    String(
+      checked('ffprobe', [
+        '-v',
+        'error',
+        '-show_entries',
+        'stream=codec_name,sample_rate,channels:format=duration',
+        '-of',
+        'json',
+        path,
+      ]),
+    ),
+  ) as { streams?: Array<Record<string, unknown>>; format?: Record<string, unknown> };
   const audio = data.streams?.[0];
   return {
     codec: audio?.codec_name,
@@ -406,10 +502,7 @@ function measure(root: string, id: Scenario, variant: Variant): AudioProductionC
     },
     {
       id: 'decoded-mono-and-small-speaker-proxy',
-      passed:
-        monoRms > stereoRms * 0.45 &&
-        monoRms < stereoRms * 1.7 &&
-        smallSpeakerRms > 0.001,
+      passed: monoRms > stereoRms * 0.45 && monoRms < stereoRms * 1.7 && smallSpeakerRms > 0.001,
       detail: `mono RMS ${monoRms.toFixed(4)}, stereo ${stereoRms.toFixed(4)}, 300–3400 Hz mono ${smallSpeakerRms.toFixed(4)}; automated proxy, not human listening`,
     },
   ];
@@ -420,7 +513,7 @@ function measure(root: string, id: Scenario, variant: Variant): AudioProductionC
     const second = similarity(b, encoded, 10, 16);
     checks.push({
       id: 'both-interview-speakers-preserved',
-      passed: first > 0.25 && second > 0.20,
+      passed: first > 0.25 && second > 0.2,
       detail: `decoded speech/source correlation first=${first.toFixed(3)} second=${second.toFixed(3)}`,
     });
   } else {
@@ -445,16 +538,28 @@ function measure(root: string, id: Scenario, variant: Variant): AudioProductionC
 function checkReports(root: string, id: Scenario): AudioProductionCheck {
   const report = readJsonArtifact<Record<string, unknown>>(root, '.kory-eval/result.json');
   const verification = readJsonArtifact<Record<string, unknown>>(
-    root, '.kory-eval/verification.json',
+    root,
+    '.kory-eval/verification.json',
   );
   const fields = [
-    'outcome', 'audience', 'sourceTreatment', 'dynamics', 'speechClarity',
-    'musicBalance', 'monitoring', 'delivery', 'negativeDefect', 'recovery', 'uncertainty',
+    'outcome',
+    'audience',
+    'sourceTreatment',
+    'dynamics',
+    'speechClarity',
+    'musicBalance',
+    'monitoring',
+    'delivery',
+    'negativeDefect',
+    'recovery',
+    'uncertainty',
   ];
   const valid = Boolean(
     report?.scenarioId === id &&
     report.boundary === 'audio-production' &&
-    fields.every((field) => typeof report[field] === 'string' && String(report[field]).length >= 12) &&
+    fields.every(
+      (field) => typeof report[field] === 'string' && String(report[field]).length >= 12,
+    ) &&
     typeof verification?.negativeFinding === 'string' &&
     verification.negativeFinding.length > 16 &&
     typeof verification?.recoveryEvidence === 'string' &&
@@ -464,7 +569,9 @@ function checkReports(root: string, id: Scenario): AudioProductionCheck {
   return {
     id: 'production-decisions-and-honest-listening-status',
     passed: valid,
-    detail: valid ? `subjective=${verification?.subjectiveListening}; separate measured encoded QC` : 'Missing task-specific decisions or subjective listening limitation',
+    detail: valid
+      ? `subjective=${verification?.subjectiveListening}; separate measured encoded QC`
+      : 'Missing task-specific decisions or subjective listening limitation',
   };
 }
 
@@ -498,8 +605,12 @@ export function runAudioProductionRuntime(root: string, id: Scenario): AudioProd
   }
   checks.push(checkReports(root, id));
   try {
-    checks.push(...measure(root, id, 'positive').map((check) => ({ ...check, id: `final-${check.id}` })));
-    checks.push(...measure(root, id, 'recovered').map((check) => ({ ...check, id: `recovered-${check.id}` })));
+    checks.push(
+      ...measure(root, id, 'positive').map((check) => ({ ...check, id: `final-${check.id}` })),
+    );
+    checks.push(
+      ...measure(root, id, 'recovered').map((check) => ({ ...check, id: `recovered-${check.id}` })),
+    );
     const negative = measure(root, id, 'negative');
     // A playable negative may expose any genuine delivery failure. In particular,
     // phase-inverted stereo can meet the loudness target while disappearing in mono.
@@ -535,7 +646,9 @@ export function runAudioProductionRuntime(root: string, id: Scenario): AudioProd
     passed: checks.every((check) => check.passed),
     checks,
     blockers: [],
-    evidence: checks.map((check) => `${check.id}: ${check.passed ? 'pass' : 'fail'} — ${check.detail}`),
+    evidence: checks.map(
+      (check) => `${check.id}: ${check.passed ? 'pass' : 'fail'} — ${check.detail}`,
+    ),
   };
 }
 
@@ -559,14 +672,18 @@ export const AUDIO_PRODUCTION_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtur
   {
     id: 'audio-production/real-interview-media-v5@1',
     realRuntime: true,
-    get readinessBlockers() { return audioProductionRuntimeReadiness(INTERVIEW); },
+    get readinessBlockers() {
+      return audioProductionRuntimeReadiness(INTERVIEW);
+    },
     matches: (scenario) => scenario.id === INTERVIEW,
     materialize: (destination) => materializeAudioProductionFixture(destination, INTERVIEW),
   },
   {
     id: 'audio-production/real-narration-media-v5@1',
     realRuntime: true,
-    get readinessBlockers() { return audioProductionRuntimeReadiness(NARRATION); },
+    get readinessBlockers() {
+      return audioProductionRuntimeReadiness(NARRATION);
+    },
     matches: (scenario) => scenario.id === NARRATION,
     materialize: (destination) => materializeAudioProductionFixture(destination, NARRATION),
   },

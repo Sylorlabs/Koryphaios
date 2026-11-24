@@ -84,7 +84,11 @@ describe('ManageSkillFeedingTool', () => {
     );
     expect(output.isError).toBe(false);
     expect(output.output).toBe('ok');
-    expect(seen[0]).toEqual({ action: 'block', skills: ['plan-mode'], reason: 'already absorbed it' });
+    expect(seen[0]).toEqual({
+      action: 'block',
+      skills: ['plan-mode'],
+      reason: 'already absorbed it',
+    });
   });
 
   test('callback errors surface as tool errors', async () => {

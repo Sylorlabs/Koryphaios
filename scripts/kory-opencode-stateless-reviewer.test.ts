@@ -10,7 +10,13 @@ const adapter = resolve(import.meta.dir, 'kory-opencode-stateless-reviewer');
 const roots: string[] = [];
 const model = 'test-provider/named/model:free';
 const prompt = 'Sealed anonymous artifacts A/B. Literal $(touch escaped) "quote"\n新\n';
-const score = { passed: true, quality: 0.9, verification: 0.8, integrityFailure: false, evidence: ['sealed evidence only'] };
+const score = {
+  passed: true,
+  quality: 0.9,
+  verification: 0.8,
+  integrityFailure: false,
+  evidence: ['sealed evidence only'],
+};
 const output = `\n${JSON.stringify({ artifactA: score, artifactB: { ...score, passed: false }, preference: 'A', rationale: ['A is stronger'] }, null, 2)}\n`;
 const response = JSON.stringify({ data: { text: output } });
 const secret = 'private-provider-api-key-and-diagnostic';
@@ -35,7 +41,9 @@ function run(options: Options = {}) {
   roots.push(root);
   const binary = join(root, 'opencode');
   const callsPath = join(root, 'calls.jsonl');
-  writeFileSync(binary, `#!${process.execPath}
+  writeFileSync(
+    binary,
+    `#!${process.execPath}
 const fs = require('node:fs');
 const settings = ${JSON.stringify(options)};
 const args = process.argv.slice(2);
@@ -52,7 +60,9 @@ if (args[0] === '--version') {
     process.exit(settings.code ?? 0);
   }
 }
-`, { mode: options.binary === 'non-executable' ? 0o600 : 0o700 });
+`,
+    { mode: options.binary === 'non-executable' ? 0o600 : 0o700 },
+  );
   // Credential-free stub-only PATH. No real OpenCode inference occurs here.
   const env: Record<string, string> = {
     PATH: root,
@@ -71,7 +81,13 @@ if (args[0] === '--version') {
   expect(result.error).toBeUndefined();
   expect(result.signal).toBeNull();
   const calls = existsSync(callsPath)
-    ? readFileSync(callsPath, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { args: string[]; cwd: string; files: string[]; home: string })
+    ? readFileSync(callsPath, 'utf8')
+        .trim()
+        .split('\n')
+        .map(
+          (line) =>
+            JSON.parse(line) as { args: string[]; cwd: string; files: string[]; home: string },
+        )
     : [];
   return { ...result, root, calls };
 }
@@ -81,7 +97,8 @@ function failed(result: ReturnType<typeof run>, dispatches?: number) {
   expect(result.stdout).toBe('');
   expect(result.stderr).toContain('diagnostics redacted');
   expect(result.stderr).not.toContain(secret);
-  if (dispatches !== undefined) expect(result.calls.filter((call) => call.args[0] === 'api')).toHaveLength(dispatches);
+  if (dispatches !== undefined)
+    expect(result.calls.filter((call) => call.args[0] === 'api')).toHaveLength(dispatches);
   for (const call of result.calls) expect(existsSync(call.cwd)).toBe(false);
 }
 
@@ -99,7 +116,10 @@ describe.skipIf(!isUnix())('stateless stage-only reviewer adapter (fake CLI only
     const call = result.calls[1]!;
     expect(call.args.slice(0, 3)).toEqual(['api', 'experimental.generate.text', '--data']);
     const request = JSON.parse(call.args[3]!);
-    expect(request).toEqual({ prompt, model: { providerID: 'test-provider', id: 'named/model:free' } });
+    expect(request).toEqual({
+      prompt,
+      model: { providerID: 'test-provider', id: 'named/model:free' },
+    });
     expect(call.args[3]).not.toContain('IGNORED_ARGV_INSTRUCTION');
     expect(call.args[3]).not.toContain(result.root);
     for (const invocation of result.calls) {
@@ -159,7 +179,8 @@ describe.skipIf(!isUnix())('stateless stage-only reviewer adapter (fake CLI only
     { binary: 'missing' as const },
     { binary: 'non-executable' as const },
   ]) {
-    test(`fails before generation dispatch on invalid input/config ${JSON.stringify(options).slice(0, 80)}`, () => failed(run(options), 0));
+    test(`fails before generation dispatch on invalid input/config ${JSON.stringify(options).slice(0, 80)}`, () =>
+      failed(run(options), 0));
   }
 
   for (const options of [
@@ -168,7 +189,8 @@ describe.skipIf(!isUnix())('stateless stage-only reviewer adapter (fake CLI only
     { versionCode: 1 },
     { versionDelay: 1000, timeout: 100 },
   ]) {
-    test(`version preflight fails closed ${JSON.stringify(options)}`, () => failed(run(options), 0));
+    test(`version preflight fails closed ${JSON.stringify(options)}`, () =>
+      failed(run(options), 0));
   }
 
   for (const stdout of [
@@ -179,14 +201,42 @@ describe.skipIf(!isUnix())('stateless stage-only reviewer adapter (fake CLI only
     '[]',
     `${response}\n${response}`,
     JSON.stringify({ data: { text: `\`\`\`json\n${output}\n\`\`\`` } }),
-    JSON.stringify({ data: { text: JSON.stringify({ artifactA: { ...score, quality: 1.1 }, artifactB: score, preference: 'A', rationale: [] }) } }),
-    JSON.stringify({ data: { text: JSON.stringify({ artifactA: score, artifactB: score, preference: 'A', rationale: [], tool: {} }) } }),
-    JSON.stringify({ data: { text: output.replace('"passed": true', '"passed": false,"passed": true') } }),
-    JSON.stringify({ data: { text: output.replace('"artifactA"', '"\\u0061rtifactA"').replace('"artifactB"', `"artifactA":{},"artifactB"`) } }),
+    JSON.stringify({
+      data: {
+        text: JSON.stringify({
+          artifactA: { ...score, quality: 1.1 },
+          artifactB: score,
+          preference: 'A',
+          rationale: [],
+        }),
+      },
+    }),
+    JSON.stringify({
+      data: {
+        text: JSON.stringify({
+          artifactA: score,
+          artifactB: score,
+          preference: 'A',
+          rationale: [],
+          tool: {},
+        }),
+      },
+    }),
+    JSON.stringify({
+      data: { text: output.replace('"passed": true', '"passed": false,"passed": true') },
+    }),
+    JSON.stringify({
+      data: {
+        text: output
+          .replace('"artifactA"', '"\\u0061rtifactA"')
+          .replace('"artifactB"', `"artifactA":{},"artifactB"`),
+      },
+    }),
     JSON.stringify({ data: { text: output.replace('0.9', '1e999') } }),
     JSON.stringify({ data: { text: ' '.repeat(100) } }),
   ]) {
-    test(`rejects non-exact or contradictory response ${sha256(stdout).slice(0, 8)}`, () => failed(run({ stdout }), 1));
+    test(`rejects non-exact or contradictory response ${sha256(stdout).slice(0, 8)}`, () =>
+      failed(run({ stdout }), 1));
   }
 
   for (const options of [
@@ -196,6 +246,7 @@ describe.skipIf(!isUnix())('stateless stage-only reviewer adapter (fake CLI only
     { mode: 'stderr-overflow' },
     { mode: 'timeout', timeout: 100 },
   ]) {
-    test(`process failures emit no completion and clean disposable cwd ${JSON.stringify(options)}`, () => failed(run(options), 1));
+    test(`process failures emit no completion and clean disposable cwd ${JSON.stringify(options)}`, () =>
+      failed(run(options), 1));
   }
 });

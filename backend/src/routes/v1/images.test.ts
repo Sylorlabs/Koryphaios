@@ -144,7 +144,11 @@ describe('image generation routes', () => {
             return {
               listModels: () => [
                 { id: 'flux.1-schnell', name: 'FLUX.1 Schnell', outputModalities: ['image'] },
-                { id: 'stable-diffusion-3.5-large', name: 'SD 3.5 Large', outputModalities: ['image'] },
+                {
+                  id: 'stable-diffusion-3.5-large',
+                  name: 'SD 3.5 Large',
+                  outputModalities: ['image'],
+                },
                 { id: 'llama3-8b', name: 'Llama 3 8B', outputModalities: ['text'] },
               ],
             };

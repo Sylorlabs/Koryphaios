@@ -59,8 +59,10 @@ export function resolvePricing(provider: string, model: string): ResolvedPricing
     return {
       inPerM: official.prompt * 1_000_000,
       outPerM: official.completion * 1_000_000,
-      cacheReadPerM: official.inputCacheRead === undefined ? undefined : official.inputCacheRead * 1_000_000,
-      cacheWritePerM: official.inputCacheWrite === undefined ? undefined : official.inputCacheWrite * 1_000_000,
+      cacheReadPerM:
+        official.inputCacheRead === undefined ? undefined : official.inputCacheRead * 1_000_000,
+      cacheWritePerM:
+        official.inputCacheWrite === undefined ? undefined : official.inputCacheWrite * 1_000_000,
       source: provider === 'openrouter' ? 'provider-rate' : 'openrouter-equivalent',
     };
   }

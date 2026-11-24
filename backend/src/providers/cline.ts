@@ -267,9 +267,7 @@ export class ClineProvider extends OpenAIProvider {
             CLINE_RECOMMENDED_URL,
             'Cline recommended models',
           );
-          this.clineBadges = new Set(
-            collectIds(recommended.recommended),
-          );
+          this.clineBadges = new Set(collectIds(recommended.recommended));
           this.clineFreeModels = new Set(collectIds(recommended.free));
         } catch (err: unknown) {
           providerLog.debug(
@@ -385,8 +383,7 @@ export class ClineProvider extends OpenAIProvider {
     }
 
     const contextWindow = asPositiveInt(row?.context_length) ?? def.contextWindow;
-    const maxOut =
-      asPositiveInt(row?.top_provider?.max_completion_tokens) ?? def.maxOutputTokens;
+    const maxOut = asPositiveInt(row?.top_provider?.max_completion_tokens) ?? def.maxOutputTokens;
     const inPerM = usdPerTokenToPerMillion(row?.pricing?.prompt);
     const outPerM = usdPerTokenToPerMillion(row?.pricing?.completion);
     const cachePerM = usdPerTokenToPerMillion(row?.pricing?.input_cache_read);
@@ -398,14 +395,10 @@ export class ClineProvider extends OpenAIProvider {
       contextWindow,
       maxOutputTokens: maxOut,
       // Only mark verified when Cline itself reported the number.
-      ...(asPositiveInt(row?.context_length)
-        ? { contextVerified: true }
-        : {}),
+      ...(asPositiveInt(row?.context_length) ? { contextVerified: true } : {}),
       ...(reasoningLevels ? { reasoningLevels } : {}),
       ...(canReason ? { canReason: true } : {}),
-      ...(vision || acceptsFiles || acceptsAudio
-        ? { vision, supportsAttachments: true }
-        : {}),
+      ...(vision || acceptsFiles || acceptsAudio ? { vision, supportsAttachments: true } : {}),
       supportsStreaming: streaming,
       ...(tools ? { functionCall: true } : {}),
       ...(inPerM !== undefined ? { costPerMInputTokens: inPerM } : {}),

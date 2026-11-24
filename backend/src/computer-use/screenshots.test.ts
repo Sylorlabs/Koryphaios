@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ComputerScreenshotStore } from './screenshots';
 
-function storeAt(root: string, options: { now?: () => number; retentionMs?: number; maxTotalBytes?: number } = {}) {
+function storeAt(
+  root: string,
+  options: { now?: () => number; retentionMs?: number; maxTotalBytes?: number } = {},
+) {
   return new ComputerScreenshotStore({ root: () => root, ...options });
 }
 

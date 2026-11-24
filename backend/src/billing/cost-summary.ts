@@ -327,9 +327,7 @@ export function summarizeBillingSpend(
   rows: UsageCostBreakdownRow[],
   pricing: PricingResolver = createMemoizedPricing(),
 ): BillingSpendSummary {
-  const providers = providerSummaries(rows, pricing).filter(
-    (provider) => !provider.subscription,
-  );
+  const providers = providerSummaries(rows, pricing).filter((provider) => !provider.subscription);
   const modelMap = new Map<
     string,
     {
@@ -436,7 +434,8 @@ function apportionEventCostByType(
   cacheReadUsd: number;
   outputUsd: number;
 } {
-  const totalCost = event.costKnown && !SUBSCRIPTION_PROVIDERS.has(event.provider) ? event.costUsd : 0;
+  const totalCost =
+    event.costKnown && !SUBSCRIPTION_PROVIDERS.has(event.provider) ? event.costUsd : 0;
   if (totalCost <= 0) return { inputUsd: 0, cacheReadUsd: 0, outputUsd: 0 };
 
   const pricing = resolvePrice(event.provider, event.model);
@@ -449,8 +448,7 @@ function apportionEventCostByType(
     const rawInput =
       (freshInputTokens / 1_000_000) * pricing.inPerM +
       (cacheWriteTokens / 1_000_000) * (pricing.cacheWritePerM ?? pricing.inPerM);
-    const rawCacheRead =
-      (cacheReadTokens / 1_000_000) * (pricing.cacheReadPerM ?? pricing.inPerM);
+    const rawCacheRead = (cacheReadTokens / 1_000_000) * (pricing.cacheReadPerM ?? pricing.inPerM);
     const rawOutput = (outputTokens / 1_000_000) * pricing.outPerM;
     const rawSum = rawInput + rawCacheRead + rawOutput;
     if (rawSum > 0) {

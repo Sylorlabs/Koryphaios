@@ -3,8 +3,17 @@ import { tmpdir } from 'node:os';
 import { DEFAULT_AGENT_SETTINGS } from '../../agent-settings';
 import { SessionRuntime } from '../../kory/services/SessionRuntime';
 import { TerminalService } from '../../terminal/terminal-service';
-import { decideToolPermission, resolveToolPermissionPolicy, READ_ONLY_TOOLS } from '../permission-policy';
-import { ReadTerminalTool, configureTerminalReads, plainTerminalText, resetTerminalReads } from '../terminal-read';
+import {
+  decideToolPermission,
+  resolveToolPermissionPolicy,
+  READ_ONLY_TOOLS,
+} from '../permission-policy';
+import {
+  ReadTerminalTool,
+  configureTerminalReads,
+  plainTerminalText,
+  resetTerminalReads,
+} from '../terminal-read';
 import type { ToolCallInput, ToolContext } from '../registry';
 
 const service = new TerminalService(() => undefined);
@@ -38,11 +47,16 @@ describe('read_terminal tool', () => {
     expect(plainTerminalText(new TextEncoder().encode(raw))).toBe('red\ndone\n');
   });
 
-  test('returns the recent output of the calling chat\'s own terminal', async () => {
+  test("returns the recent output of the calling chat's own terminal", async () => {
     wire();
     const term = service.create(chatA.terminals, {
-      sessionId: 'chat-a', scope: 'chat', cwd: tmpdir(), cols: 80, rows: 24,
-      command: '/bin/sh', args: ['-c', 'echo first-line; echo second-line'],
+      sessionId: 'chat-a',
+      scope: 'chat',
+      cwd: tmpdir(),
+      cols: 80,
+      rows: 24,
+      command: '/bin/sh',
+      args: ['-c', 'echo first-line; echo second-line'],
     });
     while (term.isRunning) await Bun.sleep(20);
     const result = await tool.run(ctx('chat-a'), call({ terminalId: term.id, lines: 5 }));
@@ -55,8 +69,13 @@ describe('read_terminal tool', () => {
   test("refuses another chat's terminal id with no output leak", async () => {
     wire();
     const term = service.create(chatA.terminals, {
-      sessionId: 'chat-a', scope: 'chat', cwd: tmpdir(), cols: 80, rows: 24,
-      command: '/bin/sh', args: ['-c', 'echo secret-output; sleep 5'],
+      sessionId: 'chat-a',
+      scope: 'chat',
+      cwd: tmpdir(),
+      cols: 80,
+      rows: 24,
+      command: '/bin/sh',
+      args: ['-c', 'echo secret-output; sleep 5'],
     });
     const result = await tool.run(ctx('chat-b'), call({ terminalId: term.id }));
     expect(result.isError).toBe(true);
@@ -73,8 +92,10 @@ describe('read_terminal tool', () => {
 });
 
 describe('read_terminal permission', () => {
-  const settings = (mode: 'ask' | 'guarded' | 'yolo', extra: Partial<typeof DEFAULT_AGENT_SETTINGS> = {}) =>
-    resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, ...extra, permissionMode: mode });
+  const settings = (
+    mode: 'ask' | 'guarded' | 'yolo',
+    extra: Partial<typeof DEFAULT_AGENT_SETTINGS> = {},
+  ) => resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, ...extra, permissionMode: mode });
 
   test('asks by default in every mode, including YOLO', () => {
     for (const mode of ['ask', 'guarded', 'yolo'] as const) {

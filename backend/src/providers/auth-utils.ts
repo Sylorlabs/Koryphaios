@@ -104,9 +104,11 @@ export function detectCodeBuddyCLILogin(): boolean {
   if (process.env.CODEBUDDY_API_KEY?.trim()) return true;
   const home = homeDir();
   if (!home) return false;
-  return existsSync(join(home, '.codebuddy', 'settings.json')) ||
+  return (
+    existsSync(join(home, '.codebuddy', 'settings.json')) ||
     existsSync(join(home, '.codebuddy', 'auth.json')) ||
-    existsSync(join(home, '.codebuddy', 'user-state.json'));
+    existsSync(join(home, '.codebuddy', 'user-state.json'))
+  );
 }
 
 export function isCursorCLIAuthMarker(value: string | null | undefined): boolean {
@@ -438,7 +440,11 @@ export function discoverFreebuffAccounts(): FreebuffAccount[] {
           return false;
         }
       });
-    if (configuredProfile && existsSync(configuredProfile) && !candidateDirs.includes(configuredProfile)) {
+    if (
+      configuredProfile &&
+      existsSync(configuredProfile) &&
+      !candidateDirs.includes(configuredProfile)
+    ) {
       candidateDirs.push(configuredProfile);
     }
   } catch (err: unknown) {

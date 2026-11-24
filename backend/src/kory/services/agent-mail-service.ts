@@ -197,9 +197,7 @@ export async function sendAgentMessage(input: SendAgentMessageInput): Promise<Ag
       const workers = kory.agentControlSnapshots(target.id).filter((s) => s.role !== 'manager');
       const wanted = (workerSpec.label ?? '').trim().toLowerCase();
       const matched = wanted
-        ? workers.find(
-            (s) => s.name.toLowerCase() === wanted || s.agentId.toLowerCase() === wanted,
-          )
+        ? workers.find((s) => s.name.toLowerCase() === wanted || s.agentId.toLowerCase() === wanted)
         : undefined;
       if (!matched) {
         throw new AgentMessageTargetError(
@@ -428,8 +426,7 @@ export async function drainInbox(sessionId: string, agentId?: string): Promise<A
     if (!addressedToAgent && message.status !== 'delivered') continue;
     // Reading the inbox delivers pull mail: everything sent within this chat,
     // plus cross-chat messages addressed to the reading agent's id.
-    const pullDelivered =
-      sameSession || (agentId !== undefined && message.toAgentId === agentId);
+    const pullDelivered = sameSession || (agentId !== undefined && message.toAgentId === agentId);
     if (message.status === 'queued' && pullDelivered) {
       const delivered = await updateAgentMessageStatus(message.id, 'delivered');
       if (delivered) kory.emitAgentMessageEvent(sessionId, delivered);

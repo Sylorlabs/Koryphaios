@@ -113,7 +113,10 @@ test('project identity persists, uploads a cropped image, resets, and syncs to a
     const iconText = dialog.getByRole('textbox', { name: 'Monogram & emoji' });
     await iconText.fill('🚀');
     await dialog.getByRole('combobox', { name: 'Color' }).click();
-    await page.getByRole('listbox', { name: 'Color' }).getByRole('option', { name: /^Purple/ }).click();
+    await page
+      .getByRole('listbox', { name: 'Color' })
+      .getByRole('option', { name: /^Purple/ })
+      .click();
     await dialog.getByRole('button', { name: 'Save identity' }).click();
     await expect(dialog.getByRole('status')).toHaveText('Project identity saved.');
 

@@ -50,7 +50,10 @@ describe('claude replay through ClaudeCodeProvider', () => {
     const spawnChild = createReplaySpawn((_command, args) =>
       args.includes('--include-partial-messages') ? transcript : null,
     );
-    const provider = new ClaudeCodeProvider({ name: 'claude' } as ProviderConfig, spawnChild as never);
+    const provider = new ClaudeCodeProvider(
+      { name: 'claude' } as ProviderConfig,
+      spawnChild as never,
+    );
 
     const events = await collect(provider.streamResponse(request()));
 
@@ -90,8 +93,16 @@ describe('claude replay through ClaudeCodeProvider', () => {
       thinking: 'main.ts is the entry point, so I will summarise it.',
     });
     expect(events[5]).toEqual({ type: 'content_delta', content: '`main.ts` starts ' });
-    expect(events[6]).toEqual({ type: 'content_delta', content: 'the HTTP server and wires in the routes.' });
-    expect(events[7]).toMatchObject({ type: 'usage_update', tokensIn: 2100, tokensOut: 120, tokensCacheRead: 1500 });
+    expect(events[6]).toEqual({
+      type: 'content_delta',
+      content: 'the HTTP server and wires in the routes.',
+    });
+    expect(events[7]).toMatchObject({
+      type: 'usage_update',
+      tokensIn: 2100,
+      tokensOut: 120,
+      tokensCacheRead: 1500,
+    });
     expect(events[8]).toEqual({ type: 'complete', finishReason: 'end_turn' });
   });
 
@@ -100,7 +111,10 @@ describe('claude replay through ClaudeCodeProvider', () => {
     const spawnChild = createReplaySpawn((_command, args) =>
       args.includes('--include-partial-messages') ? transcript : null,
     );
-    const provider = new ClaudeCodeProvider({ name: 'claude' } as ProviderConfig, spawnChild as never);
+    const provider = new ClaudeCodeProvider(
+      { name: 'claude' } as ProviderConfig,
+      spawnChild as never,
+    );
     await collect(provider.streamResponse(request()));
 
     const turn = spawnChild.calls.find((call) => call.args.includes('--include-partial-messages'));

@@ -143,18 +143,22 @@ describe('Enhanced Error Detection Validation', () => {
           { line: 15, from: 'string', to: 'number' },
           { line: 16, from: 'string', to: 'boolean' },
         ];
-        expect(errors).toEqual(expect.arrayContaining(expectedDiagnostics.map(diagnostic =>
-          expect.objectContaining({
-            type: 'TypeScriptError',
-            source: expect.objectContaining({ type: 'build', tool: 'build-detector' }),
-            message: `TS2322: Type '${diagnostic.from}' is not assignable to type '${diagnostic.to}'.`,
-            stackTrace: expect.arrayContaining([
+        expect(errors).toEqual(
+          expect.arrayContaining(
+            expectedDiagnostics.map(diagnostic =>
               expect.objectContaining({
-                location: expect.objectContaining({ file: errorFile, line: diagnostic.line }),
-              }),
-            ]),
-          })
-        )));
+                type: 'TypeScriptError',
+                source: expect.objectContaining({ type: 'build', tool: 'build-detector' }),
+                message: `TS2322: Type '${diagnostic.from}' is not assignable to type '${diagnostic.to}'.`,
+                stackTrace: expect.arrayContaining([
+                  expect.objectContaining({
+                    location: expect.objectContaining({ file: errorFile, line: diagnostic.line }),
+                  }),
+                ]),
+              })
+            )
+          )
+        );
       };
 
       await detectorManager.start();

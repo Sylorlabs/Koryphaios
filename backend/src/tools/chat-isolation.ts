@@ -48,13 +48,14 @@ export class IsolateChatTool implements Tool {
   readonly name = 'isolate_chat';
   readonly role = 'manager' as const;
   readonly description =
-    'Move this chat out of its project folder into an independent Git copy that starts from the folder\'s last commit, then keep working there instead. Use when other chats are working in the same folder and your edits could collide with theirs. The copy cannot see uncommitted changes in the folder — if the task needs them, or you are unsure, ask the user instead. Never isolate for read-only work. The current turn ends right after this call and the host continues the task in the copy automatically; the chat merges back into the folder later via merge_chat_back.';
+    "Move this chat out of its project folder into an independent Git copy that starts from the folder's last commit, then keep working there instead. Use when other chats are working in the same folder and your edits could collide with theirs. The copy cannot see uncommitted changes in the folder — if the task needs them, or you are unsure, ask the user instead. Never isolate for read-only work. The current turn ends right after this call and the host continues the task in the copy automatically; the chat merges back into the folder later via merge_chat_back.";
   readonly inputSchema = {
     type: 'object',
     properties: {
       reason: {
         type: 'string',
-        description: 'Why this chat is being isolated, e.g. which sibling chat or files could collide.',
+        description:
+          'Why this chat is being isolated, e.g. which sibling chat or files could collide.',
       },
     },
     required: ['reason'],
@@ -102,7 +103,7 @@ export class MergeChatBackTool implements Tool {
       );
       const lines: string[] = [];
       if (result.autoCommitted) {
-        lines.push('Committed the copy\'s uncommitted work first.');
+        lines.push("Committed the copy's uncommitted work first.");
       }
       if (result.mergedCommit) {
         lines.push(

@@ -10,7 +10,14 @@ import { parseAntigravityStreamLine } from '../../providers/antigravity';
 import { TurnUsageFold } from './turn-usage-fold';
 
 /** Kory's own measured categories for the turn (what the manager sent). */
-const BREAKDOWN = { system: 6_000, memory: 1_000, skills: 500, tools: 2_500, chat: 4_000, output: 0 };
+const BREAKDOWN = {
+  system: 6_000,
+  memory: 1_000,
+  skills: 500,
+  tools: 2_500,
+  chat: 4_000,
+  output: 0,
+};
 const MEASURED = 14_000;
 
 function fold(events: ProviderEvent[]) {
@@ -36,9 +43,11 @@ describe('CLI turns with three internal requests', () => {
   test('claude: message_start snapshots win over the cumulative result receipt', () => {
     const provider = new ClaudeCodeProvider({ name: 'claude' } as ProviderConfig);
     const map = (envelope: unknown) => [
-      ...(provider as unknown as {
-        mapEnvelope: (e: unknown, p: Map<string, unknown>) => Iterable<ProviderEvent>;
-      }).mapEnvelope(envelope, new Map()),
+      ...(
+        provider as unknown as {
+          mapEnvelope: (e: unknown, p: Map<string, unknown>) => Iterable<ProviderEvent>;
+        }
+      ).mapEnvelope(envelope, new Map()),
     ];
     // Three requests: 20k, 24k, 28k of context (input + cache read + write).
     const requests = [
@@ -47,7 +56,10 @@ describe('CLI turns with three internal requests', () => {
       { input_tokens: 1_500, cache_read_input_tokens: 25_000, cache_creation_input_tokens: 1_500 },
     ];
     const events = requests.flatMap((usage) =>
-      map({ type: 'stream_event', event: { type: 'message_start', message: { usage: { ...usage, output_tokens: 1 } } } }),
+      map({
+        type: 'stream_event',
+        event: { type: 'message_start', message: { usage: { ...usage, output_tokens: 1 } } },
+      }),
     );
     const totals = {
       input_tokens: sum(requests.map((r) => r.input_tokens)),
@@ -56,7 +68,12 @@ describe('CLI turns with three internal requests', () => {
       output_tokens: 900,
     };
     const receipt = map({ type: 'result', subtype: 'success', is_error: false, usage: totals });
-    expect(receipt[0]).toMatchObject({ type: 'usage_update', estimated: true, billingTokensIn: 72_000, billingTokensOut: 900 });
+    expect(receipt[0]).toMatchObject({
+      type: 'usage_update',
+      estimated: true,
+      billingTokensIn: 72_000,
+      billingTokensOut: 900,
+    });
 
     const result = meter([...events, ...receipt], 'claude');
     expect(result.fold.tokensIn).toBe(28_000);
@@ -76,9 +93,18 @@ describe('CLI turns with three internal requests', () => {
     const steps = [step(30_000, 29_000), step(34_000, 33_000), step(38_000, 37_000)];
     const events = trajectoryToEvents({
       steps,
-      finalMetrics: { promptTokens: 102_000, completionTokens: 600, cachedTokens: 99_000, totalSteps: 3 },
+      finalMetrics: {
+        promptTokens: 102_000,
+        completionTokens: 600,
+        cachedTokens: 99_000,
+        totalSteps: 3,
+      },
     });
-    expect(events.at(-1)).toMatchObject({ estimated: true, billingTokensIn: 102_000, tokensCacheRead: 99_000 });
+    expect(events.at(-1)).toMatchObject({
+      estimated: true,
+      billingTokensIn: 102_000,
+      tokensCacheRead: 99_000,
+    });
     const result = meter(events, 'devin');
     expect(result.fold.tokensIn).toBe(38_000);
     expect(result.fold.estimated).toBe(false);
@@ -102,9 +128,24 @@ describe('CLI turns with three internal requests', () => {
     // Event shapes emitted by opencode-cli.ts for usage_update and the final receipt.
     const result = meter(
       [
-        { type: 'usage_update', tokensIn: 20_000, usagePrecision: 'provider-reported', estimated: false },
-        { type: 'usage_update', tokensIn: 24_000, usagePrecision: 'provider-reported', estimated: false },
-        { type: 'usage_update', tokensIn: 28_000, usagePrecision: 'provider-reported', estimated: false },
+        {
+          type: 'usage_update',
+          tokensIn: 20_000,
+          usagePrecision: 'provider-reported',
+          estimated: false,
+        },
+        {
+          type: 'usage_update',
+          tokensIn: 24_000,
+          usagePrecision: 'provider-reported',
+          estimated: false,
+        },
+        {
+          type: 'usage_update',
+          tokensIn: 28_000,
+          usagePrecision: 'provider-reported',
+          estimated: false,
+        },
         { type: 'usage_update', estimated: true, billingTokensIn: 72_000, billingTokensOut: 500 },
       ],
       'opencode',
@@ -137,7 +178,10 @@ describe('CLI turns with three internal requests', () => {
   test('codex: a cumulative-only turn total is estimated and its CLI overhead is bounded', () => {
     const cumulative = 20_000 + 24_000 + 28_000;
     const { events } = codexJsonEvents(
-      { type: 'turn.completed', usage: { input_tokens: cumulative, cached_input_tokens: 60_000, output_tokens: 400 } },
+      {
+        type: 'turn.completed',
+        usage: { input_tokens: cumulative, cached_input_tokens: 60_000, output_tokens: 400 },
+      },
       [],
     );
     const result = meter(events, 'codex');
@@ -156,7 +200,11 @@ describe('CLI turns with three internal requests', () => {
         usage: { inputTokens: 72_000, outputTokens: 400, cacheReadTokens: 60_000 },
       }),
     ];
-    expect(events[0]).toMatchObject({ estimated: true, billingTokensIn: 72_000, billingTokensOut: 400 });
+    expect(events[0]).toMatchObject({
+      estimated: true,
+      billingTokensIn: 72_000,
+      billingTokensOut: 400,
+    });
     const result = meter(events, 'cursor');
     expect(result.bounded.harnessCapped).toBe(true);
     expect(result.cliHarness).toBe(MEASURED);
@@ -166,7 +214,10 @@ describe('CLI turns with three internal requests', () => {
     const events = parseAntigravityStreamLine(
       JSON.stringify({
         event: 'result',
-        result: { status: 'SUCCESS', usage: { input_tokens: 60_000, output_tokens: 300, cache_read_tokens: 12_000 } },
+        result: {
+          status: 'SUCCESS',
+          usage: { input_tokens: 60_000, output_tokens: 300, cache_read_tokens: 12_000 },
+        },
       }),
     );
     const result = meter(events, 'antigravity');
@@ -178,10 +229,21 @@ describe('CLI turns with three internal requests', () => {
 describe('TurnUsageFold for API providers', () => {
   test('keeps one request’s input and lets a later output-only event refine the output', () => {
     const f = fold([
-      { type: 'usage_update', tokensIn: 500, tokensCache: 9_500, tokensOut: 1, tokensCacheRead: 9_500 },
+      {
+        type: 'usage_update',
+        tokensIn: 500,
+        tokensCache: 9_500,
+        tokensOut: 1,
+        tokensCacheRead: 9_500,
+      },
       { type: 'usage_update', tokensOut: 320 },
     ]);
-    expect(f).toMatchObject({ tokensIn: 10_000, tokensOut: 320, cachedInputTokens: 9_500, estimated: false });
+    expect(f).toMatchObject({
+      tokensIn: 10_000,
+      tokensOut: 320,
+      cachedInputTokens: 9_500,
+      estimated: false,
+    });
   });
 
   test('a zero placeholder never erases a real snapshot', () => {

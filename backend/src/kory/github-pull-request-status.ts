@@ -64,7 +64,9 @@ function timestamp(value: unknown): number | undefined {
 /** The Actions run id in a check URL, or undefined for any other host or shape. */
 export function actionsRunIdFromUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
-  const match = /^https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/(\d{1,15})(?:\/|$|\?)/.exec(url);
+  const match = /^https:\/\/github\.com\/[^/]+\/[^/]+\/actions\/runs\/(\d{1,15})(?:\/|$|\?)/.exec(
+    url,
+  );
   return match?.[1];
 }
 
@@ -172,7 +174,9 @@ function parseComment(item: unknown, index: number): PullRequestCommentSummary {
 }
 
 /** Stable digest of the content a UI renders; `observedAt` is excluded. */
-function signatureOf(snapshot: Omit<PullRequestStatusSnapshot, 'signature' | 'observedAt'>): string {
+function signatureOf(
+  snapshot: Omit<PullRequestStatusSnapshot, 'signature' | 'observedAt'>,
+): string {
   return `sha256:${createHash('sha256').update(JSON.stringify(snapshot)).digest('hex')}`;
 }
 
@@ -189,7 +193,13 @@ export function parsePullRequestStatus(
     throw new ValidationError('GitHub returned invalid pull request status.');
   }
   const state =
-    raw.state === 'MERGED' ? 'merged' : raw.state === 'CLOSED' ? 'closed' : raw.state === 'OPEN' ? 'open' : null;
+    raw.state === 'MERGED'
+      ? 'merged'
+      : raw.state === 'CLOSED'
+        ? 'closed'
+        : raw.state === 'OPEN'
+          ? 'open'
+          : null;
   if (!state) throw new ValidationError('GitHub returned invalid pull request status.');
 
   const checks = (Array.isArray(raw.statusCheckRollup) ? raw.statusCheckRollup : [])
@@ -203,9 +213,10 @@ export function parsePullRequestStatus(
   const comments = (Array.isArray(raw.comments) ? raw.comments : [])
     .slice(-PR_ITEM_LIMIT)
     .map((item: unknown, index: number) => parseComment(item, index));
-  const headCommit = typeof raw.headRefOid === 'string' && /^[a-f0-9]{40,64}$/i.test(raw.headRefOid)
-    ? raw.headRefOid
-    : undefined;
+  const headCommit =
+    typeof raw.headRefOid === 'string' && /^[a-f0-9]{40,64}$/i.test(raw.headRefOid)
+      ? raw.headRefOid
+      : undefined;
 
   const body: Omit<PullRequestStatusSnapshot, 'signature' | 'observedAt'> = {
     number: context.number,
@@ -224,7 +235,11 @@ export function parsePullRequestStatus(
             ? 'review_required'
             : 'none',
     mergeable:
-      raw.mergeable === 'MERGEABLE' ? 'mergeable' : raw.mergeable === 'CONFLICTING' ? 'conflicting' : 'unknown',
+      raw.mergeable === 'MERGEABLE'
+        ? 'mergeable'
+        : raw.mergeable === 'CONFLICTING'
+          ? 'conflicting'
+          : 'unknown',
     checks,
     failingCheckCount: checks.filter((check) => failingStates.includes(check.state)).length,
     pendingCheckCount: checks.filter((check) => check.state === 'pending').length,
@@ -241,7 +256,10 @@ function assertRepository(repository: string): void {
 }
 
 /** Read the linked PR's status with `gh pr view`; gh owns the login. */
-export async function readPullRequestStatusJson(repository: string, number: number): Promise<unknown> {
+export async function readPullRequestStatusJson(
+  repository: string,
+  number: number,
+): Promise<unknown> {
   assertRepository(repository);
   if (!Number.isSafeInteger(number) || number < 1 || number > 1_000_000_000) {
     throw new ValidationError('Enter a valid pull request number.');
@@ -249,7 +267,15 @@ export async function readPullRequestStatusJson(repository: string, number: numb
   try {
     const { stdout } = await execFileAsync(
       'gh',
-      ['pr', 'view', String(number), '--repo', repository, '--json', PULL_REQUEST_STATUS_FIELDS.join(',')],
+      [
+        'pr',
+        'view',
+        String(number),
+        '--repo',
+        repository,
+        '--json',
+        PULL_REQUEST_STATUS_FIELDS.join(','),
+      ],
       {
         cwd: homedir(),
         env: getSafeSubprocessEnv({ GH_PROMPT_DISABLED: '1', GH_PAGER: 'cat' }),
@@ -278,15 +304,11 @@ export async function readFailedRunLogTail(
   assertRepository(repository);
   if (!/^\d{1,15}$/.test(runId)) throw new ValidationError('Invalid Actions run id.');
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(
-      'gh',
-      ['run', 'view', runId, '--repo', repository, '--log-failed'],
-      {
-        cwd: homedir(),
-        env: getSafeSubprocessEnv({ GH_PROMPT_DISABLED: '1', GH_PAGER: 'cat' }),
-        stdio: ['ignore', 'pipe', 'pipe'],
-      },
-    );
+    const child = spawn('gh', ['run', 'view', runId, '--repo', repository, '--log-failed'], {
+      cwd: homedir(),
+      env: getSafeSubprocessEnv({ GH_PROMPT_DISABLED: '1', GH_PAGER: 'cat' }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let tail = '';
     let truncated = false;
     let stderr = '';
@@ -301,16 +323,23 @@ export async function readFailedRunLogTail(
       }
     });
     child.stderr.on('data', (chunk: string) => {
-      if (stderr.length < FAILED_LOG_MAX_STDERR_CHARS) stderr += chunk.slice(0, FAILED_LOG_MAX_STDERR_CHARS);
+      if (stderr.length < FAILED_LOG_MAX_STDERR_CHARS)
+        stderr += chunk.slice(0, FAILED_LOG_MAX_STDERR_CHARS);
     });
     child.on('error', () => {
       clearTimeout(timer);
-      reject(new ValidationError('Could not read the failed-step log. Install GitHub CLI (gh) and run gh auth login.'));
+      reject(
+        new ValidationError(
+          'Could not read the failed-step log. Install GitHub CLI (gh) and run gh auth login.',
+        ),
+      );
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        reject(new ValidationError(`Could not read the failed-step log. ${stderr.trim().slice(0, 200)}`));
+        reject(
+          new ValidationError(`Could not read the failed-step log. ${stderr.trim().slice(0, 200)}`),
+        );
         return;
       }
       resolvePromise({ text: tail, truncated });

@@ -243,11 +243,30 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   .post(
     '/relationships/:fromId/:toId/refresh',
     async ({ request, params, body }) => {
-      const data = await notesService.refreshNoteRelationship({ ...body, ...params }, getRequestProjectRoot(request), { provenance: 'user' });
+      const data = await notesService.refreshNoteRelationship(
+        { ...body, ...params },
+        getRequestProjectRoot(request),
+        { provenance: 'user' },
+      );
       broadcastNotesNetworkUpdate('update', data.fromId, undefined, mutationOrigin(request));
       return { success: true, data };
     },
-    { body: t.Object({ expectedRevision: t.Integer({ minimum: 1 }), expectedSourceRevision: t.Integer({ minimum: 1 }), expectedTargetRevision: t.Integer({ minimum: 1 }), type: t.Union([t.Literal('related_to'), t.Literal('supports'), t.Literal('contradicts'), t.Literal('depends_on'), t.Literal('supersedes')]), evidence: t.String({ minLength: 1, maxLength: 2000 }), weight: t.Optional(t.Number({ exclusiveMinimum: 0, maximum: 1 })) }) },
+    {
+      body: t.Object({
+        expectedRevision: t.Integer({ minimum: 1 }),
+        expectedSourceRevision: t.Integer({ minimum: 1 }),
+        expectedTargetRevision: t.Integer({ minimum: 1 }),
+        type: t.Union([
+          t.Literal('related_to'),
+          t.Literal('supports'),
+          t.Literal('contradicts'),
+          t.Literal('depends_on'),
+          t.Literal('supersedes'),
+        ]),
+        evidence: t.String({ minLength: 1, maxLength: 2000 }),
+        weight: t.Optional(t.Number({ exclusiveMinimum: 0, maximum: 1 })),
+      }),
+    },
   )
   .patch(
     '/relationships/:fromId/:toId',
@@ -406,7 +425,9 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       const projectRoot = getRequestProjectRoot(request);
       if (session.workingDirectory) {
         const { resolveProjectIdentity } = await import('../../runtime/request-project');
-        if (resolveProjectIdentity(session.workingDirectory) !== resolveProjectIdentity(projectRoot)) {
+        if (
+          resolveProjectIdentity(session.workingDirectory) !== resolveProjectIdentity(projectRoot)
+        ) {
           throw new ValidationError('The source chat does not belong to the selected project.');
         }
       }
@@ -417,13 +438,21 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
       };
       if (source.messageId) {
         const message = await getDatabase()
-          .select({ id: messageRows.id, sessionId: messageRows.sessionId, role: messageRows.role, model: messageRows.model, provider: messageRows.provider })
+          .select({
+            id: messageRows.id,
+            sessionId: messageRows.sessionId,
+            role: messageRows.role,
+            model: messageRows.model,
+            provider: messageRows.provider,
+          })
           .from(messageRows)
           .where(eq(messageRows.id, source.messageId))
           .limit(1)
           .then((rows) => rows[0]);
         if (!message || message.sessionId !== session.id || message.role !== 'assistant') {
-          throw new ValidationError('The cited chat message is not an assistant response in this session.');
+          throw new ValidationError(
+            'The cited chat message is not an assistant response in this session.',
+          );
         }
         verifiedSource = {
           sessionId: session.id,
@@ -1033,17 +1062,30 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
   })
 
   // ── Update note ───────────────────────────────────────────────────────────
-  .put('/:id/icon', async ({ request, params, body }) => {
-    const icon = await notesService.setNoteIcon(params.id, body.icon, getRequestProjectRoot(request));
-    broadcastNotesNetworkUpdate('update', params.id, undefined, mutationOrigin(request));
-    return { ok: true, data: icon };
-  }, {
-    body: t.Object({ icon: t.Union([t.Null(), t.Object({
-      kind: t.Union([t.Literal('builtin'), t.Literal('emoji'), t.Literal('image')]),
-      value: t.String({ maxLength: 500000 }),
-      label: t.Optional(t.String({ maxLength: 48 })),
-    })]) }),
-  })
+  .put(
+    '/:id/icon',
+    async ({ request, params, body }) => {
+      const icon = await notesService.setNoteIcon(
+        params.id,
+        body.icon,
+        getRequestProjectRoot(request),
+      );
+      broadcastNotesNetworkUpdate('update', params.id, undefined, mutationOrigin(request));
+      return { ok: true, data: icon };
+    },
+    {
+      body: t.Object({
+        icon: t.Union([
+          t.Null(),
+          t.Object({
+            kind: t.Union([t.Literal('builtin'), t.Literal('emoji'), t.Literal('image')]),
+            value: t.String({ maxLength: 500000 }),
+            label: t.Optional(t.String({ maxLength: 48 })),
+          }),
+        ]),
+      }),
+    },
+  )
 
   .put(
     '/:id',

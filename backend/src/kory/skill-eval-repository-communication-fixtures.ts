@@ -248,16 +248,19 @@ function scorePlan(root: string): SkillEvalDeterministicScore {
   const ids = phases.map((p) => p.id);
   const required = ['inventory', 'contract', 'outbox', 'shadow-reconcile', 'cutover', 'retire'];
   const phaseComplete = phaseRowsValid && required.every((id) => ids.includes(id));
-  const gated = phaseComplete && phases.every(
-    (p) =>
-      typeof p.gate === 'string' &&
-      p.gate.length > 8 &&
-      typeof p.rollback === 'string' &&
-      p.rollback.length > 8 &&
-      Array.isArray(p.owners) &&
-      p.owners.length > 0,
-  );
-  const dependency = phaseComplete &&
+  const gated =
+    phaseComplete &&
+    phases.every(
+      (p) =>
+        typeof p.gate === 'string' &&
+        p.gate.length > 8 &&
+        typeof p.rollback === 'string' &&
+        p.rollback.length > 8 &&
+        Array.isArray(p.owners) &&
+        p.owners.length > 0,
+    );
+  const dependency =
+    phaseComplete &&
     ids[0] === 'inventory' &&
     new Set(ids).size === phases.length &&
     phases.every((phase, index) => {
@@ -266,10 +269,14 @@ function scorePlan(root: string): SkillEvalDeterministicScore {
         return !phase.dependsOn || (Array.isArray(phase.dependsOn) && phase.dependsOn.length === 0);
       }
       const dependencies = phase.dependsOn;
-      return Array.isArray(dependencies) &&
+      return (
+        Array.isArray(dependencies) &&
         dependencies.length > 0 &&
         new Set(dependencies).size === dependencies.length &&
-        dependencies.every((id) => typeof id === 'string' && ids.indexOf(id) < index && ids.includes(id));
+        dependencies.every(
+          (id) => typeof id === 'string' && ids.indexOf(id) < index && ids.includes(id),
+        )
+      );
     });
   const checks: [string, boolean][] = [
     ['packet integrity', intact],

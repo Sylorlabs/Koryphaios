@@ -1,10 +1,5 @@
 export type AgentSteeringStatus =
-  | 'queued'
-  | 'dispatching'
-  | 'running'
-  | 'completed'
-  | 'cancelled'
-  | 'failed';
+  'queued' | 'dispatching' | 'running' | 'completed' | 'cancelled' | 'failed';
 
 export interface AgentSteeringCommand {
   id: string;

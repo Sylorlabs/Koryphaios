@@ -1116,7 +1116,9 @@ function buildCustomToolDefinitions(toolCtx: ToolContext): CustomToolDefinition[
         worktree: z
           .boolean()
           .optional()
-          .describe('false for read-only research; true for file edits; omit to follow the chat setting'),
+          .describe(
+            'false for read-only research; true for file edits; omit to follow the chat setting',
+          ),
       }),
       description:
         "Delegate a task to a specialist worker (sub-agent). The worker runs through Koryphaios's worker pipeline with its own model pool, dedicated context and permission gating.",

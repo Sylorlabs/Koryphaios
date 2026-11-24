@@ -97,9 +97,7 @@ export function computeStreamingSegmentsIncremental(
  * provider finishes. Rich fenced blocks still render as soon as their closing
  * fence arrives.
  */
-export function computeStreamingSegmentsFast(
-  text: string,
-): StreamingSegment[] {
+export function computeStreamingSegmentsFast(text: string): StreamingSegment[] {
   return scanSegments(text, 0, false).segments;
 }
 
@@ -141,7 +139,13 @@ function computeIncremental(
     };
   }
   const full = scanSegments(text, 0, renderProse);
-  return { text, segments: full.segments, ends: full.ends, stableLength: full.stableLength, renderProse };
+  return {
+    text,
+    segments: full.segments,
+    ends: full.ends,
+    stableLength: full.stableLength,
+    renderProse,
+  };
 }
 
 interface ScanResult {

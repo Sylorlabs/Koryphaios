@@ -35,12 +35,12 @@ The source chat is never changed by forking. Its result can be merged back later
 
 Stored on the `sessions` row (migration `0060`) and exposed on the shared `Session`:
 
-| Field | Meaning |
-| --- | --- |
-| `forkedFromSessionId` | Source chat id. |
-| `forkedFromMessageId` | The source message the fork ends at (source id). |
-| `forkedAt` | Epoch ms when the fork was created. |
-| `forkMergedAt` | Epoch ms when the fork was merged back. Absent until then. |
+| Field                 | Meaning                                                    |
+| --------------------- | ---------------------------------------------------------- |
+| `forkedFromSessionId` | Source chat id.                                            |
+| `forkedFromMessageId` | The source message the fork ends at (source id).           |
+| `forkedAt`            | Epoch ms when the fork was created.                        |
+| `forkMergedAt`        | Epoch ms when the fork was merged back. Absent until then. |
 
 `parentSessionId` is also set to the source, as before. Internally the fork's own copy
 of its fork point is kept as the merge base (`forked_base_message_id`); it is not part
@@ -51,14 +51,14 @@ of the public contract.
 A fork never resumes or writes a parent's native CLI session. Fork state is keyed by the
 new session id, and the fork starts with `providerConversationRevision` 0.
 
-| Provider | Native resume today | Fork behaviour | Native fork flag used |
-| --- | --- | --- | --- |
-| Claude Code (`claude-code.ts`) | None: `resume: false`, no session id stored. Every turn rebuilds the prompt from Kory's history. | Starts fresh and replays Kory's transcript. | None. There is no `--resume`, so `--fork-session` is not used. |
-| Codex (`codex-cli.ts`) | None: `codex exec --ephemeral` each turn, no thread id captured. | Starts fresh and replays. | None. |
-| OpenCode (`opencode-cli.ts`) | None: a new ACP session per turn, id never stored. | Starts fresh and replays. | None. `session/fork` is not used. |
-| Antigravity (`antigravity.ts`) | Yes: `--conversation <id>` kept in an in-process map keyed by `sessionId` and role, gated by `providerConversationRevision` and a context fingerprint. | The fork's new id has no entry, so the first fork turn creates a new agy conversation. The source's conversation is never resumed or extended. | None. |
-| Jules (`jules-runner.ts`) | Remote session id stored in the chat's `metadata.jules`. | Not copied (the fork's metadata allowlist excludes it). The fork gets a new Jules session. | None. |
-| Devin, Freebuff, Codebuff, others | Own per-turn sessions or no resume; no native id reused across chats. | Starts fresh and replays. | None. |
+| Provider                          | Native resume today                                                                                                                                    | Fork behaviour                                                                                                                                 | Native fork flag used                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| Claude Code (`claude-code.ts`)    | None: `resume: false`, no session id stored. Every turn rebuilds the prompt from Kory's history.                                                       | Starts fresh and replays Kory's transcript.                                                                                                    | None. There is no `--resume`, so `--fork-session` is not used. |
+| Codex (`codex-cli.ts`)            | None: `codex exec --ephemeral` each turn, no thread id captured.                                                                                       | Starts fresh and replays.                                                                                                                      | None.                                                          |
+| OpenCode (`opencode-cli.ts`)      | None: a new ACP session per turn, id never stored.                                                                                                     | Starts fresh and replays.                                                                                                                      | None. `session/fork` is not used.                              |
+| Antigravity (`antigravity.ts`)    | Yes: `--conversation <id>` kept in an in-process map keyed by `sessionId` and role, gated by `providerConversationRevision` and a context fingerprint. | The fork's new id has no entry, so the first fork turn creates a new agy conversation. The source's conversation is never resumed or extended. | None.                                                          |
+| Jules (`jules-runner.ts`)         | Remote session id stored in the chat's `metadata.jules`.                                                                                               | Not copied (the fork's metadata allowlist excludes it). The fork gets a new Jules session.                                                     | None.                                                          |
+| Devin, Freebuff, Codebuff, others | Own per-turn sessions or no resume; no native id reused across chats.                                                                                  | Starts fresh and replays.                                                                                                                      | None.                                                          |
 
 If a provider later declares native resume, its resume handle must not be copied into a
 fork, and any native fork flag it offers must be used rather than resuming the parent.

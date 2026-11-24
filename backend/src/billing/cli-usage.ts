@@ -39,10 +39,7 @@ import {
   type FreebuffAccountSnapshot,
 } from '../providers/freebuff-account';
 import { serverLog } from '../logger';
-import {
-  detectFreebuffCLILogin,
-  discoverFreebuffAccounts,
-} from '../providers/auth-utils';
+import { detectFreebuffCLILogin, discoverFreebuffAccounts } from '../providers/auth-utils';
 import { fetchAntigravityQuotaGroups } from '../providers/antigravity-quota';
 import { getDevinAccountSnapshot } from '../providers/devin-account';
 import {

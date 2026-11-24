@@ -61,10 +61,7 @@ export function compareFeedChronology(a: FeedEntryLocal, b: FeedEntryLocal): num
  * placed where it happened. Returns the index the entry occupies, so callers
  * can report and test position rather than only membership.
  */
-export function insertByChronology(
-  lane: FeedEntryLocal[],
-  entry: FeedEntryLocal,
-): number {
+export function insertByChronology(lane: FeedEntryLocal[], entry: FeedEntryLocal): number {
   let low = 0;
   let high = lane.length;
   while (low < high) {
@@ -143,9 +140,7 @@ export function withoutAnalyzingThoughts(
   entries: ReadonlyArray<FeedEntryLocal>,
   trackedId: string | null,
 ): FeedEntryLocal[] {
-  return entries.filter(
-    (entry) => entry.id !== trackedId && !isAnalyzingThought(entry),
-  );
+  return entries.filter((entry) => entry.id !== trackedId && !isAnalyzingThought(entry));
 }
 
 /** Finalize reasoning inside a per-agent transcript when its next action lands. */

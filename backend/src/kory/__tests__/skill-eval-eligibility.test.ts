@@ -221,7 +221,8 @@ function nativeRun(
       infrastructureFailure: null,
       nativeTextEventArchive: {
         location: canonicalizePath(streamPath),
-        sha256: sha(stream), bytes: Buffer.byteLength(stream),
+        sha256: sha(stream),
+        bytes: Buffer.byteLength(stream),
         workspaceRoot: join(canonicalizePath(root), 'candidate-workspaces'),
       },
       evidence: run.evidence,
@@ -279,7 +280,10 @@ const { skillEvaluationExecutionExclusionReason } = await import(${JSON.stringif
 process.stdout.write(JSON.stringify({ reason: skillEvaluationExecutionExclusionReason(run) }) + '\\n');
 `;
   const child = Bun.spawn([process.execPath, '-e', source], {
-    cwd: dirname(path), stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
+    cwd: dirname(path),
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
   });
   child.stdin.write(JSON.stringify({ run, path, replacement, mkfifoBinary }));
   child.stdin.end();
@@ -290,7 +294,9 @@ process.stdout.write(JSON.stringify({ reason: skillEvaluationExecutionExclusionR
   }, 1_200);
   try {
     const [code, stdout, stderr] = await Promise.all([
-      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
     ]);
     return { code, stdout, stderr, timedOut };
   } finally {
@@ -301,26 +307,34 @@ process.stdout.write(JSON.stringify({ reason: skillEvaluationExecutionExclusionR
 }
 
 describe('derived native stateless receipt eligibility', () => {
-  test.skipIf(!isUnix() || !mkfifoBinary).each(['streamPath', 'outputPath', 'manifestPath'] as const)(
-    'rejects a FIFO swapped after lstat of %s without blocking', async (field) => {
+  test
+    .skipIf(!isUnix() || !mkfifoBinary)
+    .each(['streamPath', 'outputPath', 'manifestPath'] as const)(
+    'rejects a FIFO swapped after lstat of %s without blocking',
+    async (field) => {
       const f = nativeRun();
       const result = await replacedArchiveEligibility(f.run, f[field], 'fifo');
       expect(result.stdout).toContain('archive-replaced\n');
       expect(result.stderr).toBe('');
       expect(result.timedOut).toBe(false);
       expect(result.code).toBe(0);
-      expect(result.stdout).toContain(JSON.stringify({ reason: NATIVE_STATELESS_EXCLUSION_REASON }));
+      expect(result.stdout).toContain(
+        JSON.stringify({ reason: NATIVE_STATELESS_EXCLUSION_REASON }),
+      );
     },
   );
   test.skipIf(!isUnix()).each(['outputPath', 'manifestPath'] as const)(
-    'rejects an inode-preserving symlink swapped after lstat of %s', async (field) => {
+    'rejects an inode-preserving symlink swapped after lstat of %s',
+    async (field) => {
       const f = nativeRun();
       const result = await replacedArchiveEligibility(f.run, f[field], 'symlink');
       expect(result.stdout).toContain('archive-replaced\n');
       expect(result.stderr).toBe('');
       expect(result.timedOut).toBe(false);
       expect(result.code).toBe(0);
-      expect(result.stdout).toContain(JSON.stringify({ reason: NATIVE_STATELESS_EXCLUSION_REASON }));
+      expect(result.stdout).toContain(
+        JSON.stringify({ reason: NATIVE_STATELESS_EXCLUSION_REASON }),
+      );
     },
   );
   test('complete pinned semantic pass or failure is evidence, without granting blind-review credit', () => {
@@ -508,15 +522,20 @@ describe('derived native stateless receipt eligibility', () => {
       writeFileSync(f.manifestPath, text);
       f.run.artifacts!.find((artifact) => artifact.location === f.manifestPath)!.sha256 =
         createHash('sha256').update(text).digest('hex');
-      expect(skillEvaluationExecutionExclusionReason(f.run)).toBe(NATIVE_STATELESS_EXCLUSION_REASON);
+      expect(skillEvaluationExecutionExclusionReason(f.run)).toBe(
+        NATIVE_STATELESS_EXCLUSION_REASON,
+      );
       f.refresh();
     }
     const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
     delete manifest.nativeTextEventArchive;
     const text = JSON.stringify(manifest);
     writeFileSync(f.manifestPath, text);
-    f.run.artifacts!.find((artifact) => artifact.location === f.manifestPath)!.sha256 =
-      createHash('sha256').update(text).digest('hex');
+    f.run.artifacts!.find((artifact) => artifact.location === f.manifestPath)!.sha256 = createHash(
+      'sha256',
+    )
+      .update(text)
+      .digest('hex');
     expect(skillEvaluationExecutionExclusionReason(f.run)).toBe(NATIVE_STATELESS_EXCLUSION_REASON);
   });
 
@@ -550,8 +569,13 @@ describe('derived OpenCode text-patch eligibility quarantine', () => {
       { caseCategory: 'regression' as const },
       { protocolVersion: 2 as const },
     ]) {
-      expect(completePairForScenario([withSkill, { ...withoutSkill, ...mismatch }], 'task-1', 'a'.repeat(16)))
-        .toBeNull();
+      expect(
+        completePairForScenario(
+          [withSkill, { ...withoutSkill, ...mismatch }],
+          'task-1',
+          'a'.repeat(16),
+        ),
+      ).toBeNull();
     }
   });
 
@@ -561,30 +585,41 @@ describe('derived OpenCode text-patch eligibility quarantine', () => {
     const withoutSkill = arms[1]!;
     expect(completePairForScenario(arms, 'task-1', 'a'.repeat(16))).not.toBeNull();
     // The executor rejected the provider output, so no candidate artifact exists.
-    expect(completePairForScenario(
-      [{ ...withSkill, executionAborted: true }, withoutSkill], 'task-1', 'a'.repeat(16),
-    )).toBeNull();
+    expect(
+      completePairForScenario(
+        [{ ...withSkill, executionAborted: true }, withoutSkill],
+        'task-1',
+        'a'.repeat(16),
+      ),
+    ).toBeNull();
     // A normal arm still pairs, so the exclusion is about the abort, not the flag's presence.
-    expect(completePairForScenario(
-      [{ ...withSkill, executionAborted: false }, withoutSkill], 'task-1', 'a'.repeat(16),
-    )).not.toBeNull();
+    expect(
+      completePairForScenario(
+        [{ ...withSkill, executionAborted: false }, withoutSkill],
+        'task-1',
+        'a'.repeat(16),
+      ),
+    ).not.toBeNull();
   });
 
   test('orphan blind review never promotes a quarantined execution pair', () => {
     const good = (
       ['positive', 'negative', 'ambiguous', 'adversarial', 'full-task'] as const
-    ).flatMap((category) => pair(`good-${category}`, {
-      caseCategory: category,
-      caseId: category === 'full-task' ? 'task-1' : category,
-      scenarioId: category === 'full-task' ? 'task-1' : category,
-    }));
+    ).flatMap((category) =>
+      pair(`good-${category}`, {
+        caseCategory: category,
+        caseId: category === 'full-task' ? 'task-1' : category,
+        scenarioId: category === 'full-task' ? 'task-1' : category,
+      }),
+    );
     const excluded = pair('quarantined', {
       harnessVersion: guardHarness,
       provider: 'opencode',
     });
     const root = ledger([...good, ...excluded]);
-    expect(evaluateSkillPromotion(root, 'quarantine-test', 'current').status)
-      .toBe('insufficient-evidence');
+    expect(evaluateSkillPromotion(root, 'quarantine-test', 'current').status).toBe(
+      'insufficient-evidence',
+    );
 
     for (const comparisonId of [undefined, 'fabricated-pair']) {
       const orphan = review(excluded[0]!, {
@@ -603,7 +638,8 @@ describe('derived OpenCode text-patch eligibility quarantine', () => {
   });
 
   test('excludes unsigned stateless execution and linked blind review without mutating the ledger', () => {
-    const harnessVersion = 'v5-campaign-2026-09-08:opencode-stateless-text-patch:opencode-stateless-text-patch:openrouter/openrouter/free:opencode:openrouter/openrouter/free:stateless-generate-v1:text-only-patch:none:120000ms:0d18c327f9b2ca75';
+    const harnessVersion =
+      'v5-campaign-2026-09-08:opencode-stateless-text-patch:opencode-stateless-text-patch:openrouter/openrouter/free:opencode:openrouter/openrouter/free:stateless-generate-v1:text-only-patch:none:120000ms:0d18c327f9b2ca75';
     const runs = pair('stateless-unattested', { provider: 'opencode', harnessVersion });
     runs.push(review(runs[0]!));
     const root = ledger(runs);
@@ -730,8 +766,9 @@ describe('derived OpenCode text-patch eligibility quarantine', () => {
     ]) {
       const unrelatedPair = pair('excluded', changes);
       const unrelated = review(unrelatedPair[0]!);
-      expect(selectEligibleSkillEvaluationEvidence([...excluded, ...unrelatedPair, unrelated]).runs)
-        .toEqual([...unrelatedPair, unrelated]);
+      expect(
+        selectEligibleSkillEvaluationEvidence([...excluded, ...unrelatedPair, unrelated]).runs,
+      ).toEqual([...unrelatedPair, unrelated]);
     }
   });
 

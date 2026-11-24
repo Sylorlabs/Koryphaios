@@ -17,7 +17,5 @@ if (names.length === 0) throw new Error('Pass at least one bundled skill name');
 for (const name of names) {
   const revision = reinstallBundledSkill(name);
   const validity = revision.validation.valid ? 'valid' : revision.validation.errors.join('; ');
-  console.log(
-    `${name} ${revision.hash.slice(0, 12)} ${validity} -> ${resolve(revision.path)}`,
-  );
+  console.log(`${name} ${revision.hash.slice(0, 12)} ${validity} -> ${resolve(revision.path)}`);
 }

@@ -40,9 +40,13 @@ describe('ThinkingBlock expansion anchoring', () => {
         defaultExpanded: true,
       },
     });
-    expect(container.querySelector('.thinking-full-text')?.textContent).toBe('First paragraph.\n\nSecond paragraph.');
+    expect(container.querySelector('.thinking-full-text')?.textContent).toBe(
+      'First paragraph.\n\nSecond paragraph.',
+    );
     await rerender({ text: '\n\nFirst paragraph.\n\nSecond paragraph. More detail.\n\n' });
-    expect(container.querySelector('.thinking-full-text')?.textContent).toBe('First paragraph.\n\nSecond paragraph. More detail.');
+    expect(container.querySelector('.thinking-full-text')?.textContent).toBe(
+      'First paragraph.\n\nSecond paragraph. More detail.',
+    );
   });
 
   it('asks the transcript to keep the messages below it in place', async () => {

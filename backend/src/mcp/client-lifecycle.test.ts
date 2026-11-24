@@ -263,7 +263,9 @@ describe('MCP stdio framing and lifecycle', () => {
         expect(manager.listServers(projectA)).toHaveLength(1);
         await manager.connectServer(config, projectB);
         expect(manager.listServers(projectB)).toHaveLength(1);
-        expect(manager.getClient(config.name, projectA)).not.toBe(manager.getClient(config.name, projectB));
+        expect(manager.getClient(config.name, projectA)).not.toBe(
+          manager.getClient(config.name, projectB),
+        );
       } finally {
         await manager.shutdown();
         rmSync(projectA, { recursive: true, force: true });

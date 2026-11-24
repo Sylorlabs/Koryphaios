@@ -500,19 +500,16 @@ async function attachTauriListeners() {
       detail: string | null;
       elapsedMs: number;
     };
-    const unStarting = await listen<BackendStartingPayload>(
-      'backend://starting',
-      (event) => {
-        // A healthy poll that raced a stale progress event must not regress.
-        if (_status === 'healthy') return;
-        const payload = event.payload;
-        publishStarting({
-          phase: payload?.phase ?? 'starting',
-          detail: payload?.detail ?? null,
-          elapsedMs: typeof payload?.elapsedMs === 'number' ? payload.elapsedMs : null,
-        });
-      },
-    );
+    const unStarting = await listen<BackendStartingPayload>('backend://starting', (event) => {
+      // A healthy poll that raced a stale progress event must not regress.
+      if (_status === 'healthy') return;
+      const payload = event.payload;
+      publishStarting({
+        phase: payload?.phase ?? 'starting',
+        detail: payload?.detail ?? null,
+        elapsedMs: typeof payload?.elapsedMs === 'number' ? payload.elapsedMs : null,
+      });
+    });
     tauriUnlistens.push(unDown, unReady, unStarting);
   } catch (err: unknown) {
     // Not in Tauri or event plugin unavailable — fall back to polling only.

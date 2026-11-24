@@ -18,8 +18,10 @@ const runtimes = new Map<string, InstanceType<typeof SessionRuntime>>();
 
 setContext({
   sessions: {
-    getActive: async (id: string) => (liveSessions.has(id) ? { id, workingDirectory: tmpdir() } : undefined),
-    get: async (id: string) => (liveSessions.has(id) ? { id, workingDirectory: tmpdir() } : undefined),
+    getActive: async (id: string) =>
+      liveSessions.has(id) ? { id, workingDirectory: tmpdir() } : undefined,
+    get: async (id: string) =>
+      liveSessions.has(id) ? { id, workingDirectory: tmpdir() } : undefined,
   },
   kory: {
     resolveSessionWorkingDirectoryPublic: async () => tmpdir(),
@@ -63,10 +65,20 @@ describe('terminal routes', () => {
   test('every route refuses an unauthenticated caller', async () => {
     expect((await call('/api/terminals?sessionId=chat-a', {}, false)).status).toBe(401);
     expect(
-      (await call('/api/terminals', { method: 'POST', body: JSON.stringify({ sessionId: 'chat-a' }) }, false)).status,
+      (
+        await call(
+          '/api/terminals',
+          { method: 'POST', body: JSON.stringify({ sessionId: 'chat-a' }) },
+          false,
+        )
+      ).status,
     ).toBe(401);
-    expect((await call('/api/terminals/abc/scrollback?sessionId=chat-a', {}, false)).status).toBe(401);
-    expect((await call('/api/terminals/abc?sessionId=chat-a', { method: 'DELETE' }, false)).status).toBe(401);
+    expect((await call('/api/terminals/abc/scrollback?sessionId=chat-a', {}, false)).status).toBe(
+      401,
+    );
+    expect(
+      (await call('/api/terminals/abc?sessionId=chat-a', { method: 'DELETE' }, false)).status,
+    ).toBe(401);
   });
 
   test('a missing or unknown chat is not found and creates nothing', async () => {
@@ -84,17 +96,25 @@ describe('terminal routes', () => {
       body: JSON.stringify({ sessionId: 'chat-a', cols: 100, rows: 30, name: 'Build' }),
     });
     expect(created.status).toBe(200);
-    const { terminal } = (await created.json()) as { terminal: { id: string; name: string; sessionId: string; cols: number } };
+    const { terminal } = (await created.json()) as {
+      terminal: { id: string; name: string; sessionId: string; cols: number };
+    };
     expect(terminal).toMatchObject({ name: 'Build', sessionId: 'chat-a', cols: 100 });
 
-    const listed = (await (await call('/api/terminals?sessionId=chat-a')).json()) as { terminals: Array<{ id: string }> };
+    const listed = (await (await call('/api/terminals?sessionId=chat-a')).json()) as {
+      terminals: Array<{ id: string }>;
+    };
     expect(listed.terminals.map((t) => t.id)).toEqual([terminal.id]);
 
     const scrollback = await call(`/api/terminals/${terminal.id}/scrollback?sessionId=chat-a`);
     expect(scrollback.status).toBe(200);
-    expect(((await scrollback.json()) as { scrollback: { terminalId: string } }).scrollback.terminalId).toBe(terminal.id);
+    expect(
+      ((await scrollback.json()) as { scrollback: { terminalId: string } }).scrollback.terminalId,
+    ).toBe(terminal.id);
 
-    const removed = await call(`/api/terminals/${terminal.id}?sessionId=chat-a`, { method: 'DELETE' });
+    const removed = await call(`/api/terminals/${terminal.id}?sessionId=chat-a`, {
+      method: 'DELETE',
+    });
     expect(removed.status).toBe(200);
     expect(runtimes.get('chat-a')?.terminals.has(terminal.id)).toBe(false);
   });
@@ -106,12 +126,18 @@ describe('terminal routes', () => {
     });
     const { terminal } = (await created.json()) as { terminal: { id: string } };
 
-    const otherList = (await (await call('/api/terminals?sessionId=chat-b')).json()) as { terminals: unknown[] };
+    const otherList = (await (await call('/api/terminals?sessionId=chat-b')).json()) as {
+      terminals: unknown[];
+    };
     expect(otherList.terminals).toEqual([]);
 
     expect((await call(`/api/terminals/${terminal.id}?sessionId=chat-b`)).status).toBe(404);
-    expect((await call(`/api/terminals/${terminal.id}/scrollback?sessionId=chat-b`)).status).toBe(404);
-    expect((await call(`/api/terminals/${terminal.id}?sessionId=chat-b`, { method: 'DELETE' })).status).toBe(404);
+    expect((await call(`/api/terminals/${terminal.id}/scrollback?sessionId=chat-b`)).status).toBe(
+      404,
+    );
+    expect(
+      (await call(`/api/terminals/${terminal.id}?sessionId=chat-b`, { method: 'DELETE' })).status,
+    ).toBe(404);
     // Still alive in its own chat after the refused delete.
     expect(runtimes.get('chat-a')?.terminals.has(terminal.id)).toBe(true);
     await call(`/api/terminals/${terminal.id}?sessionId=chat-a`, { method: 'DELETE' });

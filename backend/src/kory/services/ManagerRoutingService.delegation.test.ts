@@ -51,7 +51,8 @@ function row(name: string, ids: string[], overrides: Partial<Row> = {}): Row {
 
 function fixture(rows: Row[]) {
   const resolveProvider = mock(
-    (_model: string, provider?: ProviderName): Provider | undefined => ({ name: provider }) as Provider,
+    (_model: string, provider?: ProviderName): Provider | undefined =>
+      ({ name: provider }) as Provider,
   );
   const getStatus = mock(() => rows);
   const service = new ManagerRoutingService({

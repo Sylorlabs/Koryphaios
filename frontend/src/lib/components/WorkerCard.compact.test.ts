@@ -127,6 +127,8 @@ describe('sub-agent cards are a single compact row', () => {
 
   it('says Stopped, not Done, for a worker the user cancelled', () => {
     const { container } = card(agent({ status: 'done', stopReason: 'cancelled' }));
-    expect(container.querySelector('.agent-seg')!.getAttribute('aria-label')).toBe('Critic, Stopped');
+    expect(container.querySelector('.agent-seg')!.getAttribute('aria-label')).toBe(
+      'Critic, Stopped',
+    );
   });
 });

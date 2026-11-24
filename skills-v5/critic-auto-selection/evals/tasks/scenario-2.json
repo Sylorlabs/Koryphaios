@@ -59,10 +59,7 @@
         "concerns point at the actual defect",
         "no fabricated concern to justify a request"
       ],
-      "blindTo": [
-        "skill-variant",
-        "expected-outcome"
-      ]
+      "blindTo": ["skill-variant", "expected-outcome"]
     }
   ],
   "requiredEvidence": [

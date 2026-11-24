@@ -223,7 +223,8 @@ describe('notes, reading, undo, confirmation', () => {
   it('recognises confirmation answers', () => {
     for (const yes of ['yes', 'Yes.', 'yeah', 'yep', 'confirm', 'do it', 'go ahead'])
       expect(isAffirmative(yes)).toBe(true);
-    for (const no of ['no', 'Nope', 'cancel', 'never mind', "don't"]) expect(isNegative(no)).toBe(true);
+    for (const no of ['no', 'Nope', 'cancel', 'never mind', "don't"])
+      expect(isNegative(no)).toBe(true);
     expect(isAffirmative('yes and also refactor the parser')).toBe(false);
   });
 });

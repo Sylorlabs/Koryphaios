@@ -142,13 +142,22 @@ async function measureTiles(page: import('@playwright/test').Page) {
 }
 
 test.describe('sub-agent rail tile layout', () => {
-  test('tiles are a single short row showing only name, status icon and close', async ({ page }) => {
+  test('tiles are a single short row showing only name, status icon and close', async ({
+    page,
+  }) => {
     test.setTimeout(90_000);
 
-    await openRail(page, threadsFor(
-      [['a1', 'Backend', 'backend'], ['a2', 'Frontend', 'ui'], ['a3', 'Tester', 'test']],
-      ['thinking', 'tool_calling', 'searching'],
-    ));
+    await openRail(
+      page,
+      threadsFor(
+        [
+          ['a1', 'Backend', 'backend'],
+          ['a2', 'Frontend', 'ui'],
+          ['a3', 'Tester', 'test'],
+        ],
+        ['thinking', 'tool_calling', 'searching'],
+      ),
+    );
 
     const m = await measureTiles(page);
     expect(m.count).toBe(3);
@@ -188,7 +197,10 @@ test.describe('sub-agent rail tile layout', () => {
 
     await openRail(
       page,
-      threadsFor([['d1', 'SecurityReviewerForTheEntireAuthenticationSubsystem', 'security']], ['thinking']),
+      threadsFor(
+        [['d1', 'SecurityReviewerForTheEntireAuthenticationSubsystem', 'security']],
+        ['thinking'],
+      ),
     );
 
     const box = (await measureTiles(page)).boxes[0];
@@ -200,8 +212,17 @@ test.describe('sub-agent rail tile layout', () => {
   test('many agents stay one row tall and wrap rather than growing downward', async ({ page }) => {
     test.setTimeout(90_000);
 
-    const names = Array.from({ length: 12 }, (_, i) => [`m${i}`, `Agent${i}`, 'backend'] as [string, string, string]);
-    await openRail(page, threadsFor(names, names.map(() => 'thinking')));
+    const names = Array.from(
+      { length: 12 },
+      (_, i) => [`m${i}`, `Agent${i}`, 'backend'] as [string, string, string],
+    );
+    await openRail(
+      page,
+      threadsFor(
+        names,
+        names.map(() => 'thinking'),
+      ),
+    );
 
     const m = await measureTiles(page);
     expect(m.count).toBe(12);
@@ -229,7 +250,9 @@ test.describe('sub-agent rail status reactivity', () => {
 
     await openRail(page, threadsFor([['e1', 'Worker', 'backend']], ['thinking']));
 
-    await expect(page.getByRole('button', { name: 'Stop and close Worker', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Stop and close Worker', exact: true }),
+    ).toBeVisible();
 
     await page.evaluate(async () => {
       const ws = await import('/src/lib/stores/websocket.svelte.ts');
@@ -254,22 +277,24 @@ test.describe('sub-agent rail status reactivity', () => {
   test('a completed worker survives a chat switch and stays closable', async ({ page }) => {
     test.setTimeout(90_000);
 
-    await openRail(page, threadsFor(
-      [['k1', 'Completed', 'backend'], ['k2', 'Running', 'backend']],
-      ['done', 'thinking'],
-    ));
+    await openRail(
+      page,
+      threadsFor(
+        [
+          ['k1', 'Completed', 'backend'],
+          ['k2', 'Running', 'backend'],
+        ],
+        ['done', 'thinking'],
+      ),
+    );
 
     // The switch is what used to erase it, so this asserts post-switch state.
     await expect(page.locator('.agent-card').filter({ hasText: 'Completed' })).toHaveCount(1, {
       timeout: 10_000,
     });
-    await expect(
-      page.getByRole('button', { name: 'Close Completed', exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Close Completed', exact: true })).toBeVisible();
 
-    await page.locator('.agent-card').filter({ hasText: 'Completed' })
-      .getByRole('button')
-      .click();
+    await page.locator('.agent-card').filter({ hasText: 'Completed' }).getByRole('button').click();
     await expect(page.locator('.agent-card').filter({ hasText: 'Completed' })).toHaveCount(0, {
       timeout: 10_000,
     });
@@ -277,7 +302,9 @@ test.describe('sub-agent rail status reactivity', () => {
 });
 
 test.describe('sub-agent rail close', () => {
-  test('closing a running worker cancels it on the backend and removes the tile', async ({ page }) => {
+  test('closing a running worker cancels it on the backend and removes the tile', async ({
+    page,
+  }) => {
     test.setTimeout(90_000);
 
     const cancels: string[] = [];
@@ -297,9 +324,7 @@ test.describe('sub-agent rail close', () => {
       });
     });
 
-    await page.locator('.agent-card').filter({ hasText: 'Backend' })
-      .getByRole('button')
-      .click();
+    await page.locator('.agent-card').filter({ hasText: 'Backend' }).getByRole('button').click();
 
     await expect(page.locator('.agent-card').filter({ hasText: 'Backend' })).toHaveCount(0, {
       timeout: 10_000,
@@ -328,9 +353,7 @@ test.describe('sub-agent rail close', () => {
 
     await openRail(page, threadsFor([['g1', 'Finished', 'backend']], ['done']));
 
-    await page.locator('.agent-card').filter({ hasText: 'Finished' })
-      .getByRole('button')
-      .click();
+    await page.locator('.agent-card').filter({ hasText: 'Finished' }).getByRole('button').click();
 
     await expect(page.locator('.agent-card').filter({ hasText: 'Finished' })).toHaveCount(0, {
       timeout: 10_000,
@@ -351,9 +374,7 @@ test.describe('sub-agent rail close', () => {
       });
     });
 
-    await page.locator('.agent-card').filter({ hasText: 'Backend' })
-      .getByRole('button')
-      .click();
+    await page.locator('.agent-card').filter({ hasText: 'Backend' }).getByRole('button').click();
 
     // Dropping a tile whose worker is still live would hide running work.
     await expect(page.locator('.agent-card').filter({ hasText: 'Backend' })).toBeVisible({

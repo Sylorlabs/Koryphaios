@@ -5,7 +5,8 @@ import type { Tool, ToolCallInput, ToolCallOutput, ToolContext } from './registr
 export class GetResourceBudgetTool implements Tool {
   readonly name = 'get_resource_budget';
   readonly role = 'any' as const;
-  readonly description = 'Read a secret-free snapshot of provider-reported API balances, subscription quota windows, live rate-limit windows, and this chat spend. Use it before fan-out to avoid assigning an agent that will rate-limit or stop mid-task. Never treat missing data as zero or invent balances.';
+  readonly description =
+    'Read a secret-free snapshot of provider-reported API balances, subscription quota windows, live rate-limit windows, and this chat spend. Use it before fan-out to avoid assigning an agent that will rate-limit or stop mid-task. Never treat missing data as zero or invent balances.';
   readonly inputSchema = { type: 'object', properties: {} };
 
   constructor(private providers: ProviderRegistry) {}
@@ -16,6 +17,12 @@ export class GetResourceBudgetTool implements Tool {
       {},
       ctx.sessionId,
     );
-    return { callId: call.id, name: this.name, output: JSON.stringify(snapshot), isError: false, durationMs: 0 };
+    return {
+      callId: call.id,
+      name: this.name,
+      output: JSON.stringify(snapshot),
+      isError: false,
+      durationMs: 0,
+    };
   }
 }

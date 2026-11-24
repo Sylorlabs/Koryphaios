@@ -12,7 +12,8 @@ import { rankHarnessCandidates, type QualificationRole } from '../skill-qualific
 import { RoutingServiceEnhanced, type RoutingDecision } from './RoutingServiceEnhanced';
 
 /** Model ids that name a non-chat capability. Never valid for a delegated worker. */
-const NON_CHAT_MODEL_ID = /embed|moderation|whisper|transcri|\btts\b|text-to-speech|speech|dall-e|image|rerank/i;
+const NON_CHAT_MODEL_ID =
+  /embed|moderation|whisper|transcri|\btts\b|text-to-speech|speech|dall-e|image|rerank/i;
 const SUGGESTION_LIMIT = 5;
 
 interface ConnectedWorkerRoute {
@@ -127,16 +128,22 @@ export class ManagerRoutingService {
   /** List the category choices exposed to the finishing agent for Critic Auto. */
   getCriticModelChoices(workingDirectory = this.deps.workingDirectory): string[] {
     const configured = loadAgentSettings(workingDirectory).managerModelAccess?.critic;
-    return configured?.length ? [...configured] : this.deps.providers.getStatus()
-      .filter((status) => status.adapterAvailable)
-      .flatMap((status) => status.models.map((model) => `${status.name}:${model}`));
+    return configured?.length
+      ? [...configured]
+      : this.deps.providers
+          .getStatus()
+          .filter((status) => status.adapterAvailable)
+          .flatMap((status) => status.models.map((model) => `${status.name}:${model}`));
   }
 
   resolveIndependentRouting(
     avoidModel: string | undefined,
     avoidProvider: ProviderName | undefined,
     domain: WorkerDomain,
-    additionalAvoid: ReadonlyArray<{ model: string | undefined; provider: ProviderName | undefined }> = [],
+    additionalAvoid: ReadonlyArray<{
+      model: string | undefined;
+      provider: ProviderName | undefined;
+    }> = [],
     task?: string,
     qualificationRole: QualificationRole = 'worker',
     workingDirectory = this.deps.workingDirectory,
@@ -195,8 +202,10 @@ export class ManagerRoutingService {
       // otherwise avoid -- because an explicit choice must never be silently
       // replaced. A model outside the enabled pool is refused with the pool, so
       // a stale pick cannot quietly become a different reviewer.
-      const selected = reachable.find((route) =>
-        preferredModel === route.model || preferredModel === `${route.provider ?? ''}:${route.model}`,
+      const selected = reachable.find(
+        (route) =>
+          preferredModel === route.model ||
+          preferredModel === `${route.provider ?? ''}:${route.model}`,
       );
       if (selected) return selected;
       const pool = candidates.length
@@ -208,8 +217,10 @@ export class ManagerRoutingService {
       );
     }
     // Prefer a different model from every producer before comparing providers.
-    const differentModels = resolved.filter((route) =>
-      route.model !== avoidModel && additionalAvoid.every((identity) => route.model !== identity.model),
+    const differentModels = resolved.filter(
+      (route) =>
+        route.model !== avoidModel &&
+        additionalAvoid.every((identity) => route.model !== identity.model),
     );
     const distinct = differentModels.length ? differentModels : resolved;
     // A different model already beats a different provider (that is what the
@@ -333,7 +344,9 @@ export class ManagerRoutingService {
       throw new Error(
         `Model "${requested}" matches several connected providers (${matches
           .map((route) => `${route.provider}:${route.model}`)
-          .join(', ')}). Name the provider, for example ${matches[0]!.provider}:${matches[0]!.model}.`,
+          .join(
+            ', ',
+          )}). Name the provider, for example ${matches[0]!.provider}:${matches[0]!.model}.`,
       );
     }
     const route = matches[0]!;

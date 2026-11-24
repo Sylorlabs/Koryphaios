@@ -115,7 +115,13 @@ import {
   toAcpProbeConfig,
   type AcpAgentDefinition,
 } from './acp/agent-definitions';
-import { acpStoreRoot, loadAcpAgentDefinitions, loadAcpAgentEnv, loadAcpProbeVerdicts, type AcpProbeVerdict } from './acp/agent-store';
+import {
+  acpStoreRoot,
+  loadAcpAgentDefinitions,
+  loadAcpAgentEnv,
+  loadAcpProbeVerdicts,
+  type AcpProbeVerdict,
+} from './acp/agent-store';
 import { getWireAdapter } from './wire-adapters/registry';
 import { getCapabilityAdapter, resolveCapabilityConfig } from './capabilities';
 import {

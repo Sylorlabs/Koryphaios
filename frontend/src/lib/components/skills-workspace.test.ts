@@ -19,7 +19,10 @@ const drawerSource = readFileSync(
   'utf8',
 );
 const pageSource = readFileSync(join(process.cwd(), 'src/routes/+page.svelte'), 'utf8');
-const editorSource = readFileSync(join(process.cwd(), 'src/lib/components/DocumentEditor.svelte'), 'utf8');
+const editorSource = readFileSync(
+  join(process.cwd(), 'src/lib/components/DocumentEditor.svelte'),
+  'utf8',
+);
 
 describe('Skills workspace contracts', () => {
   it('is the live Skills settings branch rather than a dormant preview', () => {

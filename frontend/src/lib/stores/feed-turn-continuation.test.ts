@@ -83,7 +83,10 @@ describe('one turn renders as one answer', () => {
   });
 
   it('keeps text on one row when a tool call lands mid-sentence', () => {
-    feedStore.accumulateFeedEntry(feedStore.sessionId, content('Launching Codex — checking its ', 100));
+    feedStore.accumulateFeedEntry(
+      feedStore.sessionId,
+      content('Launching Codex — checking its ', 100),
+    );
     feedStore.addFeedEntryForSession(feedStore.sessionId, toolCall('tc1', 'read_file', 110));
     feedStore.accumulateFeedEntry(feedStore.sessionId, content('layout and start command.', 120));
 
@@ -161,7 +164,10 @@ describe('one turn renders as one answer', () => {
   });
 
   it('keeps a skill row between the turn rows it happened between', () => {
-    feedStore.applyManagerTurnEvent(SID, managerEvent('stream.thinking', { thinking: 'plan' }, 100));
+    feedStore.applyManagerTurnEvent(
+      SID,
+      managerEvent('stream.thinking', { thinking: 'plan' }, 100),
+    );
     feedStore.applyManagerTurnEvent(SID, managerEvent('stream.delta', { content: 'answer' }, 500));
     feedStore.addFeedEntryForSession(feedStore.sessionId, skill('research', 300));
 

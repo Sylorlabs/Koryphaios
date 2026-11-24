@@ -78,9 +78,7 @@ import {
   stopWorkflow,
 } from '../../kory/workflows';
 import { serverLog } from '../../logger';
-import {
-  AgentFallbackChainRequestSchema,
-} from '../../validation/schemas';
+import { AgentFallbackChainRequestSchema } from '../../validation/schemas';
 import {
   normalizeFallbackChain,
   type FallbackChainRole,
@@ -1150,7 +1148,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
           model: body.model,
           reasoningLevel: body.reasoningLevel,
         });
-         return { ok: true, data: accepted };
+        return { ok: true, data: accepted };
       } catch (err: unknown) {
         if (err instanceof ConflictError) throw err;
         const message = err instanceof Error ? err.message : String(err);
@@ -1168,26 +1166,62 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       }),
     },
   )
-  .get('/:agentId/steering', async ({ request, params: { agentId }, query, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { kory } = getContext();
-    return { ok: true, data: await kory.getAgentSteering(query.sessionId, agentId) };
-  }, { query: t.Object({ sessionId: t.String() }) })
-  .patch('/:agentId/steering/:commandId', async ({ request, params: { agentId, commandId }, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { kory } = getContext();
-    return { ok: true, data: await kory.editAgentSteering(body.sessionId, agentId, commandId, body.content) };
-  }, { body: t.Object({ sessionId: t.String(), content: t.String() }) })
-  .delete('/:agentId/steering/:commandId', async ({ request, params: { agentId, commandId }, query, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { kory } = getContext();
-    return { ok: true, data: await kory.deleteAgentSteering(query.sessionId, agentId, commandId) };
-  }, { query: t.Object({ sessionId: t.String() }) })
-  .post('/:agentId/steering/reorder', async ({ request, params: { agentId }, body, set }) => {
-    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
-    const { kory } = getContext();
-    return { ok: true, data: await kory.reorderAgentSteering(body.sessionId, agentId, body.commandId, body.beforeId ?? null) };
-  }, { body: t.Object({ sessionId: t.String(), commandId: t.String(), beforeId: t.Optional(t.Union([t.String(), t.Null()])) }) })
+  .get(
+    '/:agentId/steering',
+    async ({ request, params: { agentId }, query, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { kory } = getContext();
+      return { ok: true, data: await kory.getAgentSteering(query.sessionId, agentId) };
+    },
+    { query: t.Object({ sessionId: t.String() }) },
+  )
+  .patch(
+    '/:agentId/steering/:commandId',
+    async ({ request, params: { agentId, commandId }, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { kory } = getContext();
+      return {
+        ok: true,
+        data: await kory.editAgentSteering(body.sessionId, agentId, commandId, body.content),
+      };
+    },
+    { body: t.Object({ sessionId: t.String(), content: t.String() }) },
+  )
+  .delete(
+    '/:agentId/steering/:commandId',
+    async ({ request, params: { agentId, commandId }, query, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { kory } = getContext();
+      return {
+        ok: true,
+        data: await kory.deleteAgentSteering(query.sessionId, agentId, commandId),
+      };
+    },
+    { query: t.Object({ sessionId: t.String() }) },
+  )
+  .post(
+    '/:agentId/steering/reorder',
+    async ({ request, params: { agentId }, body, set }) => {
+      if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+      const { kory } = getContext();
+      return {
+        ok: true,
+        data: await kory.reorderAgentSteering(
+          body.sessionId,
+          agentId,
+          body.commandId,
+          body.beforeId ?? null,
+        ),
+      };
+    },
+    {
+      body: t.Object({
+        sessionId: t.String(),
+        commandId: t.String(),
+        beforeId: t.Optional(t.Union([t.String(), t.Null()])),
+      }),
+    },
+  )
   .post(
     '/:agentId/controls',
     async ({ request, params: { agentId }, body, set }) => {

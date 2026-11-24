@@ -15,11 +15,23 @@ vi.mock('$lib/stores/agents.svelte', () => ({
 function agent(status: AgentStatus) {
   return {
     identity: {
-      id: 'w1', name: 'UI Worker', role: 'worker' as AgentRole, domain: 'ui' as const,
-      provider: 'openai', model: 'gpt-test', glowColor: 'var(--color-accent)',
+      id: 'w1',
+      name: 'UI Worker',
+      role: 'worker' as AgentRole,
+      domain: 'ui' as const,
+      provider: 'openai',
+      model: 'gpt-test',
+      glowColor: 'var(--color-accent)',
     },
-    status, content: '', thinking: '', toolCalls: [], task: '',
-    tokensUsed: 0, contextMax: 0, contextKnown: false, sessionId: 'session-1',
+    status,
+    content: '',
+    thinking: '',
+    toolCalls: [],
+    task: '',
+    tokensUsed: 0,
+    contextMax: 0,
+    contextKnown: false,
+    sessionId: 'session-1',
   };
 }
 
@@ -77,12 +89,17 @@ describe('WorkerCard live tool icon', () => {
     expect(badge?.getAttribute('data-badge')).toBe('attention');
     expect(badge?.textContent?.trim()).toBe('?');
     // A parked worker is not running: its icon must not animate as busy.
-    expect(container.querySelector('[data-tool-icon]')!.getAttribute('data-tool-state')).toBe('completed');
+    expect(container.querySelector('[data-tool-icon]')!.getAttribute('data-tool-state')).toBe(
+      'completed',
+    );
     expect(screen.getByRole('tab').getAttribute('aria-label')).toBe('UI Worker, Waiting on you');
   });
 
   it('names the current tool and its argument in the accessible name while running', () => {
-    currentTool.mockReturnValue({ name: 'bash', input: { command: 'bun run test --reporter=dot' } });
+    currentTool.mockReturnValue({
+      name: 'bash',
+      input: { command: 'bun run test --reporter=dot' },
+    });
     renderCard('tool_calling');
     expect(screen.getByRole('tab').getAttribute('aria-label')).toBe(
       'UI Worker, Running tool: bash · bun run test --reporter=dot',
@@ -94,7 +111,13 @@ describe('WorkerCard live tool icon', () => {
     const { container, rerender } = renderCard('thinking');
     const seg = container.querySelector('.agent-seg')!;
     const before = [...seg.children].map((child) => child.className.split(' ')[0]);
-    await rerender({ agent: agent('error'), status: 'error', selected: false, onSelect: vi.fn(), onClose: vi.fn() });
+    await rerender({
+      agent: agent('error'),
+      status: 'error',
+      selected: false,
+      onSelect: vi.fn(),
+      onClose: vi.fn(),
+    });
     const after = [...seg.children].map((child) => child.className.split(' ')[0]);
     // Same row of children: the badge lives inside the icon slot, absolutely
     // positioned, so the name and close control never shift.

@@ -10,10 +10,10 @@ evidence and **Known gaps** for what is still open.
 The same encrypted link supports two different user intents. They are not
 interchangeable.
 
-| Placement | Meaning | Default for | Return behavior |
-| --------- | ------- | ----------- | --------------- |
-| `stay` | The work lives on the target computer. | A chat created on that computer from the device chooser. | Nothing is copied back unless the user asks. |
-| `return` | The target is used for its compute, and the changes come back to the origin. | "Use my compute on my VPS", or moving a heavy job off a busy machine. | A read-only patch bundle is written under `.koryphaios/incoming/<transferId>/`. |
+| Placement | Meaning                                                                      | Default for                                                           | Return behavior                                                                 |
+| --------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `stay`    | The work lives on the target computer.                                       | A chat created on that computer from the device chooser.              | Nothing is copied back unless the user asks.                                    |
+| `return`  | The target is used for its compute, and the changes come back to the origin. | "Use my compute on my VPS", or moving a heavy job off a busy machine. | A read-only patch bundle is written under `.koryphaios/incoming/<transferId>/`. |
 
 A `stay` chat cannot be collected. That is enforced in the manager tool, not
 only in the prompt.
@@ -91,12 +91,12 @@ agent to:
 
 ## Tools
 
-| Tool | Role | Behavior |
-| ---- | ---- | -------- |
-| `list_linked_devices` | manager | Lists peers with user-granted agent routing. |
-| `control_linked_device` | manager | Workspace/chat discovery, create, prompt, cancel, `delegate`, `collect_work`. |
-| `delegate` | manager | Creates a target chat with a placement and submits the task in one call. Returns the announcement text. |
-| `collect_work` | manager | Exports a `return` chat and writes the bundle to the origin workspace. |
+| Tool                    | Role    | Behavior                                                                                                |
+| ----------------------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `list_linked_devices`   | manager | Lists peers with user-granted agent routing.                                                            |
+| `control_linked_device` | manager | Workspace/chat discovery, create, prompt, cancel, `delegate`, `collect_work`.                           |
+| `delegate`              | manager | Creates a target chat with a placement and submits the task in one call. Returns the announcement text. |
+| `collect_work`          | manager | Exports a `return` chat and writes the bundle to the origin workspace.                                  |
 
 Workers and critics cannot use these tools.
 
@@ -173,7 +173,7 @@ run. `collect` refuses a `stay` chat unless `--force` is explicit.
 - **Target auto-routing gap reproduced.** With no pinned assignment, a
   delegated child selected `phoenix-1.0` (an image model) from the custom
   catalog and failed with `404 … does not support the chat/completions
-  endpoint`. Pinning `assignments.general` fixed this host; the routing gap is
+endpoint`. Pinning `assignments.general` fixed this host; the routing gap is
   recorded below rather than papered over.
 - **Virtual display available on the VPS.** `Xvfb :99` runs at 1280x800 after
   installing `xorg-server-xvfb`, `xorg-xdpyinfo`, `xterm` and `xdotool` with

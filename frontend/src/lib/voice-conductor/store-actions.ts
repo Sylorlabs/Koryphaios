@@ -85,7 +85,8 @@ export function createStoreActions(host: () => ConductorHost | null): ConductorA
     },
     updateNoteContent: async (noteId, content) =>
       !!(await notesStore.updateNote(noteId, { content })),
-    createNote: async (title, content) => (await notesStore.createNote({ title, content }))?.id ?? null,
+    createNote: async (title, content) =>
+      (await notesStore.createNote({ title, content }))?.id ?? null,
     trashNote: (noteId) => notesStore.deleteNote(noteId),
 
     lastReply: (sessionId) => {

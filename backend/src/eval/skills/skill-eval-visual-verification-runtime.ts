@@ -17,15 +17,21 @@ import {
   BROWSER_EVAL_CONSTANTS,
   BROWSER_SKILL_EVAL_MATERIALIZERS,
 } from './skill-eval-browser-fixtures';
-import type { SkillEvalDeterministicScore, SkillEvalDeterministicScorer } from './skill-eval-execution';
+import type {
+  SkillEvalDeterministicScore,
+  SkillEvalDeterministicScorer,
+} from './skill-eval-execution';
 import { readJsonArtifact, readFixtureText, writeFixtureFile } from './skill-eval-fixture-helpers';
 import type { SkillEvalScenarioV3 } from './skill-eval-harness';
 
 /** Browser-only evidence for V5 task 1. Task 2 requires a native macOS inspector. */
 export const VISUAL_VERIFICATION_BROWSER_SCENARIO = 'visual-verification-full-task-1';
 
-const { dashboardViewports: VIEWPORTS, dashboardThemes: THEMES, dashboardStates: STATES } =
-  BROWSER_EVAL_CONSTANTS;
+const {
+  dashboardViewports: VIEWPORTS,
+  dashboardThemes: THEMES,
+  dashboardStates: STATES,
+} = BROWSER_EVAL_CONSTANTS;
 const FIXED_ASSETS = [
   ['index.html', 'text/html; charset=utf-8'],
   ['src/styles.css', 'text/css; charset=utf-8'],
@@ -126,7 +132,9 @@ function safeAsset(root: string, path: string): Buffer {
 }
 
 /** Compare against a fresh copy of the actual pinned fixture, never candidate hashes. */
-async function pinnedDashboardAssets(root: string): Promise<Map<string, { bytes: Buffer; mime: string }>> {
+async function pinnedDashboardAssets(
+  root: string,
+): Promise<Map<string, { bytes: Buffer; mime: string }>> {
   const reference = mkdtempSync(join(tmpdir(), 'kory-visual-reference-'));
   try {
     const materializer = BROWSER_SKILL_EVAL_MATERIALIZERS.find((item) =>
@@ -212,17 +220,30 @@ function metricFailures(capture: BrowserVisualCapture): string[] {
   ].filter((issue): issue is string => typeof issue === 'string');
 }
 
-function candidateAuditMatches(root: string, captures: readonly BrowserVisualCapture[], browser: string) {
+function candidateAuditMatches(
+  root: string,
+  captures: readonly BrowserVisualCapture[],
+  browser: string,
+) {
   const matrix = readJsonArtifact<{
     environment?: Record<string, unknown>;
     entries?: Array<Record<string, unknown>>;
   }>(root, 'verification/visual-verification-scenario-1-capture-matrix.json');
   const entries = Array.isArray(matrix?.entries) ? matrix.entries : [];
   const fields = [
-    'captureId', 'width', 'height', 'theme', 'state', 'horizontalOverflow',
-    'chartClipped', 'legendClipped', 'stickyOverlap', 'primaryActionDistinct',
+    'captureId',
+    'width',
+    'height',
+    'theme',
+    'state',
+    'horizontalOverflow',
+    'chartClipped',
+    'legendClipped',
+    'stickyOverlap',
+    'primaryActionDistinct',
   ] as const;
-  const matrixMatches = entries.length === captures.length &&
+  const matrixMatches =
+    entries.length === captures.length &&
     new Set(entries.map((row) => row?.captureId)).size === captures.length &&
     captures.every((capture) => {
       const candidate = entries.find((row) => row?.captureId === capture.captureId);
@@ -235,22 +256,31 @@ function candidateAuditMatches(root: string, captures: readonly BrowserVisualCap
     matrix.environment.dataset === 'fixture-v1';
 
   const audit = readJsonArtifact<{ failures?: unknown; renderingNoisePolicy?: unknown }>(
-    root, 'verification/visual-verification-scenario-1-claim-audit.json',
+    root,
+    'verification/visual-verification-scenario-1-claim-audit.json',
   );
   const expected = captures.flatMap(metricFailures).sort();
-  const actual = Array.isArray(audit?.failures) &&
-    audit.failures.every((row) => typeof row === 'string')
-    ? [...audit.failures].sort() : [];
-  const auditMatches = JSON.stringify(expected) === JSON.stringify(actual) &&
+  const actual =
+    Array.isArray(audit?.failures) && audit.failures.every((row) => typeof row === 'string')
+      ? [...audit.failures].sort()
+      : [];
+  const auditMatches =
+    JSON.stringify(expected) === JSON.stringify(actual) &&
     typeof audit?.renderingNoisePolicy === 'string' &&
     /noise|font|dpr|animation|runtime/iu.test(audit.renderingNoisePolicy);
 
   let verdict = '';
   try {
     verdict = readFixtureText(root, 'verification/visual-verification-scenario-1-verdict.md');
-  } catch { /* Missing candidate evidence is a failed check. */ }
-  const verdictMatches = /390/iu.test(verdict) && /dense/iu.test(verdict) &&
-    /overflow/iu.test(verdict) && /light/iu.test(verdict) && /dark/iu.test(verdict) &&
+  } catch {
+    /* Missing candidate evidence is a failed check. */
+  }
+  const verdictMatches =
+    /390/iu.test(verdict) &&
+    /dense/iu.test(verdict) &&
+    /overflow/iu.test(verdict) &&
+    /light/iu.test(verdict) &&
+    /dark/iu.test(verdict) &&
     /noise/iu.test(verdict);
   return { matrixMatches, auditMatches, verdictMatches };
 }
@@ -267,31 +297,46 @@ function validateIndependentReview(
 ): { human: boolean; screenReader: boolean } {
   const byId = new Map(captures.map((capture) => [capture.captureId, capture]));
   const human = report?.human;
-  const humanVerified = Array.isArray(human) && human.length === captures.length &&
+  const humanVerified =
+    Array.isArray(human) &&
+    human.length === captures.length &&
     new Set(human.map((item) => item?.captureId)).size === captures.length &&
     human.every((item) => {
       const capture = byId.get(item?.captureId);
-      return !!capture && item.simulated === false &&
+      return (
+        !!capture &&
+        item.simulated === false &&
         item.screenshotSha256 === capture.screenshotSha256 &&
-        !!item.reviewerId?.trim() && Number.isFinite(Date.parse(item.reviewedAt)) &&
+        !!item.reviewerId?.trim() &&
+        Number.isFinite(Date.parse(item.reviewedAt)) &&
         (item.verdict === 'pass' || item.verdict === 'fail') &&
         !!item.observation?.trim() &&
-        (metricFailures(capture).length === 0 || item.verdict === 'fail');
+        (metricFailures(capture).length === 0 || item.verdict === 'fail')
+      );
     });
 
   const screenReader = report?.screenReader;
-  const screenReaderVerified = Array.isArray(screenReader) &&
+  const screenReaderVerified =
+    Array.isArray(screenReader) &&
     screenReader.length === SCREEN_READER_SAMPLE_IDS.length &&
     new Set(screenReader.map((item) => item?.captureId)).size === screenReader.length &&
-    SCREEN_READER_SAMPLE_IDS.every((id) => screenReader.some((item) => {
-      const capture = byId.get(id);
-      return !!capture && item.captureId === id && item.simulated === false &&
-        item.screenshotSha256 === capture.screenshotSha256 &&
-        item.browserVersion === browserVersion &&
-        !!item.assistiveTechnology?.trim() && !!item.assistiveTechnologyVersion?.trim() &&
-        !!item.sessionId?.trim() && !!item.announcement?.trim() &&
-        !!item.interaction?.trim();
-    }));
+    SCREEN_READER_SAMPLE_IDS.every((id) =>
+      screenReader.some((item) => {
+        const capture = byId.get(id);
+        return (
+          !!capture &&
+          item.captureId === id &&
+          item.simulated === false &&
+          item.screenshotSha256 === capture.screenshotSha256 &&
+          item.browserVersion === browserVersion &&
+          !!item.assistiveTechnology?.trim() &&
+          !!item.assistiveTechnologyVersion?.trim() &&
+          !!item.sessionId?.trim() &&
+          !!item.announcement?.trim() &&
+          !!item.interaction?.trim()
+        );
+      }),
+    );
   return { human: !!humanVerified, screenReader: !!screenReaderVerified };
 }
 
@@ -362,72 +407,105 @@ export async function runVisualVerificationBrowserScenario(
                 currentCaptureId = captureId;
                 const url = `${baseUrl}/?theme=${theme}&state=${state}`;
                 const response = await page.goto(url, { waitUntil: 'load', timeout: 5_000 });
-                if (response?.status() !== 200) throw new Error(`${captureId}: HTTP ${response?.status()}`);
+                if (response?.status() !== 200)
+                  throw new Error(`${captureId}: HTTP ${response?.status()}`);
                 await page.evaluate(() => document.fonts.ready);
-                const facts = await page.evaluate((input) => {
-                  const header = document.querySelector('.topbar')?.getBoundingClientRect();
-                  const content = document.querySelector('.content')?.getBoundingClientRect();
-                  const panel = document.querySelector('.chart-panel') as HTMLElement | null;
-                  const chart = document.querySelector('.chart') as HTMLElement | null;
-                  const legend = document.querySelector('.legend') as HTMLElement | null;
-                  const primary = document.querySelector('.primary-action') as HTMLElement | null;
-                  const secondary = document.querySelector('.secondary-action') as HTMLElement | null;
-                  const primaryStyle = primary && getComputedStyle(primary);
-                  const secondaryStyle = secondary && getComputedStyle(secondary);
-                  const visibleCards = document.querySelectorAll('.card').length;
-                  const firstBadges = document.querySelectorAll('.card:first-child .badge').length;
-                  const heading = document.querySelector('main h1');
-                  const activeState = input.state === 'loading'
-                    ? !!document.querySelector('[aria-busy="true"]')
-                    : input.state === 'empty'
-                      ? !!document.querySelector('.state-panel h2')?.textContent?.includes('No delivery data')
-                      : visibleCards === 3 && !!panel &&
-                        (input.state !== 'dense' || firstBadges === 5);
-                  return {
-                    horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1,
-                    chartClipped: !!chart && !!panel && chart.scrollWidth > panel.clientWidth + 1,
-                    legendClipped: !!legend && legend.scrollWidth > legend.clientWidth + 1,
-                    stickyOverlap: !!header && !!content && content.top < header.bottom - 1,
-                    primaryActionDistinct: !!primaryStyle && !!secondaryStyle &&
-                      `${primaryStyle.backgroundColor}|${primaryStyle.color}|${primaryStyle.borderColor}` !==
-                      `${secondaryStyle.backgroundColor}|${secondaryStyle.color}|${secondaryStyle.borderColor}`,
-                    stateConfirmed: activeState && !!heading &&
-                      document.documentElement.dataset.theme === input.theme,
-                    environmentConfirmed: devicePixelRatio === 1 &&
-                      document.fonts.check(`16px "${input.font}"`) &&
-                      getComputedStyle(document.body).fontFamily.includes(input.font) &&
-                      document.getAnimations().length === 0 &&
-                      document.body.innerText.includes('Dataset: fixture-v1'),
-                  };
-                }, { theme, state, font: BROWSER_EVAL_CONSTANTS.dashboardFont });
+                const facts = await page.evaluate(
+                  (input) => {
+                    const header = document.querySelector('.topbar')?.getBoundingClientRect();
+                    const content = document.querySelector('.content')?.getBoundingClientRect();
+                    const panel = document.querySelector('.chart-panel') as HTMLElement | null;
+                    const chart = document.querySelector('.chart') as HTMLElement | null;
+                    const legend = document.querySelector('.legend') as HTMLElement | null;
+                    const primary = document.querySelector('.primary-action') as HTMLElement | null;
+                    const secondary = document.querySelector(
+                      '.secondary-action',
+                    ) as HTMLElement | null;
+                    const primaryStyle = primary && getComputedStyle(primary);
+                    const secondaryStyle = secondary && getComputedStyle(secondary);
+                    const visibleCards = document.querySelectorAll('.card').length;
+                    const firstBadges = document.querySelectorAll(
+                      '.card:first-child .badge',
+                    ).length;
+                    const heading = document.querySelector('main h1');
+                    const activeState =
+                      input.state === 'loading'
+                        ? !!document.querySelector('[aria-busy="true"]')
+                        : input.state === 'empty'
+                          ? !!document
+                              .querySelector('.state-panel h2')
+                              ?.textContent?.includes('No delivery data')
+                          : visibleCards === 3 &&
+                            !!panel &&
+                            (input.state !== 'dense' || firstBadges === 5);
+                    return {
+                      horizontalOverflow: document.documentElement.scrollWidth > innerWidth + 1,
+                      chartClipped: !!chart && !!panel && chart.scrollWidth > panel.clientWidth + 1,
+                      legendClipped: !!legend && legend.scrollWidth > legend.clientWidth + 1,
+                      stickyOverlap: !!header && !!content && content.top < header.bottom - 1,
+                      primaryActionDistinct:
+                        !!primaryStyle &&
+                        !!secondaryStyle &&
+                        `${primaryStyle.backgroundColor}|${primaryStyle.color}|${primaryStyle.borderColor}` !==
+                          `${secondaryStyle.backgroundColor}|${secondaryStyle.color}|${secondaryStyle.borderColor}`,
+                      stateConfirmed:
+                        activeState &&
+                        !!heading &&
+                        document.documentElement.dataset.theme === input.theme,
+                      environmentConfirmed:
+                        devicePixelRatio === 1 &&
+                        document.fonts.check(`16px "${input.font}"`) &&
+                        getComputedStyle(document.body).fontFamily.includes(input.font) &&
+                        document.getAnimations().length === 0 &&
+                        document.body.innerText.includes('Dataset: fixture-v1'),
+                    };
+                  },
+                  { theme, state, font: BROWSER_EVAL_CONSTANTS.dashboardFont },
+                );
                 const ariaSnapshot = await page.locator('body').ariaSnapshot();
                 const semanticEvidence = {
                   mainCount: await page.getByRole('main').count(),
-                  headingCount: await page.getByRole('heading', { name: 'Delivery health' }).count(),
-                  primaryActionCount: await page.getByRole('button', { name: 'Investigate' }).count(),
+                  headingCount: await page
+                    .getByRole('heading', { name: 'Delivery health' })
+                    .count(),
+                  primaryActionCount: await page
+                    .getByRole('button', { name: 'Investigate' })
+                    .count(),
                 };
                 const screenshot = `${location.relative}/${captureId}.png`;
                 const bytes = await page.screenshot({
-                  type: 'png', fullPage: false, animations: 'disabled', timeout: 5_000,
+                  type: 'png',
+                  fullPage: false,
+                  animations: 'disabled',
+                  timeout: 5_000,
                 });
                 if (bytes.length < 1_000 || !bytes.subarray(0, 8).equals(PNG_HEADER))
                   throw new Error(`${captureId}: missing real PNG screenshot`);
                 writeFileSync(join(location.absolute, `${captureId}.png`), bytes, {
-                  flag: 'wx', mode: 0o600,
+                  flag: 'wx',
+                  mode: 0o600,
                 });
                 await page.keyboard.press('Tab');
-                const keyboardFocus = await page.evaluate(() =>
-                  (document.activeElement as HTMLElement | null)?.innerText?.trim() ?? '',
+                const keyboardFocus = await page.evaluate(
+                  () => (document.activeElement as HTMLElement | null)?.innerText?.trim() ?? '',
                 );
                 captures.push({
-                  captureId, ...viewport, theme, state, screenshot,
-                  screenshotSha256: sha256(bytes), ...facts, ariaSnapshot,
-                  keyboardFocus, semanticEvidence,
+                  captureId,
+                  ...viewport,
+                  theme,
+                  state,
+                  screenshot,
+                  screenshotSha256: sha256(bytes),
+                  ...facts,
+                  ariaSnapshot,
+                  keyboardFocus,
+                  semanticEvidence,
                 });
               }
             }
           }
-          if (errors.length) evidence.push(`Real browser application errors: ${errors.join(' | ').slice(0, 600)}`);
+          if (errors.length)
+            evidence.push(`Real browser application errors: ${errors.join(' | ').slice(0, 600)}`);
           browserChecksPassed = errors.length === 0;
         } finally {
           await context.close();
@@ -438,18 +516,26 @@ export async function runVisualVerificationBrowserScenario(
     });
 
     const ids = new Set(captures.map((capture) => capture.captureId));
-    browserChecksPassed = browserChecksPassed && captures.length === 24 && ids.size === 24 &&
-      captures.every((capture) =>
-        capture.stateConfirmed && capture.environmentConfirmed &&
-        capture.semanticEvidence.mainCount === 1 &&
-        capture.semanticEvidence.headingCount === 1 &&
-        capture.semanticEvidence.primaryActionCount === 1 &&
-        !!capture.keyboardFocus && capture.ariaSnapshot.includes('main') &&
-        capture.ariaSnapshot.includes('Investigate') &&
-        sha256(readFileSync(join(root, capture.screenshot))) === capture.screenshotSha256,
+    browserChecksPassed =
+      browserChecksPassed &&
+      captures.length === 24 &&
+      ids.size === 24 &&
+      captures.every(
+        (capture) =>
+          capture.stateConfirmed &&
+          capture.environmentConfirmed &&
+          capture.semanticEvidence.mainCount === 1 &&
+          capture.semanticEvidence.headingCount === 1 &&
+          capture.semanticEvidence.primaryActionCount === 1 &&
+          !!capture.keyboardFocus &&
+          capture.ariaSnapshot.includes('main') &&
+          capture.ariaSnapshot.includes('Investigate') &&
+          sha256(readFileSync(join(root, capture.screenshot))) === capture.screenshotSha256,
       );
     observedFailures = captures.flatMap(metricFailures).sort();
-    evidence.push(`Real Playwright Chromium ${browserVersion}: ${captures.length}/24 PNG captures, accessible DOM snapshots and keyboard focus: ${browserChecksPassed ? 'pass' : 'fail'}`);
+    evidence.push(
+      `Real Playwright Chromium ${browserVersion}: ${captures.length}/24 PNG captures, accessible DOM snapshots and keyboard focus: ${browserChecksPassed ? 'pass' : 'fail'}`,
+    );
     evidence.push(`Measured layout failures: ${observedFailures.join(', ') || 'none'}`);
     const audit = candidateAuditMatches(root, captures, browserVersion ?? '');
     evidence.push(`Candidate state matrix: ${audit.matrixMatches ? 'pass' : 'fail'}`);
@@ -459,7 +545,9 @@ export async function runVisualVerificationBrowserScenario(
     if (reviewAuthority && browserChecksPassed && browserVersion) {
       try {
         const verified = validateIndependentReview(
-          await reviewAuthority(captures, browserVersion), captures, browserVersion,
+          await reviewAuthority(captures, browserVersion),
+          captures,
+          browserVersion,
         );
         humanReviewVerified = verified.human;
         screenReaderVerified = verified.screenReader;
@@ -467,29 +555,65 @@ export async function runVisualVerificationBrowserScenario(
         evidence.push(`Independent review authority failed: ${detail(error)}`);
       }
     }
-    evidence.push(`Independent human visual inspection bound to 24 screenshot hashes: ${humanReviewVerified ? 'pass' : 'unavailable'}`);
-    evidence.push(`Live screen-reader interaction evidence for representative states: ${screenReaderVerified ? 'pass' : 'unavailable'}`);
-    const passed = browserChecksPassed && audit.matrixMatches && audit.auditMatches &&
-      audit.verdictMatches && humanReviewVerified && screenReaderVerified;
-    writeFixtureFile(root, `${location.relative}/receipt.json`, `${JSON.stringify({
-      scenarioId: VISUAL_VERIFICATION_BROWSER_SCENARIO,
-      browserVersion, captures, observedFailures,
-      humanReviewVerified, screenReaderVerified, passed,
-      limitations: ['ARIA snapshots and keyboard focus are browser evidence, not live screen-reader evidence.',
-        'Only an independently authenticated review authority can supply human and assistive-technology inspection.'],
-    }, null, 2)}\n`);
+    evidence.push(
+      `Independent human visual inspection bound to 24 screenshot hashes: ${humanReviewVerified ? 'pass' : 'unavailable'}`,
+    );
+    evidence.push(
+      `Live screen-reader interaction evidence for representative states: ${screenReaderVerified ? 'pass' : 'unavailable'}`,
+    );
+    const passed =
+      browserChecksPassed &&
+      audit.matrixMatches &&
+      audit.auditMatches &&
+      audit.verdictMatches &&
+      humanReviewVerified &&
+      screenReaderVerified;
+    writeFixtureFile(
+      root,
+      `${location.relative}/receipt.json`,
+      `${JSON.stringify(
+        {
+          scenarioId: VISUAL_VERIFICATION_BROWSER_SCENARIO,
+          browserVersion,
+          captures,
+          observedFailures,
+          humanReviewVerified,
+          screenReaderVerified,
+          passed,
+          limitations: [
+            'ARIA snapshots and keyboard focus are browser evidence, not live screen-reader evidence.',
+            'Only an independently authenticated review authority can supply human and assistive-technology inspection.',
+          ],
+        },
+        null,
+        2,
+      )}\n`,
+    );
     return {
-      score: { passed, quality: passed ? 1 : 0, verification: passed ? 1 : 0,
-        integrityFailure: false, evidence },
-      browserVersion, captures, artifactDirectory, observedFailures,
-      humanReviewVerified, screenReaderVerified,
+      score: {
+        passed,
+        quality: passed ? 1 : 0,
+        verification: passed ? 1 : 0,
+        integrityFailure: false,
+        evidence,
+      },
+      browserVersion,
+      captures,
+      artifactDirectory,
+      observedFailures,
+      humanReviewVerified,
+      screenReaderVerified,
     };
   } catch (error) {
     evidence.push(`Real browser visual verification failed: ${detail(error)}`);
     return {
       score: { passed: false, quality: 0, verification: 0, integrityFailure, evidence },
-      browserVersion, captures, artifactDirectory, observedFailures,
-      humanReviewVerified, screenReaderVerified,
+      browserVersion,
+      captures,
+      artifactDirectory,
+      observedFailures,
+      humanReviewVerified,
+      screenReaderVerified,
     };
   }
 }

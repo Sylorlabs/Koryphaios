@@ -35,7 +35,11 @@ describe('toast actions', () => {
     const undoNew = vi.fn();
     toastStore.success('Pinned', { duration: STAY, action: plain, actionLabel: 'Open' });
     toastStore.success('Archived', { duration: STAY, action: undoOld, actionLabel: UNDO_LABEL });
-    toastStore.success('Pinned again', { duration: STAY, action: undoNew, actionLabel: UNDO_LABEL });
+    toastStore.success('Pinned again', {
+      duration: STAY,
+      action: undoNew,
+      actionLabel: UNDO_LABEL,
+    });
 
     expect(toastStore.runLatestUndo()).toBe(true);
     expect(undoNew).toHaveBeenCalledTimes(1);

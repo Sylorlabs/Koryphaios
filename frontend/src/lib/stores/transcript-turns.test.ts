@@ -50,7 +50,11 @@ describe('partsToFeedEntries', () => {
       text: 'plan',
       metadata: { thinkingTokens: 12 },
     });
-    expect(second).toMatchObject({ thinkingStartedAt: 210, durationMs: 10, thinkingFinalized: true });
+    expect(second).toMatchObject({
+      thinkingStartedAt: 210,
+      durationMs: 10,
+      thinkingFinalized: true,
+    });
   });
 
   it('keeps an open reasoning part live', () => {
@@ -65,9 +69,7 @@ describe('partsToFeedEntries', () => {
   it('renders a running tool as a call row and a finished tool as a result row', () => {
     const rows = partsToFeedEntries({
       ...base,
-      parts: [
-        { kind: 'tool', callId: 'c', name: 'bash', input: { x: 1 }, startedAt: 10 },
-      ],
+      parts: [{ kind: 'tool', callId: 'c', name: 'bash', input: { x: 1 }, startedAt: 10 }],
     });
     expect(rows[0]).toMatchObject({
       type: 'tool_call',
@@ -83,7 +85,13 @@ describe('partsToFeedEntries', () => {
       text: 'Tool result (40ms): a.ts',
       metadata: {
         toolCall: { id: 'call-1', name: 'bash', input: { command: 'ls' } },
-        toolResult: { callId: 'call-1', name: 'bash', output: 'a.ts', isError: false, durationMs: 40 },
+        toolResult: {
+          callId: 'call-1',
+          name: 'bash',
+          output: 'a.ts',
+          isError: false,
+          durationMs: 40,
+        },
       },
     });
   });

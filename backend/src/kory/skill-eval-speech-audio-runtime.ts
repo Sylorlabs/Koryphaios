@@ -10,7 +10,12 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -126,7 +131,11 @@ const SHA256 = /^[a-f0-9]{64}$/iu;
 const LIMIT_MS = 180_000;
 const MAX_OUTPUT_BYTES = 24_000_000;
 
-function exec(binary: string, args: string[], binaryOutput = false): {
+function exec(
+  binary: string,
+  args: string[],
+  binaryOutput = false,
+): {
   status: number | null;
   stdout: Buffer | string;
   stderr: string;
@@ -153,7 +162,9 @@ function exec(binary: string, args: string[], binaryOutput = false): {
 function checked(binary: string, args: string[], binaryOutput = false): Buffer | string {
   const result = exec(binary, args, binaryOutput);
   if (result.status !== 0) {
-    throw new Error(`${binary} failed (${result.status}): ${(result.error ?? result.stderr).slice(-300)}`);
+    throw new Error(
+      `${binary} failed (${result.status}): ${(result.error ?? result.stderr).slice(-300)}`,
+    );
   }
   return result.stdout;
 }
@@ -164,17 +175,30 @@ function hash(path: string): string {
 
 function inputFile(path: string, expectedHash: string): void {
   if (!SHA256.test(expectedHash)) throw new Error('Missing pinned SHA-256 evidence');
-  if (!existsSync(path) || !lstatSync(path).isFile()) throw new Error(`Missing regular input file: ${path}`);
-  if (hash(path) !== expectedHash.toLowerCase()) throw new Error(`Source SHA-256 mismatch: ${path}`);
+  if (!existsSync(path) || !lstatSync(path).isFile())
+    throw new Error(`Missing regular input file: ${path}`);
+  if (hash(path) !== expectedHash.toLowerCase())
+    throw new Error(`Source SHA-256 mismatch: ${path}`);
 }
 
 function probe(path: string): AudioStreamIdentity {
-  if (!existsSync(path) || !lstatSync(path).isFile()) throw new Error(`Missing encoded audio: ${path}`);
-  const metadata = JSON.parse(String(checked('ffprobe', [
-    '-v', 'error', '-select_streams', 'a:0',
-    '-show_entries', 'stream=codec_name,sample_rate,channels:format=duration',
-    '-of', 'json', path,
-  ]))) as {
+  if (!existsSync(path) || !lstatSync(path).isFile())
+    throw new Error(`Missing encoded audio: ${path}`);
+  const metadata = JSON.parse(
+    String(
+      checked('ffprobe', [
+        '-v',
+        'error',
+        '-select_streams',
+        'a:0',
+        '-show_entries',
+        'stream=codec_name,sample_rate,channels:format=duration',
+        '-of',
+        'json',
+        path,
+      ]),
+    ),
+  ) as {
     streams?: Array<{ codec_name?: string; sample_rate?: string; channels?: number }>;
     format?: { duration?: string };
   };
@@ -182,17 +206,37 @@ function probe(path: string): AudioStreamIdentity {
   const sampleRate = Number(stream?.sample_rate);
   const channels = Number(stream?.channels);
   const durationSeconds = Number(metadata.format?.duration);
-  if (!stream?.codec_name || !Number.isInteger(sampleRate) || sampleRate < 8000 ||
-    !Number.isInteger(channels) || channels < 1 || channels > 8 ||
-    !Number.isFinite(durationSeconds) || durationSeconds < 0.2 || durationSeconds > 180) {
+  if (
+    !stream?.codec_name ||
+    !Number.isInteger(sampleRate) ||
+    sampleRate < 8000 ||
+    !Number.isInteger(channels) ||
+    channels < 1 ||
+    channels > 8 ||
+    !Number.isFinite(durationSeconds) ||
+    durationSeconds < 0.2 ||
+    durationSeconds > 180
+  ) {
     throw new Error('Invalid, missing, or out-of-bounds decoded audio metadata');
   }
-  return { path, sha256: hash(path), codec: stream.codec_name, sampleRate, channels, durationSeconds };
+  return {
+    path,
+    sha256: hash(path),
+    codec: stream.codec_name,
+    sampleRate,
+    channels,
+    durationSeconds,
+  };
 }
 
 function tokens(text: string): string[] {
-  return text.normalize('NFKC').toLocaleLowerCase('und')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/u).filter(Boolean);
+  return text
+    .normalize('NFKC')
+    .toLocaleLowerCase('und')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean);
 }
 
 function editDistance<T>(left: readonly T[], right: readonly T[]): number {
@@ -201,7 +245,8 @@ function editDistance<T>(left: readonly T[], right: readonly T[]): number {
     const row = [i];
     for (let j = 1; j <= right.length; j++) {
       row[j] = Math.min(
-        previous[j]! + 1, row[j - 1]! + 1,
+        previous[j]! + 1,
+        row[j - 1]! + 1,
         previous[j - 1]! + (left[i - 1] === right[j - 1] ? 0 : 1),
       );
     }
@@ -211,7 +256,10 @@ function editDistance<T>(left: readonly T[], right: readonly T[]): number {
 }
 
 /** Case/punctuation normalized, with numerals and named entities preserved. */
-export function speechRecognitionErrors(reference: string, hypothesis: string): {
+export function speechRecognitionErrors(
+  reference: string,
+  hypothesis: string,
+): {
   wer: number | null;
   cer: number | null;
   silenceHallucinatedWords: number | null;
@@ -231,8 +279,10 @@ export function speechRecognitionErrors(reference: string, hypothesis: string): 
 function entityFound(text: string, entity: string): boolean {
   const haystack = tokens(text);
   const needle = tokens(entity);
-  return needle.length > 0 && haystack.some((_, index) =>
-    needle.every((word, offset) => haystack[index + offset] === word));
+  return (
+    needle.length > 0 &&
+    haystack.some((_, index) => needle.every((word, offset) => haystack[index + offset] === word))
+  );
 }
 
 function createOutput(parent?: string): string {
@@ -255,42 +305,94 @@ export function runSpeechRecognitionProbe(
   outputParent?: string,
 ): SpeechAudioAsrResult {
   try {
-    if (!recording.sourceProvenance || !recording.recordingRights ||
-      !recording.referenceProvenance || !recording.language ||
-      !recording.speakerDescription || !recording.acousticCondition || !recording.device ||
-      !model.id || !model.language || recording.language !== model.language ||
-      recording.referenceTranscript.length > 10_000 || recording.criticalEntities.length > 30) {
-      throw new Error('Source rights, independent reference, signal context, or pinned model identity missing');
+    if (
+      !recording.sourceProvenance ||
+      !recording.recordingRights ||
+      !recording.referenceProvenance ||
+      !recording.language ||
+      !recording.speakerDescription ||
+      !recording.acousticCondition ||
+      !recording.device ||
+      !model.id ||
+      !model.language ||
+      recording.language !== model.language ||
+      recording.referenceTranscript.length > 10_000 ||
+      recording.criticalEntities.length > 30
+    ) {
+      throw new Error(
+        'Source rights, independent reference, signal context, or pinned model identity missing',
+      );
     }
     inputFile(recording.path, recording.sha256);
     inputFile(model.path, model.sha256);
     const source = probe(recording.path);
     const version = exec('whisper-cli', ['--version']);
-    if (version.status !== 0) throw new Error(`Real whisper-cli unavailable: ${version.error ?? version.stderr.slice(-120)}`);
-    const engineVersion = `${version.stdout}\n${version.stderr}`.match(/whisper\.cpp version:\s*([\w.-]+)/iu)?.[1];
+    if (version.status !== 0)
+      throw new Error(
+        `Real whisper-cli unavailable: ${version.error ?? version.stderr.slice(-120)}`,
+      );
+    const engineVersion = `${version.stdout}\n${version.stderr}`.match(
+      /whisper\.cpp version:\s*([\w.-]+)/iu,
+    )?.[1];
     if (!engineVersion) throw new Error('Cannot identify whisper.cpp runtime version');
     const directory = createOutput(outputParent);
     const wav = join(directory, 'inference-input.wav');
-    checked('ffmpeg', ['-v', 'error', '-nostdin', '-y', '-i', recording.path,
-      '-map', '0:a:0', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav]);
+    checked('ffmpeg', [
+      '-v',
+      'error',
+      '-nostdin',
+      '-y',
+      '-i',
+      recording.path,
+      '-map',
+      '0:a:0',
+      '-ac',
+      '1',
+      '-ar',
+      '16000',
+      '-c:a',
+      'pcm_s16le',
+      wav,
+    ]);
     const inferenceInput = probe(wav);
-    if (inferenceInput.sampleRate !== 16000 || inferenceInput.channels !== 1 ||
-      inferenceInput.codec !== 'pcm_s16le') throw new Error('Whisper input preprocessing mismatch');
+    if (
+      inferenceInput.sampleRate !== 16000 ||
+      inferenceInput.channels !== 1 ||
+      inferenceInput.codec !== 'pcm_s16le'
+    )
+      throw new Error('Whisper input preprocessing mismatch');
     const prefix = join(directory, 'inference');
     const observed = exec('whisper-cli', [
-      '-ng', '-m', model.path, '-f', wav, '-l', model.language,
-      '-oj', '-of', prefix, '-np',
+      '-ng',
+      '-m',
+      model.path,
+      '-f',
+      wav,
+      '-l',
+      model.language,
+      '-oj',
+      '-of',
+      prefix,
+      '-np',
     ]);
-    if (observed.status !== 0) throw new Error(`Real ASR inference failed: ${observed.error ?? observed.stderr.slice(-250)}`);
+    if (observed.status !== 0)
+      throw new Error(
+        `Real ASR inference failed: ${observed.error ?? observed.stderr.slice(-250)}`,
+      );
     const outputFile = prefix + '.json';
-    if (!existsSync(outputFile)) throw new Error('Whisper produced no independently inspectable inference JSON');
+    if (!existsSync(outputFile))
+      throw new Error('Whisper produced no independently inspectable inference JSON');
     const decoded = JSON.parse(readFileSync(outputFile, 'utf8')) as {
       result?: { language?: string };
       params?: { model?: string; language?: string };
       transcription?: Array<{ text?: string; offsets?: { from?: number; to?: number } }>;
     };
-    if (decoded.params?.model !== model.path || decoded.params?.language !== model.language ||
-      decoded.result?.language !== model.language || !Array.isArray(decoded.transcription)) {
+    if (
+      decoded.params?.model !== model.path ||
+      decoded.params?.language !== model.language ||
+      decoded.result?.language !== model.language ||
+      !Array.isArray(decoded.transcription)
+    ) {
       throw new Error('Whisper model, language, or transcription identity does not match request');
     }
     let previousEnd = 0;
@@ -300,10 +402,14 @@ export function runSpeechRecognitionProbe(
       const startMs = segment.offsets?.from;
       const endMs = segment.offsets?.to;
       const blankMarker = segment.text?.trim() === '[BLANK_AUDIO]';
-      if (typeof segment.text !== 'string' || !Number.isFinite(startMs) ||
-        !Number.isFinite(endMs) || startMs! < previousEnd || endMs! < startMs! ||
-        (endMs! > inferenceInput.durationSeconds * 1000 + 500 &&
-          (!blankMarker || endMs! > 30_000))) {
+      if (
+        typeof segment.text !== 'string' ||
+        !Number.isFinite(startMs) ||
+        !Number.isFinite(endMs) ||
+        startMs! < previousEnd ||
+        endMs! < startMs! ||
+        (endMs! > inferenceInput.durationSeconds * 1000 + 500 && (!blankMarker || endMs! > 30_000))
+      ) {
         throw new Error('ASR segment timestamps invalid or out of bounds');
       }
       if (blankMarker) silenceMarkers++;
@@ -313,14 +419,19 @@ export function runSpeechRecognitionProbe(
       previousEnd = endMs!;
       return { text: segment.text, startMs: startMs!, endMs: endMs! };
     });
-    const transcript = segments.filter((segment) => segment.text.trim() !== '[BLANK_AUDIO]')
-      .map((segment) => segment.text.trim()).join(' ').trim();
+    const transcript = segments
+      .filter((segment) => segment.text.trim() !== '[BLANK_AUDIO]')
+      .map((segment) => segment.text.trim())
+      .join(' ')
+      .trim();
     const errorRates = speechRecognitionErrors(recording.referenceTranscript, transcript);
     const evidenceFile = join(directory, 'evidence.json');
     const evidence = {
-      engine: 'whisper.cpp/whisper-cli' as const, engineVersion,
+      engine: 'whisper.cpp/whisper-cli' as const,
+      engineVersion,
       model: { id: model.id, sha256: model.sha256, language: model.language },
-      input: source, inferenceInput,
+      input: source,
+      inferenceInput,
       sourceProvenance: recording.sourceProvenance,
       recordingRights: recording.recordingRights,
       referenceProvenance: recording.referenceProvenance,
@@ -329,11 +440,17 @@ export function runSpeechRecognitionProbe(
       device: recording.device,
       slices: recording.slices,
       referenceTranscript: recording.referenceTranscript,
-      transcript, segments, silenceMarkers, timestampPaddingObserved,
+      transcript,
+      segments,
+      silenceMarkers,
+      timestampPaddingObserved,
       batchWallMs: observed.elapsedMs,
       realTimeFactor: observed.elapsedMs / (inferenceInput.durationSeconds * 1000),
       ...errorRates,
-      criticalEntities: recording.criticalEntities.map((text) => ({ text, found: entityFound(transcript, text) })),
+      criticalEntities: recording.criticalEntities.map((text) => ({
+        text,
+        found: entityFound(transcript, text),
+      })),
       evidenceFile,
     };
     writeFileSync(evidenceFile, JSON.stringify(evidence, null, 2));
@@ -354,7 +471,10 @@ export interface SpeechAudioTtsRequest {
 }
 
 /** Measures actual independently decoded 8 kHz mono G.711 mu-law delivery. */
-export function inspectSpeechDelivery(encodedPath: string, referenceDurationSeconds: number): {
+export function inspectSpeechDelivery(
+  encodedPath: string,
+  referenceDurationSeconds: number,
+): {
   passed: boolean;
   blockers: string[];
   identity?: AudioStreamIdentity;
@@ -363,11 +483,31 @@ export function inspectSpeechDelivery(encodedPath: string, referenceDurationSeco
   clippedFraction?: number;
 } {
   try {
-    if (!Number.isFinite(referenceDurationSeconds) || referenceDurationSeconds < 0.2 ||
-      referenceDurationSeconds > 180) throw new Error('Reference audio duration is invalid');
+    if (
+      !Number.isFinite(referenceDurationSeconds) ||
+      referenceDurationSeconds < 0.2 ||
+      referenceDurationSeconds > 180
+    )
+      throw new Error('Reference audio duration is invalid');
     const identity = probe(encodedPath);
-    const raw = checked('ffmpeg', ['-v', 'error', '-nostdin', '-i', encodedPath,
-      '-f', 's16le', '-ac', '1', '-ar', '16000', '-'], true) as Buffer;
+    const raw = checked(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-nostdin',
+        '-i',
+        encodedPath,
+        '-f',
+        's16le',
+        '-ac',
+        '1',
+        '-ar',
+        '16000',
+        '-',
+      ],
+      true,
+    ) as Buffer;
     const blockers: string[] = [];
     if (identity.sampleRate !== 8000 || identity.channels !== 1 || identity.codec !== 'pcm_mulaw') {
       blockers.push('Encoded target is not 8 kHz mono G.711 mu-law');
@@ -402,9 +542,15 @@ export function runSpeechSynthesisProbe(
   outputParent?: string,
 ): SpeechAudioTtsResult {
   try {
-    if (!request.voice || !request.locale || !request.voiceRights ||
-      !request.sourceText.trim() || !request.normalizedSpokenText.trim() ||
-      request.normalizedSpokenText.length > 1000 || /\bclone\b/iu.test(request.voiceRights)) {
+    if (
+      !request.voice ||
+      !request.locale ||
+      !request.voiceRights ||
+      !request.sourceText.trim() ||
+      !request.normalizedSpokenText.trim() ||
+      request.normalizedSpokenText.length > 1000 ||
+      /\bclone\b/iu.test(request.voiceRights)
+    ) {
       throw new Error('Speech content, system voice identity, or voice authorization missing');
     }
     // Some versions of `say` silently substitute the default voice for an
@@ -414,17 +560,42 @@ export function runSpeechSynthesisProbe(
       const match = line.match(/^(.+?)\s+([a-z]{2}_[A-Z]{2})\s+#/u);
       return match?.[1]?.trim() === request.voice && match[2] === request.locale;
     });
-    if (!declaredVoice) throw new Error('Requested system voice/locale absent from installed voice catalog');
+    if (!declaredVoice)
+      throw new Error('Requested system voice/locale absent from installed voice catalog');
     const directory = createOutput(outputParent);
     const sourceFile = join(directory, 'host-synthesis.aiff');
-    const observed = exec('say', ['-v', request.voice, '-o', sourceFile, '--', request.normalizedSpokenText]);
+    const observed = exec('say', [
+      '-v',
+      request.voice,
+      '-o',
+      sourceFile,
+      '--',
+      request.normalizedSpokenText,
+    ]);
     if (observed.status !== 0 || !existsSync(sourceFile)) {
-      throw new Error(`Real authorized system voice unavailable: ${observed.error ?? observed.stderr.slice(-250)}`);
+      throw new Error(
+        `Real authorized system voice unavailable: ${observed.error ?? observed.stderr.slice(-250)}`,
+      );
     }
     const source = probe(sourceFile);
     const encodedFile = join(directory, 'telephony-delivery.wav');
-    checked('ffmpeg', ['-v', 'error', '-nostdin', '-y', '-i', sourceFile,
-      '-map', '0:a:0', '-ac', '1', '-ar', '8000', '-c:a', 'pcm_mulaw', encodedFile]);
+    checked('ffmpeg', [
+      '-v',
+      'error',
+      '-nostdin',
+      '-y',
+      '-i',
+      sourceFile,
+      '-map',
+      '0:a:0',
+      '-ac',
+      '1',
+      '-ar',
+      '8000',
+      '-c:a',
+      'pcm_mulaw',
+      encodedFile,
+    ]);
     const inspected = inspectSpeechDelivery(encodedFile, source.durationSeconds);
     if (!inspected.passed || !inspected.identity) {
       throw new Error(`Encoded TTS delivery failed: ${inspected.blockers.join('; ')}`);
@@ -432,34 +603,47 @@ export function runSpeechSynthesisProbe(
     const evidenceFile = join(directory, 'evidence.json');
     const evidence = {
       engine: 'macOS say' as const,
-      voice: request.voice, locale: request.locale, voiceRights: request.voiceRights,
-      sourceText: request.sourceText, normalizedSpokenText: request.normalizedSpokenText,
-      synthesisWallMs: observed.elapsedMs, firstAudioMs: null,
-      source, encoded: inspected.identity,
-      decodedPeak: inspected.peak!, decodedRms: inspected.rms!,
-      clippedSampleFraction: inspected.clippedFraction!, evidenceFile,
-      physicalPlayback: 'unverified' as const, humanListening: 'unverified' as const,
+      voice: request.voice,
+      locale: request.locale,
+      voiceRights: request.voiceRights,
+      sourceText: request.sourceText,
+      normalizedSpokenText: request.normalizedSpokenText,
+      synthesisWallMs: observed.elapsedMs,
+      firstAudioMs: null,
+      source,
+      encoded: inspected.identity,
+      decodedPeak: inspected.peak!,
+      decodedRms: inspected.rms!,
+      clippedSampleFraction: inspected.clippedFraction!,
+      evidenceFile,
+      physicalPlayback: 'unverified' as const,
+      humanListening: 'unverified' as const,
     };
     writeFileSync(evidenceFile, JSON.stringify(evidence, null, 2));
     return { probePassed: true, blockers: [], evidence };
   } catch (error) {
-    return { probePassed: false, blockers: [error instanceof Error ? error.message : String(error)] };
+    return {
+      probePassed: false,
+      blockers: [error instanceof Error ? error.message : String(error)],
+    };
   }
 }
 
 /** The sidecar has intentionally NOT replaced either full-task gate. */
 export function speechAudioFullTaskGaps(scenarioId: string): string[] {
-  if (scenarioId === SPEECH_AUDIO_SCENARIOS.recognition) return [
-    'No complete, authorized, versioned held-out corpus with independently verified accent/language, noise, overlap, device, long-utterance and silence references.',
-    'No two real version-pinned streaming ASR configurations, live interim/final/endpoint/reconnect traces, measured partial/final latency, or rollback execution.',
-    'No independently verified speaker diarization/turn scoring or critical-entity migration threshold across representative slices.',
-    'No same-model skill/no-skill agent pair and independent blind semantic review.',
-  ];
-  if (scenarioId === SPEECH_AUDIO_SCENARIOS.synthesis) return [
-    'Host system voice exposes no independently pinned versioned provider model or complete rights/target-voice provenance for the intended deployment.',
-    'No representative independently reviewed multilingual pronunciation, human listening evaluation, or real target-device playback captures.',
-    'No streaming first-audio/interrupt/reconnect latency measurements or provider migration/rollback execution.',
-    'No same-model skill/no-skill agent pair and independent blind semantic review.',
-  ];
+  if (scenarioId === SPEECH_AUDIO_SCENARIOS.recognition)
+    return [
+      'No complete, authorized, versioned held-out corpus with independently verified accent/language, noise, overlap, device, long-utterance and silence references.',
+      'No two real version-pinned streaming ASR configurations, live interim/final/endpoint/reconnect traces, measured partial/final latency, or rollback execution.',
+      'No independently verified speaker diarization/turn scoring or critical-entity migration threshold across representative slices.',
+      'No same-model skill/no-skill agent pair and independent blind semantic review.',
+    ];
+  if (scenarioId === SPEECH_AUDIO_SCENARIOS.synthesis)
+    return [
+      'Host system voice exposes no independently pinned versioned provider model or complete rights/target-voice provenance for the intended deployment.',
+      'No representative independently reviewed multilingual pronunciation, human listening evaluation, or real target-device playback captures.',
+      'No streaming first-audio/interrupt/reconnect latency measurements or provider migration/rollback execution.',
+      'No same-model skill/no-skill agent pair and independent blind semantic review.',
+    ];
   return ['Unknown speech/audio V5 scenario'];
 }

@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { basename, extname, join, resolve } from 'node:path';
 import { type Page } from 'playwright';
 import { isContainedBy } from '../../runtime/platform';
-import type { SkillEvalDeterministicScorer, SkillEvalFixtureMaterializer } from './skill-eval-execution';
+import type {
+  SkillEvalDeterministicScorer,
+  SkillEvalFixtureMaterializer,
+} from './skill-eval-execution';
 import { readFixtureText, readJsonArtifact, writeFixtureFile } from './skill-eval-fixture-helpers';
 import {
   chromiumBlockers,
@@ -42,13 +45,17 @@ export function vueNativeBrowserReadiness(): string[] {
   return [...pinnedPackageBlockers([['vue', VUE_VERSION]]), ...chromiumBlockers()];
 }
 
-const PACKAGE = `${JSON.stringify({
-  name: 'kory-native-vue3-browser-eval',
-  private: true,
-  type: 'module',
-  dependencies: { vue: VUE_VERSION },
-  scripts: { build: 'bun build src/main.js --target browser --outdir dist' },
-}, null, 2)}\n`;
+const PACKAGE = `${JSON.stringify(
+  {
+    name: 'kory-native-vue3-browser-eval',
+    private: true,
+    type: 'module',
+    dependencies: { vue: VUE_VERSION },
+    scripts: { build: 'bun build src/main.js --target browser --outdir dist' },
+  },
+  null,
+  2,
+)}\n`;
 const INDEX = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vue browser evaluation</title><link rel="stylesheet" href="/theme.css"></head><body><div id="app"></div><script type="module" src="/main.js"></script></body></html>\n`;
 const STYLE = `*{box-sizing:border-box}body{margin:0;background:#f0f4fb;color:#1c2737;font:16px/1.45 system-ui,sans-serif}.shell{margin:16px auto;padding:12px;max-width:760px;min-width:0}.panel{background:white;border:1px solid #9fb0c9;border-radius:8px;padding:16px;min-width:0}.nav{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}h1{font-size:1.35rem}button,input{font:inherit;max-width:100%}button{background:white;border:1px solid #8398b7;padding:6px 10px;border-radius:5px;cursor:pointer}input{min-width:0;padding:7px;border:1px solid #8398b7;border-radius:5px}button:focus-visible,input:focus-visible,[tabindex]:focus-visible{outline:3px solid #376ac8;outline-offset:2px}.field{display:grid;gap:5px;max-width:450px;margin:10px 0}.status{overflow-wrap:anywhere}@media(max-width:400px){.shell{padding:6px}.panel{padding:8px}.nav{gap:3px}}\n`;
 const MAIN = `import { createApp, version } from 'vue';
@@ -230,46 +237,67 @@ function fixedFiles(number: Scenario): Record<string, string> {
 
 function materialize(root: string, number: Scenario): void {
   const blockers = vueNativeBrowserReadiness();
-  if (blockers.length) throw new Error(`Native Vue 3 browser fixture unavailable: ${blockers.join('; ')}`);
+  if (blockers.length)
+    throw new Error(`Native Vue 3 browser fixture unavailable: ${blockers.join('; ')}`);
   writeVueBrowserFixtureContract(root, number);
 }
 
 /** Contract-only authoring for integrity checks; no runtime availability or browser evidence. */
 export function writeVueBrowserFixtureContract(root: string, number: Scenario): void {
-  for (const [path, content] of Object.entries(fixedFiles(number))) writeFixtureFile(root, path, content);
+  for (const [path, content] of Object.entries(fixedFiles(number)))
+    writeFixtureFile(root, path, content);
   writeFixtureFile(root, 'src/App.js', number === 1 ? ROUTE_STARTER : DRAFT_STARTER);
   writeFixtureFile(root, 'verification/result.json', '{"status":"not-run"}\n');
-  writeFixtureFile(root, 'README.md', `# Native Vue ${VUE_VERSION} browser task ${number}\n\n` +
-    (number === 1
-      ? 'Repair the route watcher, request abortion, stale completion, unmount, browser history, keyboard navigation, focus recovery, empty/error/retry, and persisted preference in src/App.js.\n' +
-        'Provide these stable, accessible interfaces so browser automation can exercise the finished behavior:\n' +
-        '- Show an [aria-busy="true"] loading status inside [data-route-component] during the initial request.\n' +
-        '- Provide #detail-input; Enter navigates with browser history to /detail/<entered-id>, updates the rendered route, and keeps the input focused.\n' +
-        '- For failed loads focus a #retry button; after a successful retry transfer focus to the heading marked [data-detail-id].\n' +
-        '- Show [data-empty] for a successful empty result.\n' +
-        '- Provide a #favorite toggle with aria-pressed that persists the selected state across unmount, remount, and page reload.\n' +
-        'Preserve the fixed harness, real browser history, request lifecycle, and cleanup behavior; the service intentionally delivers late completions after abort.\n'
-      : 'Repair child draft ownership, same-ID refresh, entity-ID reuse, explicit reset, cancellation, validation/focus, and exactly one commit emit in src/App.js.\n') +
-    'The harness and service are evaluator-owned. Do not modify them. Run `bun install --offline --ignore-scripts` and `bun run build` with the pinned Vue runtime. Provide verification/result.json with status=verified, vueVersion, broaderSkill=frontend-engineering, nearNeighbor (angular-engineering for task 1, react-engineering for task 2), and a specific recovery explanation. The independent scorer checks actual Chromium behavior. Client-side routing here uses browser history, not the vue-router library; SSR/hydration is not part of this fixture.\n');
+  writeFixtureFile(
+    root,
+    'README.md',
+    `# Native Vue ${VUE_VERSION} browser task ${number}\n\n` +
+      (number === 1
+        ? 'Repair the route watcher, request abortion, stale completion, unmount, browser history, keyboard navigation, focus recovery, empty/error/retry, and persisted preference in src/App.js.\n' +
+          'Provide these stable, accessible interfaces so browser automation can exercise the finished behavior:\n' +
+          '- Show an [aria-busy="true"] loading status inside [data-route-component] during the initial request.\n' +
+          '- Provide #detail-input; Enter navigates with browser history to /detail/<entered-id>, updates the rendered route, and keeps the input focused.\n' +
+          '- For failed loads focus a #retry button; after a successful retry transfer focus to the heading marked [data-detail-id].\n' +
+          '- Show [data-empty] for a successful empty result.\n' +
+          '- Provide a #favorite toggle with aria-pressed that persists the selected state across unmount, remount, and page reload.\n' +
+          'Preserve the fixed harness, real browser history, request lifecycle, and cleanup behavior; the service intentionally delivers late completions after abort.\n'
+        : 'Repair child draft ownership, same-ID refresh, entity-ID reuse, explicit reset, cancellation, validation/focus, and exactly one commit emit in src/App.js.\n') +
+      'The harness and service are evaluator-owned. Do not modify them. Run `bun install --offline --ignore-scripts` and `bun run build` with the pinned Vue runtime. Provide verification/result.json with status=verified, vueVersion, broaderSkill=frontend-engineering, nearNeighbor (angular-engineering for task 1, react-engineering for task 2), and a specific recovery explanation. The independent scorer checks actual Chromium behavior. Client-side routing here uses browser history, not the vue-router library; SSR/hydration is not part of this fixture.\n',
+  );
 }
 
-export const VUE_NATIVE_BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] = [
-  { id: 'vue-engineering/native-vue-history-browser@2', realRuntime: true,
-    get readinessBlockers() { return vueNativeBrowserReadiness(); },
-    matches: (scenario) => scenario.id === ROUTE_SCENARIO,
-    materialize: (root) => materialize(root, 1) },
-  { id: 'vue-engineering/native-vue-draft-browser@1', realRuntime: true,
-    get readinessBlockers() { return vueNativeBrowserReadiness(); },
-    matches: (scenario) => scenario.id === DRAFT_SCENARIO,
-    materialize: (root) => materialize(root, 2) },
-];
+export const VUE_NATIVE_BROWSER_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] =
+  [
+    {
+      id: 'vue-engineering/native-vue-history-browser@2',
+      realRuntime: true,
+      get readinessBlockers() {
+        return vueNativeBrowserReadiness();
+      },
+      matches: (scenario) => scenario.id === ROUTE_SCENARIO,
+      materialize: (root) => materialize(root, 1),
+    },
+    {
+      id: 'vue-engineering/native-vue-draft-browser@1',
+      realRuntime: true,
+      get readinessBlockers() {
+        return vueNativeBrowserReadiness();
+      },
+      matches: (scenario) => scenario.id === DRAFT_SCENARIO,
+      materialize: (root) => materialize(root, 2),
+    },
+  ];
 
 function claimedEvidence(root: string, number: Scenario): boolean {
   const candidate = readJsonArtifact<Record<string, unknown>>(root, 'verification/result.json');
-  return candidate?.status === 'verified' && candidate.vueVersion === VUE_VERSION &&
+  return (
+    candidate?.status === 'verified' &&
+    candidate.vueVersion === VUE_VERSION &&
     candidate.broaderSkill === 'frontend-engineering' &&
     candidate.nearNeighbor === (number === 1 ? 'angular-engineering' : 'react-engineering') &&
-    typeof candidate.recovery === 'string' && candidate.recovery.trim().length >= 32;
+    typeof candidate.recovery === 'string' &&
+    candidate.recovery.trim().length >= 32
+  );
 }
 
 async function exerciseRoute(page: Page, checks: RuntimeCheck[]): Promise<void> {
@@ -280,16 +308,26 @@ async function exerciseRoute(page: Page, checks: RuntimeCheck[]): Promise<void> 
       watcherEffects: (window as any).__vueNativeLifecycle.watcherEffects,
       active: (window as any).__vueNativeSource.active,
     }));
-    return [metrics.vue === VUE_VERSION && metrics.watcherEffects >= 1 && metrics.active === 1, JSON.stringify(metrics)];
+    return [
+      metrics.vue === VUE_VERSION && metrics.watcherEffects >= 1 && metrics.active === 1,
+      JSON.stringify(metrics),
+    ];
   });
   await tryCheck(checks, 'out-of-order response cannot overwrite latest route', async () => {
     await page.locator('#nav-fast').click();
     await page.locator('[data-detail-id="fast"]').waitFor();
     await page.waitForTimeout(430);
-    const value = await page.locator('[data-detail-id]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-detail-id')));
+    const value = await page
+      .locator('[data-detail-id]')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-detail-id')));
     const source = await page.evaluate(() => (window as any).__vueNativeSource);
-    return [value.join(',') === 'fast' && source.active === 0 && source.aborted >= 1 && source.lateAfterAbort >= 1,
-      `visible=${value.join(',')}; source=${JSON.stringify(source)}`];
+    return [
+      value.join(',') === 'fast' &&
+        source.active === 0 &&
+        source.aborted >= 1 &&
+        source.lateAfterAbort >= 1,
+      `visible=${value.join(',')}; source=${JSON.stringify(source)}`,
+    ];
   });
   await tryCheck(checks, 'history back/forward updates rendered Vue route', async () => {
     await page.goBack();
@@ -297,7 +335,10 @@ async function exerciseRoute(page: Page, checks: RuntimeCheck[]): Promise<void> 
     await page.goForward();
     await page.locator('[data-detail-id="fast"]').waitFor();
     const route = await page.evaluate(() => (window as any).__vueNativeLifecycle.route);
-    return [route === 'fast' && new URL(page.url()).pathname === '/detail/fast', `route=${route}; url=${page.url()}`];
+    return [
+      route === 'fast' && new URL(page.url()).pathname === '/detail/fast',
+      `route=${route}; url=${page.url()}`,
+    ];
   });
   await tryCheck(checks, 'keyboard route navigation and input focus', async () => {
     const input = page.locator('#detail-input');
@@ -305,7 +346,10 @@ async function exerciseRoute(page: Page, checks: RuntimeCheck[]): Promise<void> 
     await input.press('Enter');
     await page.locator('[data-detail-id="keyboard"]').waitFor();
     const focused = await input.evaluate((element) => document.activeElement === element);
-    return [focused && new URL(page.url()).pathname === '/detail/keyboard', `focused=${focused}; url=${page.url()}`];
+    return [
+      focused && new URL(page.url()).pathname === '/detail/keyboard',
+      `focused=${focused}; url=${page.url()}`,
+    ];
   });
   await tryCheck(checks, 'error retry recovers and restores keyboard focus', async () => {
     await page.locator('#nav-error').click();
@@ -317,37 +361,56 @@ async function exerciseRoute(page: Page, checks: RuntimeCheck[]): Promise<void> 
     await result.waitFor();
     const restored = await result.evaluate((element) => document.activeElement === element);
     const attempts = await page.evaluate(() => (window as any).__vueNativeSource.attempts.error);
-    return [focused && restored && attempts >= 2, `retryFocused=${focused}; detailFocused=${restored}; attempts=${attempts}`];
+    return [
+      focused && restored && attempts >= 2,
+      `retryFocused=${focused}; detailFocused=${restored}; attempts=${attempts}`,
+    ];
   });
   await tryCheck(checks, 'empty state and mobile viewport', async () => {
     await page.locator('#nav-empty').click();
     await page.locator('[data-empty]').waitFor();
     await page.setViewportSize({ width: 390, height: 710 });
-    const dimensions = await page.evaluate(() => [document.documentElement.scrollWidth, innerWidth]);
+    const dimensions = await page.evaluate(() => [
+      document.documentElement.scrollWidth,
+      innerWidth,
+    ]);
     return [dimensions[0] <= dimensions[1], `document/viewport=${dimensions.join('/')}`];
   });
-  await tryCheck(checks, 'unmount disposes watchers and aborted work, remount retains preference', async () => {
-    await page.locator('#favorite').click();
-    await page.locator('#nav-slow').click();
-    await page.waitForFunction(() => (window as any).__vueNativeSource.active > 0);
-    await page.locator('#hide').click();
-    await page.locator('[data-unmounted]').waitFor();
-    const watchers = await page.evaluate(() => (window as any).__vueNativeLifecycle.watcherEffects);
-    await page.waitForTimeout(420);
-    const source = await page.evaluate(() => (window as any).__vueNativeSource);
-    const lifecycle = await page.evaluate(() => ({
-      mounts: (window as any).__vueNativeLifecycle.mounts,
-      unmounts: (window as any).__vueNativeLifecycle.unmounts,
-      routeListeners: (window as any).__vueNativeLifecycle.routeListeners,
-    }));
-    await page.locator('#show').click();
-    await page.locator('#favorite[aria-pressed="true"]').waitFor();
-    await page.reload();
-    await page.locator('#favorite[aria-pressed="true"]').waitFor();
-    return [watchers === 0 && source.active === 0 && source.aborted >= 2 && source.lateAfterAbort >= 2 &&
-      lifecycle.mounts >= 1 && lifecycle.unmounts >= 1 && lifecycle.routeListeners === 1,
-      `watchers=${watchers}; lifecycle=${JSON.stringify(lifecycle)}; service=${JSON.stringify(source)}`];
-  });
+  await tryCheck(
+    checks,
+    'unmount disposes watchers and aborted work, remount retains preference',
+    async () => {
+      await page.locator('#favorite').click();
+      await page.locator('#nav-slow').click();
+      await page.waitForFunction(() => (window as any).__vueNativeSource.active > 0);
+      await page.locator('#hide').click();
+      await page.locator('[data-unmounted]').waitFor();
+      const watchers = await page.evaluate(
+        () => (window as any).__vueNativeLifecycle.watcherEffects,
+      );
+      await page.waitForTimeout(420);
+      const source = await page.evaluate(() => (window as any).__vueNativeSource);
+      const lifecycle = await page.evaluate(() => ({
+        mounts: (window as any).__vueNativeLifecycle.mounts,
+        unmounts: (window as any).__vueNativeLifecycle.unmounts,
+        routeListeners: (window as any).__vueNativeLifecycle.routeListeners,
+      }));
+      await page.locator('#show').click();
+      await page.locator('#favorite[aria-pressed="true"]').waitFor();
+      await page.reload();
+      await page.locator('#favorite[aria-pressed="true"]').waitFor();
+      return [
+        watchers === 0 &&
+          source.active === 0 &&
+          source.aborted >= 2 &&
+          source.lateAfterAbort >= 2 &&
+          lifecycle.mounts >= 1 &&
+          lifecycle.unmounts >= 1 &&
+          lifecycle.routeListeners === 1,
+        `watchers=${watchers}; lifecycle=${JSON.stringify(lifecycle)}; service=${JSON.stringify(source)}`,
+      ];
+    },
+  );
 }
 
 async function exerciseDraft(page: Page, checks: RuntimeCheck[]): Promise<void> {
@@ -357,15 +420,23 @@ async function exerciseDraft(page: Page, checks: RuntimeCheck[]): Promise<void> 
       vue: (window as any).__vueNativeVersion,
       watcherEffects: (window as any).__vueNativeDraft.watcherEffects,
     }));
-    return [metrics.vue === VUE_VERSION && metrics.watcherEffects >= 1 &&
-      await page.locator('#name').inputValue() === 'Alice', JSON.stringify(metrics)];
+    return [
+      metrics.vue === VUE_VERSION &&
+        metrics.watcherEffects >= 1 &&
+        (await page.locator('#name').inputValue()) === 'Alice',
+      JSON.stringify(metrics),
+    ];
   });
   await tryCheck(checks, 'dirty child draft does not mutate props or emit', async () => {
     await page.locator('#name').fill('Unsaved Alice');
     await page.locator('#email').fill('draft@example.test');
     const ledger = await page.evaluate(() => (window as any).__vueNativeDraft);
-    return [ledger.emits === 0 && ledger.record.name === 'Alice' && ledger.record.email === 'alice@example.test',
-      JSON.stringify({ emits: ledger.emits, record: ledger.record })];
+    return [
+      ledger.emits === 0 &&
+        ledger.record.name === 'Alice' &&
+        ledger.record.email === 'alice@example.test',
+      JSON.stringify({ emits: ledger.emits, record: ledger.record }),
+    ];
   });
   await tryCheck(checks, 'same entity refresh preserves dirty draft and focus', async () => {
     const field = page.locator('#name');
@@ -377,21 +448,32 @@ async function exerciseDraft(page: Page, checks: RuntimeCheck[]): Promise<void> 
       emits: (window as any).__vueNativeDraft.emits,
       name: (window as any).__vueNativeDraft.record.name,
     }));
-    return [current === 'Unsaved Alice' && focused && ledger.emits === 0 && ledger.name === 'Alice server',
-      JSON.stringify({ current, focused, ledger })];
+    return [
+      current === 'Unsaved Alice' &&
+        focused &&
+        ledger.emits === 0 &&
+        ledger.name === 'Alice server',
+      JSON.stringify({ current, focused, ledger }),
+    ];
   });
-  await tryCheck(checks, 'entity switch and ID reuse discard stale draft without emitting', async () => {
-    await page.locator('#switch-beta').click();
-    const beta = await page.locator('#name').inputValue();
-    await page.locator('#name').fill('dirty Bob');
-    await page.locator('#switch-alpha').click();
-    const alpha = await page.locator('#name').inputValue();
-    await page.locator('#switch-beta').click();
-    const repeat = await page.locator('#name').inputValue();
-    const count = await page.evaluate(() => (window as any).__vueNativeDraft.emits);
-    return [beta === 'Bob' && alpha === 'Alice' && repeat === 'Bob' && count === 0,
-      `beta=${beta}, alpha=${alpha}, betaReused=${repeat}, emits=${count}`];
-  });
+  await tryCheck(
+    checks,
+    'entity switch and ID reuse discard stale draft without emitting',
+    async () => {
+      await page.locator('#switch-beta').click();
+      const beta = await page.locator('#name').inputValue();
+      await page.locator('#name').fill('dirty Bob');
+      await page.locator('#switch-alpha').click();
+      const alpha = await page.locator('#name').inputValue();
+      await page.locator('#switch-beta').click();
+      const repeat = await page.locator('#name').inputValue();
+      const count = await page.evaluate(() => (window as any).__vueNativeDraft.emits);
+      return [
+        beta === 'Bob' && alpha === 'Alice' && repeat === 'Bob' && count === 0,
+        `beta=${beta}, alpha=${alpha}, betaReused=${repeat}, emits=${count}`,
+      ];
+    },
+  );
   await tryCheck(checks, 'invalid commit blocks emit and focuses first invalid input', async () => {
     await page.locator('#name').fill('  ');
     await page.locator('#save').click();
@@ -407,8 +489,12 @@ async function exerciseDraft(page: Page, checks: RuntimeCheck[]): Promise<void> 
     await page.locator('#name').fill('cancel this');
     await page.locator('#cancel').click();
     const cancelled = await page.locator('#name').inputValue();
-    return [reset === 'Bob' && cancelled === 'Bob' && await page.locator('[role="alert"]').count() === 0,
-      `reset=${reset}; cancelled=${cancelled}`];
+    return [
+      reset === 'Bob' &&
+        cancelled === 'Bob' &&
+        (await page.locator('[role="alert"]').count()) === 0,
+      `reset=${reset}; cancelled=${cancelled}`,
+    ];
   });
   await tryCheck(checks, 'single explicit commit without watcher feedback', async () => {
     await page.locator('#name').fill('Bob saved');
@@ -420,31 +506,50 @@ async function exerciseDraft(page: Page, checks: RuntimeCheck[]): Promise<void> 
       payloads: (window as any).__vueNativeDraft.payloads,
       record: (window as any).__vueNativeDraft.record,
     }));
-    return [ledger.emits === 1 && ledger.payloads.length === 1 &&
-      ledger.payloads[0].id === 'beta' && ledger.payloads[0].name === 'Bob saved' && ledger.record.name === 'Bob saved',
-      JSON.stringify(ledger)];
+    return [
+      ledger.emits === 1 &&
+        ledger.payloads.length === 1 &&
+        ledger.payloads[0].id === 'beta' &&
+        ledger.payloads[0].name === 'Bob saved' &&
+        ledger.record.name === 'Bob saved',
+      JSON.stringify(ledger),
+    ];
   });
-  await tryCheck(checks, 'unmount ends child watcher scope; responsive remount preserves parent', async () => {
-    await page.setViewportSize({ width: 390, height: 690 });
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
-    await page.locator('#hide').click();
-    await page.locator('[data-unmounted]').waitFor();
-    const inactive = await page.evaluate(() => ({
-      watcherEffects: (window as any).__vueNativeDraft.watcherEffects,
-      unmounts: (window as any).__vueNativeDraft.unmounts,
-    }));
-    await page.locator('#show').click();
-    await page.locator('#name').waitFor();
-    const remounted = await page.locator('#name').inputValue();
-    return [!overflow && inactive.watcherEffects === 0 && inactive.unmounts >= 1 && remounted === 'Bob saved',
-      `overflow=${overflow}; ${JSON.stringify(inactive)}; remounted=${remounted}`];
-  });
+  await tryCheck(
+    checks,
+    'unmount ends child watcher scope; responsive remount preserves parent',
+    async () => {
+      await page.setViewportSize({ width: 390, height: 690 });
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+      await page.locator('#hide').click();
+      await page.locator('[data-unmounted]').waitFor();
+      const inactive = await page.evaluate(() => ({
+        watcherEffects: (window as any).__vueNativeDraft.watcherEffects,
+        unmounts: (window as any).__vueNativeDraft.unmounts,
+      }));
+      await page.locator('#show').click();
+      await page.locator('#name').waitFor();
+      const remounted = await page.locator('#name').inputValue();
+      return [
+        !overflow &&
+          inactive.watcherEffects === 0 &&
+          inactive.unmounts >= 1 &&
+          remounted === 'Bob saved',
+        `overflow=${overflow}; ${JSON.stringify(inactive)}; remounted=${remounted}`,
+      ];
+    },
+  );
 }
 
-async function runNativeBrowser(root: string, number: Scenario, checks: RuntimeCheck[]): Promise<void> {
+async function runNativeBrowser(
+  root: string,
+  number: Scenario,
+  checks: RuntimeCheck[],
+): Promise<void> {
   const sandbox = mkdtempSync(join(tmpdir(), 'kory-vue3-native-browser-'));
   try {
-    for (const [path, content] of Object.entries(fixedFiles(number))) writeFixtureFile(sandbox, path, content);
+    for (const [path, content] of Object.entries(fixedFiles(number)))
+      writeFixtureFile(sandbox, path, content);
     // Only this bounded candidate source is copied. No candidate scripts, build
     // config, node_modules, auxiliary files, or symlinks enter the runtime.
     writeFixtureFile(sandbox, 'src/App.js', readFixtureText(root, 'src/App.js'));
@@ -455,24 +560,42 @@ async function runNativeBrowser(root: string, number: Scenario, checks: RuntimeC
       outdir: join(sandbox, 'dist'),
       minify: true,
     });
-    if (!build.success) throw new Error(`Vue production build failed: ${build.logs.map((log) => log.message).join(' | ')}`);
+    if (!build.success)
+      throw new Error(
+        `Vue production build failed: ${build.logs.map((log) => log.message).join(' | ')}`,
+      );
     const entry = build.outputs.find((output) => output.kind === 'entry-point');
     if (!entry) throw new Error('Vue production build generated no browser entry');
-    writeFileSync(join(sandbox, 'index.html'), INDEX.replace('/main.js', `/dist/${basename(entry.path)}`));
-    recordCheck(checks, 'actual pinned Vue production browser bundle', true,
-      `Vue ${VUE_VERSION}, ${build.outputs.length} bundled outputs`, false);
+    writeFileSync(
+      join(sandbox, 'index.html'),
+      INDEX.replace('/main.js', `/dist/${basename(entry.path)}`),
+    );
+    recordCheck(
+      checks,
+      'actual pinned Vue production browser bundle',
+      true,
+      `Vue ${VUE_VERSION}, ${build.outputs.length} bundled outputs`,
+      false,
+    );
 
     const server = createServer((request, response) => {
       try {
         const uri = new URL(request.url || '/', 'http://127.0.0.1');
-        const route = uri.pathname.startsWith('/detail/') || uri.pathname === '/' ? '/index.html' : uri.pathname;
+        const route =
+          uri.pathname.startsWith('/detail/') || uri.pathname === '/'
+            ? '/index.html'
+            : uri.pathname;
         const path = resolve(sandbox, `.${route}`);
         if (!isContainedBy(sandbox, path) || !existsSync(path) || !lstatSync(path).isFile()) {
           response.writeHead(404).end('Not found');
           return;
         }
-        const type = extname(path) === '.js' ? 'text/javascript' :
-          extname(path) === '.css' ? 'text/css' : 'text/html';
+        const type =
+          extname(path) === '.js'
+            ? 'text/javascript'
+            : extname(path) === '.css'
+              ? 'text/css'
+              : 'text/html';
         response.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store' });
         response.end(readFileSync(path));
       } catch {
@@ -485,19 +608,28 @@ async function runNativeBrowser(root: string, number: Scenario, checks: RuntimeC
     });
     try {
       const bound = server.address();
-      if (!bound || typeof bound === 'string') throw new Error('Vue browser server has no bound port');
+      if (!bound || typeof bound === 'string')
+        throw new Error('Vue browser server has no bound port');
       await withRealChromium(async (browser) => {
         const context = await browser.newContext({ viewport: { width: 830, height: 720 } });
         try {
           const page = await context.newPage();
           page.setDefaultTimeout(2_500);
           const pageErrors: string[] = [];
-          page.on('pageerror', (error) => { pageErrors.push(error.message); });
-          await page.goto(`http://127.0.0.1:${bound.port}${number === 1 ? '/detail/slow' : '/'}`, { waitUntil: 'load' });
+          page.on('pageerror', (error) => {
+            pageErrors.push(error.message);
+          });
+          await page.goto(`http://127.0.0.1:${bound.port}${number === 1 ? '/detail/slow' : '/'}`, {
+            waitUntil: 'load',
+          });
           if (number === 1) await exerciseRoute(page, checks);
           else await exerciseDraft(page, checks);
-          recordCheck(checks, 'Chromium Vue execution without uncaught page exceptions', pageErrors.length === 0,
-            pageErrors.join(' | ') || `Chromium ${browser.version()}, Vue ${VUE_VERSION}`);
+          recordCheck(
+            checks,
+            'Chromium Vue execution without uncaught page exceptions',
+            pageErrors.length === 0,
+            pageErrors.join(' | ') || `Chromium ${browser.version()}, Vue ${VUE_VERSION}`,
+          );
         } finally {
           await context.close();
         }
@@ -516,27 +648,54 @@ async function score(root: string, number: Scenario) {
   const fixed = fixedFiles(number);
   const untampered = fixedFilesUnmodified(root, fixed);
   const bounded = safeCandidateTree(root, ['src']);
-  recordCheck(checks, 'immutable evaluator harness and bounded candidate input', untampered && bounded,
-    `immutable=${untampered}; safe candidate=${bounded}`, false);
+  recordCheck(
+    checks,
+    'immutable evaluator harness and bounded candidate input',
+    untampered && bounded,
+    `immutable=${untampered}; safe candidate=${bounded}`,
+    false,
+  );
   if (!untampered || !bounded) return finishChecks(checks, true);
   const blockers = vueNativeBrowserReadiness();
-  if (blockers.length) return finishChecks(blockers.map((reason) => ({
-    name: 'native Vue/Chromium runtime unavailable', passed: false, detail: reason, browser: false,
-  })));
-  recordCheck(checks, 'candidate provided Vue/version/scope/recovery declaration', claimedEvidence(root, number),
-    `Vue ${VUE_VERSION}; near-neighbor=${number === 1 ? 'angular-engineering' : 'react-engineering'}`, false);
+  if (blockers.length)
+    return finishChecks(
+      blockers.map((reason) => ({
+        name: 'native Vue/Chromium runtime unavailable',
+        passed: false,
+        detail: reason,
+        browser: false,
+      })),
+    );
+  recordCheck(
+    checks,
+    'candidate provided Vue/version/scope/recovery declaration',
+    claimedEvidence(root, number),
+    `Vue ${VUE_VERSION}; near-neighbor=${number === 1 ? 'angular-engineering' : 'react-engineering'}`,
+    false,
+  );
   try {
     await runNativeBrowser(root, number, checks);
   } catch (error) {
-    recordCheck(checks, 'native Vue production server/browser execution', false,
-      error instanceof Error ? error.message.slice(0, 900) : String(error), true);
+    recordCheck(
+      checks,
+      'native Vue production server/browser execution',
+      false,
+      error instanceof Error ? error.message.slice(0, 900) : String(error),
+      true,
+    );
   }
   return finishChecks(checks);
 }
 
 export const VUE_NATIVE_BROWSER_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] = [
-  { id: 'vue-engineering/native-vue-history-browser-scorer@1', scenarioIds: [ROUTE_SCENARIO],
-    score: ({ workingDirectory }) => score(workingDirectory, 1) },
-  { id: 'vue-engineering/native-vue-draft-browser-scorer@1', scenarioIds: [DRAFT_SCENARIO],
-    score: ({ workingDirectory }) => score(workingDirectory, 2) },
+  {
+    id: 'vue-engineering/native-vue-history-browser-scorer@1',
+    scenarioIds: [ROUTE_SCENARIO],
+    score: ({ workingDirectory }) => score(workingDirectory, 1),
+  },
+  {
+    id: 'vue-engineering/native-vue-draft-browser-scorer@1',
+    scenarioIds: [DRAFT_SCENARIO],
+    score: ({ workingDirectory }) => score(workingDirectory, 2),
+  },
 ];

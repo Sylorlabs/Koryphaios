@@ -4,12 +4,7 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { userConfirmedImageInput } from './attachment-admission';
-import type {
-  ModelParameterKey,
-  ProviderConfig,
-  ModelDef,
-  ProviderName,
-} from '@koryphaios/shared';
+import type { ModelParameterKey, ProviderConfig, ModelDef, ProviderName } from '@koryphaios/shared';
 import { sanitizeModelParameterValues } from '@koryphaios/shared';
 import {
   type Provider,

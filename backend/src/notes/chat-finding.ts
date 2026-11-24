@@ -50,9 +50,13 @@ export function buildChatFinding(
 
   const provenanceRows = [
     ['Session', inlineCode(sessionId)],
-    input.source.messageId ? ['Message', inlineCode(cleanScalar(input.source.messageId, 240))] : null,
+    input.source.messageId
+      ? ['Message', inlineCode(cleanScalar(input.source.messageId, 240))]
+      : null,
     input.source.role ? ['Role', inlineCode(cleanScalar(input.source.role, 120))] : null,
-    input.source.provider ? ['Provider', inlineCode(cleanScalar(input.source.provider, 240))] : null,
+    input.source.provider
+      ? ['Provider', inlineCode(cleanScalar(input.source.provider, 240))]
+      : null,
     input.source.model ? ['Model', inlineCode(cleanScalar(input.source.model, 240))] : null,
     ['Recorded', inlineCode(recordedAt.toISOString())],
   ].filter((row): row is string[] => Boolean(row));

@@ -5,24 +5,13 @@
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "ai",
-    "retrieval",
-    "search"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["ai", "retrieval", "search"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 6000,
-  "broader": [
-    "llm-application-engineering"
-  ],
+  "broader": ["llm-application-engineering"],
   "facets": [],
-  "requires": [
-    "verification",
-    "llm-evaluation"
-  ],
+  "requires": ["verification", "llm-evaluation"],
   "conflicts": [],
   "activation": [
     "retrieval augmented generation",
@@ -90,13 +79,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "prompt-context-engineering"
-        ],
-        "tags": [
-          "ambiguous",
-          "neighbor-boundary"
-        ]
+        "adjacentSkills": ["prompt-context-engineering"],
+        "tags": ["ambiguous", "neighbor-boundary"]
       },
       {
         "id": "rag-retrieval-systems-ambiguous-2",
@@ -104,13 +88,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "vector-search-systems"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["vector-search-systems"],
+        "tags": ["ambiguous", "scope-control"]
       },
       {
         "id": "rag-retrieval-systems-ambiguous-3",
@@ -118,13 +97,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "llm-evaluation"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["ambiguous", "scope-control"]
       }
     ],
     "adversarial": [
@@ -134,13 +108,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "testing-engineering"
-        ],
-        "tags": [
-          "adversarial",
-          "quoted-decoy"
-        ]
+        "adjacentSkills": ["testing-engineering"],
+        "tags": ["adversarial", "quoted-decoy"]
       },
       {
         "id": "rag-retrieval-systems-adversarial-2",
@@ -148,13 +117,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "incident-response"
-        ],
-        "tags": [
-          "adversarial",
-          "scope-control"
-        ]
+        "adjacentSkills": ["incident-response"],
+        "tags": ["adversarial", "scope-control"]
       },
       {
         "id": "rag-retrieval-systems-adversarial-3",
@@ -162,13 +126,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "documentation"
-        ],
-        "tags": [
-          "adversarial",
-          "scope-control"
-        ]
+        "adjacentSkills": ["documentation"],
+        "tags": ["adversarial", "scope-control"]
       }
     ]
   },

@@ -138,7 +138,9 @@ export async function mergeForkCoordinated(
   if (!fork) throw new NotFoundError('Session', request.forkSessionId);
   const sourceId = fork.forkedFromSessionId;
   if (!sourceId) {
-    throw new ValidationError('This chat was not forked from another chat, so there is nothing to merge back.');
+    throw new ValidationError(
+      'This chat was not forked from another chat, so there is nothing to merge back.',
+    );
   }
   if (!(await deps.getSession(sourceId))) {
     throw new ConflictError('The chat this fork came from no longer exists.');

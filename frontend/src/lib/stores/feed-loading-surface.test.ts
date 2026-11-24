@@ -134,9 +134,7 @@ describe('chat loading surface', () => {
     expect(feedStore.feed.some((entry) => entry.id === 'arch-tool-1')).toBe(false);
 
     pending.timeline.resolve(json({ ok: true, data: { timeline: [] } }));
-    pending.context.resolve(
-      json({ ok: true, lastUsage: null, data: [archivedTool('tool-1')] }),
-    );
+    pending.context.resolve(json({ ok: true, lastUsage: null, data: [archivedTool('tool-1')] }));
     await loading;
 
     expect(feedStore.isLoadingSession).toBe(false);
@@ -159,7 +157,7 @@ describe('chat loading surface', () => {
     expect(feedStore.isLoadingSession).toBe(false);
   });
 
-  it('does not let a superseded load clear the newer load\'s spinner', async () => {
+  it("does not let a superseded load clear the newer load's spinner", async () => {
     const sessionId = 'loading-gate-race';
     state.activeSessionId = sessionId;
     const first = lane();
@@ -170,12 +168,16 @@ describe('chat loading surface', () => {
 
     const older = feedStore.loadSessionMessages(sessionId, MESSAGES);
     await vi.waitFor(() => {
-      expect(state.apiFetch.mock.calls.filter(([path]) => path.includes('/timetravel'))).toHaveLength(1);
+      expect(
+        state.apiFetch.mock.calls.filter(([path]) => path.includes('/timetravel')),
+      ).toHaveLength(1);
     });
     current = second;
     const newer = feedStore.loadSessionMessages(sessionId, MESSAGES);
     await vi.waitFor(() => {
-      expect(state.apiFetch.mock.calls.filter(([path]) => path.includes('/timetravel'))).toHaveLength(2);
+      expect(
+        state.apiFetch.mock.calls.filter(([path]) => path.includes('/timetravel')),
+      ).toHaveLength(2);
     });
 
     // The newer load reveals at its own text commit; that is the instant-open

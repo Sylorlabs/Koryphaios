@@ -5,15 +5,25 @@ import { resolveToolPermissionPolicy } from '../permission-policy';
 import { canonicalizePath } from '../../runtime/platform';
 
 test.each(['yolo', 'guarded', 'ask', 'edits', 'custom'] as const)(
-  'Critic commands require an argument-bound approval in %s', async (permissionMode) => {
+  'Critic commands require an argument-bound approval in %s',
+  async (permissionMode) => {
     const registry = new ToolRegistry();
-    const run = mock(async (_ctx, call) => ({ callId: call.id, name: call.name, output: 'executed', isError: false, durationMs: 0 }));
+    const run = mock(async (_ctx, call) => ({
+      callId: call.id,
+      name: call.name,
+      output: 'executed',
+      isError: false,
+      durationMs: 0,
+    }));
     registry.register({ name: 'bash', description: 'test', inputSchema: {}, run });
     const approve = mock(async () => false);
     const ctx = {
-      sessionId: 'review', workingDirectory: process.cwd(), callerRole: 'critic' as const,
+      sessionId: 'review',
+      workingDirectory: process.cwd(),
+      callerRole: 'critic' as const,
       permissionPolicy: resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, permissionMode }),
-      requestToolApproval: approve, approvedToolCallIds: new Set<string>(),
+      requestToolApproval: approve,
+      approvedToolCallIds: new Set<string>(),
     };
     const call = { id: 'same-id', name: 'bash', input: { command: 'bun test' } };
     expect((await registry.execute(ctx, call)).isError).toBe(true);
@@ -30,14 +40,29 @@ test.each(['yolo', 'guarded', 'ask', 'edits', 'custom'] as const)(
 
 test('explicit blocks prevent a Critic request from reaching the approver', async () => {
   const registry = new ToolRegistry();
-  const run = mock(async (_ctx, call) => ({ callId: call.id, name: call.name, output: '', isError: false, durationMs: 0 }));
+  const run = mock(async (_ctx, call) => ({
+    callId: call.id,
+    name: call.name,
+    output: '',
+    isError: false,
+    durationMs: 0,
+  }));
   registry.register({ name: 'bash', description: '', inputSchema: {}, run });
   const approve = mock(async () => true);
-  const result = await registry.execute({
-    sessionId: 'review', workingDirectory: process.cwd(), callerRole: 'critic',
-    permissionPolicy: resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, permissionMode: 'yolo', toolBlocklist: ['bash'] }),
-    requestToolApproval: approve,
-  }, { id: 'blocked', name: 'bash', input: { command: 'bun test' } });
+  const result = await registry.execute(
+    {
+      sessionId: 'review',
+      workingDirectory: process.cwd(),
+      callerRole: 'critic',
+      permissionPolicy: resolveToolPermissionPolicy({
+        ...DEFAULT_AGENT_SETTINGS,
+        permissionMode: 'yolo',
+        toolBlocklist: ['bash'],
+      }),
+      requestToolApproval: approve,
+    },
+    { id: 'blocked', name: 'bash', input: { command: 'bun test' } },
+  );
   expect(result.isError).toBe(true);
   expect(approve).not.toHaveBeenCalled();
   expect(run).not.toHaveBeenCalled();
@@ -45,27 +70,50 @@ test('explicit blocks prevent a Critic request from reaching the approver', asyn
 
 test('derived review contexts honor a block added while approval is pending', async () => {
   const registry = new ToolRegistry();
-  const run = mock(async (_ctx, call) => ({ callId: call.id, name: call.name, output: '', isError: false, durationMs: 0 }));
+  const run = mock(async (_ctx, call) => ({
+    callId: call.id,
+    name: call.name,
+    output: '',
+    isError: false,
+    durationMs: 0,
+  }));
   registry.register({ name: 'bash', description: '', inputSchema: {}, run });
   let policy = resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, permissionMode: 'yolo' });
   let release!: (approved: boolean) => void;
   let entered!: () => void;
-  const approvalEntered = new Promise<void>((resolve) => { entered = resolve; });
+  const approvalEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
   const root = canonicalizePath(process.cwd());
   const ctx: ToolContext = {
-    sessionId: 'review', workingDirectory: root, callerRole: 'critic',
-    requiredWorkspaceRoot: root, reviewWorkspaceRoot: root,
-    get permissionPolicy() { return policy; },
+    sessionId: 'review',
+    workingDirectory: root,
+    callerRole: 'critic',
+    requiredWorkspaceRoot: root,
+    reviewWorkspaceRoot: root,
+    get permissionPolicy() {
+      return policy;
+    },
     requestToolApproval: async () => {
       entered();
-      return new Promise<boolean>((resolve) => { release = resolve; });
+      return new Promise<boolean>((resolve) => {
+        release = resolve;
+      });
     },
   };
   const specialist = deriveToolContext(ctx, { agentId: 'review-specialist' });
   const scoped = deriveToolContext(specialist, { signal: new AbortController().signal });
-  const result = registry.execute(scoped, { id: 'revoked', name: 'bash', input: { command: 'bun test' } });
+  const result = registry.execute(scoped, {
+    id: 'revoked',
+    name: 'bash',
+    input: { command: 'bun test' },
+  });
   await approvalEntered;
-  policy = resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, permissionMode: 'yolo', toolBlocklist: ['bash'] });
+  policy = resolveToolPermissionPolicy({
+    ...DEFAULT_AGENT_SETTINGS,
+    permissionMode: 'yolo',
+    toolBlocklist: ['bash'],
+  });
   release(true);
   expect((await result).isError).toBe(true);
   expect(run).not.toHaveBeenCalled();

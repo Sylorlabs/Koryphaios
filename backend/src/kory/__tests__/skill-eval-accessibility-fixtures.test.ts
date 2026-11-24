@@ -20,7 +20,12 @@ const roots: string[] = [];
 type RecordedWebSession = {
   browser: string;
   locale: string;
-  keyboard: { focusOnOpen: string; tabStops: string[]; closedByEscape: boolean; focusAfterEscape: string };
+  keyboard: {
+    focusOnOpen: string;
+    tabStops: string[];
+    closedByEscape: boolean;
+    focusAfterEscape: string;
+  };
   errorState: { visible: boolean; role: string; text: string };
   zoom200: {
     horizontalOverflow: boolean;
@@ -98,7 +103,8 @@ describe('V5 accessibility verification infrastructure', () => {
       environment: {
         browser: session.browser,
         locale: session.locale,
-        screenReader: 'orca 43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800',
+        screenReader:
+          'orca 43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800',
       },
       keyboard: session.keyboard,
       errorState: session.errorState,
@@ -111,7 +117,9 @@ describe('V5 accessibility verification infrastructure', () => {
           at: 'orca 43.1',
           manual: true,
           passed: true,
-          observations: ['Speech Dispatcher log records "Löschen fehlgeschlagen. Erneut versuchen." for the opened dialog'],
+          observations: [
+            'Speech Dispatcher log records "Löschen fehlgeschlagen. Erneut versuchen." for the opened dialog',
+          ],
         },
         {
           task: 'focus-escape-defect',
@@ -120,7 +128,9 @@ describe('V5 accessibility verification infrastructure', () => {
           at: 'orca 43.1',
           manual: true,
           passed: true,
-          observations: ['recorded tabStops show focus left the dialog onto the Seitenreiter (document body)'],
+          observations: [
+            'recorded tabStops show focus left the dialog onto the Seitenreiter (document body)',
+          ],
         },
         {
           task: 'zoom-200-reflow',
@@ -129,7 +139,9 @@ describe('V5 accessibility verification infrastructure', () => {
           at: 'orca 43.1',
           manual: true,
           passed: true,
-          observations: ['dialog fits at 200 percent zoom: no horizontal overflow at viewport width 640'],
+          observations: [
+            'dialog fits at 200 percent zoom: no horizontal overflow at viewport width 640',
+          ],
         },
       ],
       automation: {
@@ -141,7 +153,8 @@ describe('V5 accessibility verification infrastructure', () => {
       conflicts: [
         {
           claimId: 'focus-trap',
-          evidence: 'the recorded tabStops place one Tab stop on the document body outside the dialog',
+          evidence:
+            'the recorded tabStops place one Tab stop on the document body outside the dialog',
           verdict: 'rejected',
         },
       ],
@@ -151,7 +164,12 @@ describe('V5 accessibility verification infrastructure', () => {
       untested: ['NVDA on Windows and VoiceOver on macOS were not driven'],
     };
     const score = async () =>
-      scorer.score({ workingDirectory: root, scenario, observation: {} as never, experiment: {} as never });
+      scorer.score({
+        workingDirectory: root,
+        scenario,
+        observation: {} as never,
+        experiment: {} as never,
+      });
 
     writeFixtureFile(root, '.kory-eval/web-verification.json', JSON.stringify(base));
     const accepted = await score();
@@ -161,7 +179,8 @@ describe('V5 accessibility verification infrastructure', () => {
     writeFixtureFile(root, '.kory-eval/web-verification.json', JSON.stringify(base));
     expect((await score()).passed).toBe(false);
 
-    base.environment.screenReader = 'orca 43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800';
+    base.environment.screenReader =
+      'orca 43.1 with Speech Dispatcher 0.11.4 on Debian bookworm (aarch64), Xvfb 1280x800';
     base.keyboard.focusOnOpen = 'confirm';
     writeFixtureFile(root, '.kory-eval/web-verification.json', JSON.stringify(base));
     expect((await score()).passed).toBe(false);
@@ -223,7 +242,8 @@ describe('V5 accessibility verification infrastructure', () => {
       conflicts: [
         {
           claimId: 'spoken-state-change',
-          evidence: 'the recording captured no utterance, so the Espresso assertion cannot attest spoken output',
+          evidence:
+            'the recording captured no utterance, so the Espresso assertion cannot attest spoken output',
           verdict: 'rejected',
         },
         {
@@ -243,7 +263,12 @@ describe('V5 accessibility verification infrastructure', () => {
       untested: ['spoken output was not captured and Switch Access input was not exercised'],
     };
     const score = async () =>
-      scorer.score({ workingDirectory: root, scenario, observation: {} as never, experiment: {} as never });
+      scorer.score({
+        workingDirectory: root,
+        scenario,
+        observation: {} as never,
+        experiment: {} as never,
+      });
 
     writeFixtureFile(root, '.kory-eval/android-verification.json', JSON.stringify(base));
     const accepted = await score();
@@ -315,9 +340,11 @@ describe('V5 accessibility verification infrastructure', () => {
         const cdp = await context.newCDPSession(page);
         await cdp.send('Accessibility.enable');
         const tree = await cdp.send('Accessibility.getFullAXTree');
-        expect(tree.nodes.some((node) =>
-          node.role?.value === 'dialog' && node.name?.value === 'Remove item',
-        )).toBe(true);
+        expect(
+          tree.nodes.some(
+            (node) => node.role?.value === 'dialog' && node.name?.value === 'Remove item',
+          ),
+        ).toBe(true);
 
         await page.setViewportSize({ width: 320, height: 768 });
         const reflow = await page.evaluate(() => ({
@@ -326,8 +353,9 @@ describe('V5 accessibility verification infrastructure', () => {
         }));
         expect(reflow.viewport).toBe(320);
         expect(reflow.content).toBeGreaterThan(reflow.viewport);
-        expect((await page.screenshot()).subarray(0, 8))
-          .toEqual(Buffer.from('89504e470d0a1a0a', 'hex'));
+        expect((await page.screenshot()).subarray(0, 8)).toEqual(
+          Buffer.from('89504e470d0a1a0a', 'hex'),
+        );
       } finally {
         await browser.close();
       }

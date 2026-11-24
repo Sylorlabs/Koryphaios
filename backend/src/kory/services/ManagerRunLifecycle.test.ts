@@ -96,7 +96,9 @@ describe('ManagerRunLifecycle', () => {
       await lifecycle.phase(handle, 'streaming', 'late_callback');
 
       expect(coordinator.get(SESSION_ID)).toMatchObject({
-        runId: handle.runId, status: 'active', revision: 1,
+        runId: handle.runId,
+        status: 'active',
+        revision: 1,
       });
       await expect(lifecycle.begin(SESSION_ID, 'overlapping_turn')).rejects.toThrow();
       await coordinator.drainOutbox();
@@ -106,7 +108,9 @@ describe('ManagerRunLifecycle', () => {
       expect(settled).toMatchObject({
         runId: handle.runId,
         phase: outcome === 'complete' ? 'done' : outcome === 'fail' ? 'error' : 'cancelled',
-        status: 'terminal', terminalReason: 'original_outcome', revision: 2,
+        status: 'terminal',
+        terminalReason: 'original_outcome',
+        revision: 2,
       });
       const next = await lifecycle.begin(SESSION_ID, 'next_turn');
       // Repeated settlement and a late callback cannot release the new lease.
@@ -126,7 +130,10 @@ describe('ManagerRunLifecycle', () => {
       VALUES ('scope-proc', '${SESSION_ID}', 'running', 'agent-tool', 'owned-child', 1)`);
     await lifecycle.waitForProcesses(handle, ['scope-proc']);
     await settle();
-    expect(coordinator.get(SESSION_ID)).toMatchObject({ status: 'waiting', phase: 'waiting_terminal' });
+    expect(coordinator.get(SESSION_ID)).toMatchObject({
+      status: 'waiting',
+      phase: 'waiting_terminal',
+    });
     expect(lifecycle.listProcessWaits()).toHaveLength(1);
     await expect(lifecycle.begin(SESSION_ID, 'overlapping_turn')).rejects.toThrow();
   });

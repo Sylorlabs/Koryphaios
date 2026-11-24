@@ -123,12 +123,16 @@ export function renderInventory(rows: PromotionInventoryRow[]) {
 
 export function runInventoryAudit(root: string, script: string, args: string[] = []) {
   // Keep the caller's environment authoritative; Bun children must not reload .env.
-  const result = spawnSync(process.execPath, ['--no-env-file', resolve(root, 'scripts', script), ...args], {
-    cwd: root,
-    encoding: 'utf8',
-    timeout: 300_000,
-    maxBuffer: 32 * 1024 * 1024,
-  });
+  const result = spawnSync(
+    process.execPath,
+    ['--no-env-file', resolve(root, 'scripts', script), ...args],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 300_000,
+      maxBuffer: 32 * 1024 * 1024,
+    },
+  );
   if (result.error || (result.status !== 0 && result.status !== 1)) {
     throw result.error ?? new Error(`${script} did not complete: ${result.stderr}`);
   }

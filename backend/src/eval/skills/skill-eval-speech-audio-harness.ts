@@ -78,13 +78,10 @@ export function speechAudioHarnessReadiness(): string[] {
     if (!voice) blockers.push('espeak-ng version could not be pinned.');
   }
   if (existsSync(PYTHON)) {
-    const model = run(
-      'bash',
-      [
-        '-lc',
-        `"${PYTHON}" -c "import faster_whisper,ctranslate2,av;print('ok')"`,
-      ],
-    );
+    const model = run('bash', [
+      '-lc',
+      `"${PYTHON}" -c "import faster_whisper,ctranslate2,av;print('ok')"`,
+    ]);
     if (model.status !== 0) blockers.push('faster-whisper runtime is not importable.');
   }
   return blockers;
@@ -105,31 +102,28 @@ function measureUtterance(text: string): {
 } {
   const directory = join(RUNTIME_ROOT, 'corpus');
   mkdirSync(directory, { recursive: true });
-  const audio = join(directory, `${createHash('sha256').update(text).digest('hex').slice(0, 16)}.wav`);
-  const rendered = run('espeak-ng', [
-    '-s', '150', '-v', 'en-us', '-w', audio, text,
-  ]);
+  const audio = join(
+    directory,
+    `${createHash('sha256').update(text).digest('hex').slice(0, 16)}.wav`,
+  );
+  const rendered = run('espeak-ng', ['-s', '150', '-v', 'en-us', '-w', audio, text]);
   if (rendered.status !== 0) {
     throw new Error(`espeak-ng render failed: ${rendered.stderr?.slice(0, 200) ?? 'unknown'}`);
   }
   const bytes = readFileSync(audio);
-  const measured = spawnSync(
-    PYTHON,
-    ['-c', MEASURE_PYTHON, audio, text, MODEL_NAME],
-    {
-      encoding: 'utf8',
-      timeout: 180_000,
-      maxBuffer: 8_000_000,
-      env: {
-        PATH: process.env.PATH ?? '',
-        HOME: RUNTIME_ROOT,
-        HF_HOME,
-        HF_HUB_OFFLINE: '1',
-        LANG: 'C',
-        NO_COLOR: '1',
-      },
+  const measured = spawnSync(PYTHON, ['-c', MEASURE_PYTHON, audio, text, MODEL_NAME], {
+    encoding: 'utf8',
+    timeout: 180_000,
+    maxBuffer: 8_000_000,
+    env: {
+      PATH: process.env.PATH ?? '',
+      HOME: RUNTIME_ROOT,
+      HF_HOME,
+      HF_HUB_OFFLINE: '1',
+      LANG: 'C',
+      NO_COLOR: '1',
     },
-  );
+  });
   if (measured.status !== 0 || !measured.stdout) {
     throw new Error(`ASR measure failed: ${measured.stderr?.slice(0, 300) ?? 'unknown'}`);
   }
@@ -217,11 +211,19 @@ function recognitionVectors(): RecognitionVector[] {
 
 const RECOGNITION_CONTRACT = `Evaluate supplied ASR measurement evidence for a synthetic held-out corpus. Input has utteranceId, reference, hypothesis, substitutions, deletions, insertions, audioSha256, model, partialLatencyMs, finalLatencyMs, budget{partialMs,finalMs}, entityVerdict{missed,hallucinations,slices}, scope. Return {accepted,issues,scope} with issues sorted and accepted meaning no issues. Issue codes: unpinned-audio when audioSha256 or model is missing; word-error when substitutions+deletions+insertions exceeds the corpus allowance; latency when partialLatencyMs or finalLatencyMs is missing or above its budget; entity-loss when entityVerdict.missed is nonempty; hallucination when entityVerdict.hallucinations is nonempty; slice-coverage unless entityVerdict.slices contains clean and tiny; scope-statement unless scope is synthetic-speech-corpus. This is a decision and evidence exercise over real measured corpus data, not a claim about live human speech.`;
 
-function synthesizeMeasures(): { text: string; outputSha256: string; model: string; latencyMs: number } {
+function synthesizeMeasures(): {
+  text: string;
+  outputSha256: string;
+  model: string;
+  latencyMs: number;
+} {
   const text = 'Route the operator to the billing team, then read back the reference number.';
   const directory = join(RUNTIME_ROOT, 'corpus');
   mkdirSync(directory, { recursive: true });
-  const output = join(directory, `${createHash('sha256').update(text).digest('hex').slice(0, 16)}.wav`);
+  const output = join(
+    directory,
+    `${createHash('sha256').update(text).digest('hex').slice(0, 16)}.wav`,
+  );
   const started = Date.now();
   const rendered = run('espeak-ng', ['-s', '150', '-v', 'en-us', '-w', output, text]);
   const latency = Date.now() - started;
@@ -254,7 +256,11 @@ function synthesisVectors(): RecognitionVector[] {
     scope: 'synthetic-speech-corpus',
   });
   return [
-    { name: 'synthetic synthesis output is pinned and authorized', input: base, expected: verdict() },
+    {
+      name: 'synthetic synthesis output is pinned and authorized',
+      input: base,
+      expected: verdict(),
+    },
     {
       name: 'missing output hash is not delivery evidence',
       input: { ...base, outputSha256: '' },
@@ -309,7 +315,11 @@ function scoreVectors(
   workingDirectory: string,
   vectors: readonly RecognitionVector[],
 ): SkillEvalDeterministicScore {
-  for (const [path] of Object.entries({ 'README.md': '', 'contract.json': '', 'package.json': '' })) {
+  for (const [path] of Object.entries({
+    'README.md': '',
+    'contract.json': '',
+    'package.json': '',
+  })) {
     try {
       if (!lstatSync(join(workingDirectory, path)).isFile()) throw new Error('missing');
     } catch {
@@ -337,22 +347,27 @@ function scoreVectors(
     actual = null;
   }
   const outputs = Array.isArray(actual) ? actual : [];
-  const matching = vectors.filter((vector, index) =>
-    JSON.stringify(outputs[index]) === JSON.stringify(vector.expected));
-  const passed = probe.status === 0 && outputs.length === vectors.length && matching.length === vectors.length;
+  const matching = vectors.filter(
+    (vector, index) => JSON.stringify(outputs[index]) === JSON.stringify(vector.expected),
+  );
+  const passed =
+    probe.status === 0 && outputs.length === vectors.length && matching.length === vectors.length;
   return {
     passed,
-    quality: probe.status === 0 && outputs.length === vectors.length ? matching.length / vectors.length : 0,
+    quality:
+      probe.status === 0 && outputs.length === vectors.length
+        ? matching.length / vectors.length
+        : 0,
     verification: passed ? 1 : 0,
     integrityFailure: false,
     evidence: [
       `Synthetic behavioral vectors over a real measured corpus: ${matching.length}/${vectors.length}.`,
       ...vectors
-        .filter((vector, index) => JSON.stringify(outputs[index]) !== JSON.stringify(vector.expected))
+        .filter(
+          (vector, index) => JSON.stringify(outputs[index]) !== JSON.stringify(vector.expected),
+        )
         .map((vector) => `Failed: ${vector.name}`),
-      ...(probe.status !== 0
-        ? [`Candidate process did not succeed: ${String(probe.status)}`]
-        : []),
+      ...(probe.status !== 0 ? [`Candidate process did not succeed: ${String(probe.status)}`] : []),
     ],
   };
 }

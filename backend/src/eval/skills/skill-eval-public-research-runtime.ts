@@ -575,7 +575,10 @@ function atomTotal(body: string): number {
   return Number(count);
 }
 
-function scholarlyEvidence(sources: FetchResult[], now: Date): Pick<RuntimeEvidence, 'studies' | 'searchTotals'> {
+function scholarlyEvidence(
+  sources: FetchResult[],
+  now: Date,
+): Pick<RuntimeEvidence, 'studies' | 'searchTotals'> {
   const studies: ScholarlyStudy[] = [];
   const searchTotals: Record<string, number> = {};
   for (const [stem, id] of [
@@ -815,8 +818,7 @@ async function independentEvidence(
     chosen.every((id) => searchIds.includes(id))
       ? chosen
       : searchIds.slice(0, 2);
-  if ((report?.sources ?? []).length > 6)
-    throw new Error('Too many declared scholarly sources');
+  if ((report?.sources ?? []).length > 6) throw new Error('Too many declared scholarly sources');
   // The evidence set is fixed: the search, the grouped PubMed XML, the Europe PMC
   // lookup and the measured negative control. Deriving it from the candidate's own
   // declarations let an extra row change what the evaluator fetched and then fail

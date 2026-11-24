@@ -96,9 +96,9 @@ describe('session cost payload is the only price a session shows', () => {
   });
 
   test('unpriced usage shows the unknown marker on both surfaces, never a zero', () => {
-    const summary = sessionCostsPayload([
-      row({ knownCostUsd: 0, knownRows: 0, unknownRows: 1 }),
-    ])['session-1'];
+    const summary = sessionCostsPayload([row({ knownCostUsd: 0, knownRows: 0, unknownRows: 1 })])[
+      'session-1'
+    ];
 
     expect(summary?.hasKnownCost).toBe(false);
     expect(summary?.pricingIncomplete).toBe(true);

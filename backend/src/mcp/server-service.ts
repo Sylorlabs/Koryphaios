@@ -221,7 +221,9 @@ export function listServers(
 /** Public display identity only: never forward MCP credentials/configuration
  * to the transcript. Tool names come from already-discovered catalogs; this
  * read does not connect a server or spawn a CLI. */
-export function listToolServerIdentities(projectRoot: string): Array<{ name: string; tools: string[] }> {
+export function listToolServerIdentities(
+  projectRoot: string,
+): Array<{ name: string; tools: string[] }> {
   projectRoot = mcpProjectScope(projectRoot);
   const { mcpManager } = getContext();
   const names = new Set([

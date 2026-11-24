@@ -2,8 +2,8 @@
 description: Reviews sealed anonymous skill-evaluation artifacts without accessing tools or outside evidence.
 mode: primary
 permissions:
-  - action: "*"
-    resource: "*"
+  - action: '*'
+    resource: '*'
     effect: deny
 ---
 

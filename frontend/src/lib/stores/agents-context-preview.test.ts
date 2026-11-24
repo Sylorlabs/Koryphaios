@@ -73,21 +73,21 @@ describe('manager context preview provider transitions', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'gpt-5.6', 262_144);
     updateUsage(sessionId, 'kory-manager', {
-        agentId: 'kory-manager',
-        model: 'gpt-5.6',
-        provider: 'openai',
-        tokensIn: 20_000,
-        tokensOut: 250,
-        tokensUsed: 20_250,
-        usageKnown: true,
-        contextWindow: 262_144,
-        contextKnown: true,
-        cachedInputTokens: 12_000,
-        cacheWriteInputTokens: 3_000,
-        estimatedCostUsd: 0.0123,
-        cacheSavingsUsd: 0.0042,
-        breakdown: API_BREAKDOWN,
-      });
+      agentId: 'kory-manager',
+      model: 'gpt-5.6',
+      provider: 'openai',
+      tokensIn: 20_000,
+      tokensOut: 250,
+      tokensUsed: 20_250,
+      usageKnown: true,
+      contextWindow: 262_144,
+      contextKnown: true,
+      cachedInputTokens: 12_000,
+      cacheWriteInputTokens: 3_000,
+      estimatedCostUsd: 0.0123,
+      cacheSavingsUsd: 0.0042,
+      breakdown: API_BREAKDOWN,
+    });
 
     expect(getContextUsage()).toMatchObject({
       cachedInputTokens: 12_000,
@@ -154,17 +154,17 @@ describe('manager context preview provider transitions', () => {
     clearManagerContextPreview(sessionId);
 
     updateUsage(sessionId, 'kory-manager', {
-        agentId: 'kory-manager',
-        model: 'gpt-5.6-codex',
-        provider: 'codex',
-        tokensIn: 211_000,
-        tokensOut: 700,
-        tokensUsed: 211_700,
-        usageKnown: true,
-        contextWindow: 1_000_000,
-        contextKnown: true,
-        breakdown: CLI_BREAKDOWN,
-      });
+      agentId: 'kory-manager',
+      model: 'gpt-5.6-codex',
+      provider: 'codex',
+      tokensIn: 211_000,
+      tokensOut: 700,
+      tokensUsed: 211_700,
+      usageKnown: true,
+      contextWindow: 1_000_000,
+      contextKnown: true,
+      breakdown: CLI_BREAKDOWN,
+    });
     expect(
       seedManagerUsage(sessionId, {
         used: 211_700,
@@ -189,7 +189,9 @@ describe('manager context preview provider transitions', () => {
   it('never lets a worker restore provider usage while the selected manager awaits a report', () => {
     const sessionId = sessionState.activeSessionId;
     beginManagerContextPreview(sessionId, 'openai', 'minimax-m3', 262_144);
-    spawnAgent(sessionId, {
+    spawnAgent(
+      sessionId,
+      {
         id: 'codex-worker',
         name: 'Codex worker',
         role: 'coder',
@@ -197,19 +199,21 @@ describe('manager context preview provider transitions', () => {
         provider: 'codex',
         domain: 'backend',
         glowColor: '#fff',
-      }, 'work');
+      },
+      'work',
+    );
     updateUsage(sessionId, 'codex-worker', {
-        agentId: 'codex-worker',
-        model: 'gpt-5.6-codex',
-        provider: 'codex',
-        tokensIn: 211_000,
-        tokensOut: 700,
-        tokensUsed: 211_700,
-        usageKnown: true,
-        contextWindow: 1_000_000,
-        contextKnown: true,
-        breakdown: CLI_BREAKDOWN,
-      });
+      agentId: 'codex-worker',
+      model: 'gpt-5.6-codex',
+      provider: 'codex',
+      tokensIn: 211_000,
+      tokensOut: 700,
+      tokensUsed: 211_700,
+      usageKnown: true,
+      contextWindow: 1_000_000,
+      contextKnown: true,
+      breakdown: CLI_BREAKDOWN,
+    });
 
     expect(getContextUsage()).toMatchObject({
       used: 0,
@@ -252,18 +256,18 @@ describe('manager context preview provider transitions', () => {
     beginManagerContextPreview(sessionId, 'codex', 'gpt-5.6-codex', 285_000);
 
     updateUsage(sessionId, 'kory-manager', {
-        agentId: 'kory-manager',
-        model: 'gpt-5.6-codex',
-        provider: 'codex',
-        tokensIn: 860_300,
-        tokensOut: 700,
-        tokensUsed: 861_000,
-        usageKnown: true,
-        estimated: true,
-        contextWindow: 285_000,
-        contextKnown: true,
-        breakdown: CLI_BREAKDOWN,
-      });
+      agentId: 'kory-manager',
+      model: 'gpt-5.6-codex',
+      provider: 'codex',
+      tokensIn: 860_300,
+      tokensOut: 700,
+      tokensUsed: 861_000,
+      usageKnown: true,
+      estimated: true,
+      contextWindow: 285_000,
+      contextKnown: true,
+      breakdown: CLI_BREAKDOWN,
+    });
 
     // The meter must never render 860.3k / 285.0k, nor a 100% bar that is all
     // "CLI runtime overhead": the cumulative remainder is bounded by what Kory
@@ -332,18 +336,18 @@ describe('manager context preview provider transitions', () => {
     expect(manager().cachedInputTokens).toBeUndefined();
 
     updateUsage(sessionId, 'kory-manager', {
-        agentId: 'kory-manager',
-        model: 'gpt-5.6-codex',
-        provider: 'codex',
-        tokensIn: 211_000,
-        tokensOut: 700,
-        tokensUsed: 211_700,
-        usageKnown: true,
-        cachedInputTokens: 199_200,
-        contextWindow: 1_000_000,
-        contextKnown: true,
-        breakdown: CLI_BREAKDOWN,
-      });
+      agentId: 'kory-manager',
+      model: 'gpt-5.6-codex',
+      provider: 'codex',
+      tokensIn: 211_000,
+      tokensOut: 700,
+      tokensUsed: 211_700,
+      usageKnown: true,
+      cachedInputTokens: 199_200,
+      contextWindow: 1_000_000,
+      contextKnown: true,
+      breakdown: CLI_BREAKDOWN,
+    });
     expect(manager()).toMatchObject({
       identity: { provider: 'openai', model: 'minimax-m3' },
       tokensUsed: 14_100,
@@ -401,18 +405,18 @@ describe('manager context preview provider transitions', () => {
     // nor destroy the last verified one. The 400k figure mirrors the real
     // chars/4 planning estimate, which runs ~10x above the actual total.
     updateUsage(sessionId, 'kory-manager', {
-        agentId: 'kory-manager',
-        model: 'minimax-m3',
-        provider: 'openai',
-        tokensIn: 400_000,
-        tokensOut: 0,
-        tokensUsed: 400_000,
-        usageKnown: false,
-        contextWindow: 262_144,
-        contextKnown: true,
-        breakdown: API_BREAKDOWN,
-        cachedInputTokens: 10_000,
-      });
+      agentId: 'kory-manager',
+      model: 'minimax-m3',
+      provider: 'openai',
+      tokensIn: 400_000,
+      tokensOut: 0,
+      tokensUsed: 400_000,
+      usageKnown: false,
+      contextWindow: 262_144,
+      contextKnown: true,
+      breakdown: API_BREAKDOWN,
+      cachedInputTokens: 10_000,
+    });
     expect(manager()).toMatchObject({
       tokensUsed: 20_000,
       contextMax: 262_144,

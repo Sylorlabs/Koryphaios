@@ -22,11 +22,31 @@ const cookieMutation = {
 function dashboardSpec() {
   return {
     sourceSinkInventory: [
-      { source: 'Untrusted rich-text comment', transform: 'Sanitize HTML', sink: 'Rich-text HTML renderer', control: 'Remove script and event-handler attributes' },
-      { source: 'Return-navigation query parameter', transform: 'Validate relative path', sink: 'Return navigation URL', control: 'Reject absolute and protocol-relative destinations' },
+      {
+        source: 'Untrusted rich-text comment',
+        transform: 'Sanitize HTML',
+        sink: 'Rich-text HTML renderer',
+        control: 'Remove script and event-handler attributes',
+      },
+      {
+        source: 'Return-navigation query parameter',
+        transform: 'Validate relative path',
+        sink: 'Return navigation URL',
+        control: 'Reject absolute and protocol-relative destinations',
+      },
       cookieMutation,
-      { source: 'Payment iframe', transform: 'Restrict frame-src to the payment origin', sink: 'Iframe browsing context', control: 'Deny arbitrary frame ancestors' },
-      { source: 'Payment postMessage event', transform: 'Validate origin, source, schema, and transaction context', sink: 'Payment status update', control: 'Reject untrusted or mismatched event' },
+      {
+        source: 'Payment iframe',
+        transform: 'Restrict frame-src to the payment origin',
+        sink: 'Iframe browsing context',
+        control: 'Deny arbitrary frame ancestors',
+      },
+      {
+        source: 'Payment postMessage event',
+        transform: 'Validate origin, source, schema, and transaction context',
+        sink: 'Payment status update',
+        control: 'Reject untrusted or mismatched event',
+      },
     ],
     richText: {
       legacyDangerousSinkRemovedOrSanitized: true,
@@ -46,12 +66,31 @@ function dashboardSpec() {
       frameSrc: [paymentOrigin],
       connectSrc: ["'self'"],
       primaryXssFix: false,
-      directives: ["default-src 'none'", "script-src 'nonce-<per-response>'", "style-src 'self'", "object-src 'none'", "base-uri 'none'", "frame-ancestors 'none'"],
+      directives: [
+        "default-src 'none'",
+        "script-src 'nonce-<per-response>'",
+        "style-src 'self'",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "frame-ancestors 'none'",
+      ],
       noncePropagation: 'Attach a fresh response nonce to trusted script tags',
       reportEndpoint: '/csp-report',
-      enforcementVerification: ['Reject inline scripts lacking the nonce', 'Reject hostile embedding after Report-Only validation'],
+      enforcementVerification: [
+        'Reject inline scripts lacking the nonce',
+        'Reject hostile embedding after Report-Only validation',
+      ],
     },
-    csrf: { serverValidatedToken: true, originComplement: true, fetchMetadataComplement: true, sameSiteComplement: true, tokenTransport: 'header', sessionBound: true, allCookieMutationsCovered: true, rejectMissingOrInvalid: true },
+    csrf: {
+      serverValidatedToken: true,
+      originComplement: true,
+      fetchMetadataComplement: true,
+      sameSiteComplement: true,
+      tokenTransport: 'header',
+      sessionBound: true,
+      allCookieMutationsCovered: true,
+      rejectMissingOrInvalid: true,
+    },
     postMessage: {
       expectedOrigin: paymentOrigin,
       validateSchema: true,
@@ -69,9 +108,24 @@ function dashboardSpec() {
 
 function analyticsSpec() {
   return {
-    cors: { origins: ['https://app.example.com'], methods: ['GET', 'POST'], headers: ['Content-Type', 'X-CSRF-Token'], credentials: true, reflectOrigin: false, wildcard: false },
-    reportFetch: { allowedOrigin: 'https://reports.example.net', hashIsDirectUrl: false, allowPathIdsOnly: true },
-    credentials: { architecture: 'bff-http-only-cookie', localStorageAccessToken: false, csrfServerValidated: true },
+    cors: {
+      origins: ['https://app.example.com'],
+      methods: ['GET', 'POST'],
+      headers: ['Content-Type', 'X-CSRF-Token'],
+      credentials: true,
+      reflectOrigin: false,
+      wildcard: false,
+    },
+    reportFetch: {
+      allowedOrigin: 'https://reports.example.net',
+      hashIsDirectUrl: false,
+      allowPathIdsOnly: true,
+    },
+    credentials: {
+      architecture: 'bff-http-only-cookie',
+      localStorageAccessToken: false,
+      csrfServerValidated: true,
+    },
     framing: { frameAncestors: ["'self'"] },
     rendering: { safeText: true, explicitSanitization: false },
     csp: { reporting: true, primaryXssFix: false },
@@ -85,8 +139,12 @@ type ScenarioId = 'web-security-full-task-1' | 'web-security-full-task-2';
 async function fixture(scenarioId: ScenarioId) {
   const root = mkdtempSync(join(tmpdir(), 'kory-web-security-regression-'));
   roots.push(root);
-  const materializer = PRIVACY_WEB_DEVICE_SKILL_EVAL_MATERIALIZERS.find((item) => item.matches({ id: scenarioId } as never));
-  const scorer = PRIVACY_WEB_DEVICE_SKILL_EVAL_SCORERS.find((item) => item.scenarioIds.includes(scenarioId));
+  const materializer = PRIVACY_WEB_DEVICE_SKILL_EVAL_MATERIALIZERS.find((item) =>
+    item.matches({ id: scenarioId } as never),
+  );
+  const scorer = PRIVACY_WEB_DEVICE_SKILL_EVAL_SCORERS.find((item) =>
+    item.scenarioIds.includes(scenarioId),
+  );
   expect(materializer).toBeDefined();
   expect(scorer).toBeDefined();
   if (scenarioId === 'web-security-full-task-1') {
@@ -126,19 +184,23 @@ describe('web-security origin and cookie mutation scoring', () => {
 
   test('rejects Markdown-wrapped, lookalike, or trailing-slash origins', async () => {
     for (const field of ['expectedOrigin', 'outgoingTargetOrigin'] as const) {
-      for (const value of [`[${paymentOrigin}](${paymentOrigin})`, `${paymentOrigin}.evil.example`, `${paymentOrigin}/`]) {
-      const { root, scorer } = await fixture('web-security-full-task-1');
-      const spec = dashboardSpec();
-      spec.postMessage[field] = value;
-      writeFileSync(join(root, '.kory-eval', 'dashboard-web.json'), JSON.stringify(spec));
-      const score = await scorer.score({ workingDirectory: root } as never);
-      expect(score.passed).toBe(false);
-      expect(score.integrityFailure).toBe(false);
-      expect(score.evidence).toContain(
-        value.startsWith('[')
-          ? `postMessage.${field}: Markdown-wrapped origin (invalid)`
-          : `postMessage.${field}: mismatch or missing`,
-      );
+      for (const value of [
+        `[${paymentOrigin}](${paymentOrigin})`,
+        `${paymentOrigin}.evil.example`,
+        `${paymentOrigin}/`,
+      ]) {
+        const { root, scorer } = await fixture('web-security-full-task-1');
+        const spec = dashboardSpec();
+        spec.postMessage[field] = value;
+        writeFileSync(join(root, '.kory-eval', 'dashboard-web.json'), JSON.stringify(spec));
+        const score = await scorer.score({ workingDirectory: root } as never);
+        expect(score.passed).toBe(false);
+        expect(score.integrityFailure).toBe(false);
+        expect(score.evidence).toContain(
+          value.startsWith('[')
+            ? `postMessage.${field}: Markdown-wrapped origin (invalid)`
+            : `postMessage.${field}: mismatch or missing`,
+        );
       }
     }
   });
@@ -151,12 +213,24 @@ describe('web-security origin and cookie mutation scoring', () => {
     const score = await scorer.score({ workingDirectory: root } as never);
     expect(score.passed).toBe(false);
     expect(score.evidence).toContain('cookie-authenticated mutation source/sink: missing');
-    expect(hasCookieMutationInventory([{ source: 'Cookie-authenticated action', transform: 'Client checks CSRF locally', sink: 'POST state-changing handler', control: 'Reject missing token in the browser; no server validation' }])).toBe(false);
+    expect(
+      hasCookieMutationInventory([
+        {
+          source: 'Cookie-authenticated action',
+          transform: 'Client checks CSRF locally',
+          sink: 'POST state-changing handler',
+          control: 'Reject missing token in the browser; no server validation',
+        },
+      ]),
+    ).toBe(false);
   });
 
   test('analytics origins remain raw exact strings', async () => {
     const good = await fixture('web-security-full-task-2');
-    writeFileSync(join(good.root, '.kory-eval', 'analytics-web.json'), JSON.stringify(analyticsSpec()));
+    writeFileSync(
+      join(good.root, '.kory-eval', 'analytics-web.json'),
+      JSON.stringify(analyticsSpec()),
+    );
     expect((await good.scorer.score({ workingDirectory: good.root } as never)).passed).toBe(true);
 
     const bad = await fixture('web-security-full-task-2');

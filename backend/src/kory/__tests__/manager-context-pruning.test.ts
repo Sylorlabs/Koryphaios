@@ -115,9 +115,11 @@ describe('manager context pruning', () => {
           { role: 'assistant', content: 'The recent inspection is complete.' },
         ],
       };
-      const removed = (manager as unknown as {
-        pruneAgentThreadContext(value: typeof thread, keepRecent?: number): number;
-      }).pruneAgentThreadContext(thread, 4);
+      const removed = (
+        manager as unknown as {
+          pruneAgentThreadContext(value: typeof thread, keepRecent?: number): number;
+        }
+      ).pruneAgentThreadContext(thread, 4);
 
       expect(removed).toBe(1);
       expect(thread.messages[0]?.content).toContain('IMMUTABLE TASK CONTRACT');
@@ -368,7 +370,13 @@ describe('manager tool message construction', () => {
       const base = {
         sessionId: 'thread-scope',
         tc: { id: 'call-w1', name: 'bash', input: { cmd: 'ls' } },
-        toolResult: { callId: 'call-w1', name: 'bash', output: 'v'.repeat(5_000), isError: false, durationMs: 4 },
+        toolResult: {
+          callId: 'call-w1',
+          name: 'bash',
+          output: 'v'.repeat(5_000),
+          isError: false,
+          durationMs: 4,
+        },
         archiveId: 'cx_w1',
         turnCount: 1,
         settings: { toolContextPolicies: {} } as unknown as AgentSettings,
@@ -403,7 +411,13 @@ describe('manager tool message construction', () => {
       const base = {
         sessionId: 'thread-policy',
         tc: { id: 'call-w2', name: 'bash', input: { cmd: 'pwd' } },
-        toolResult: { callId: 'call-w2', name: 'bash', output: 'w'.repeat(4_000), isError: false, durationMs: 4 },
+        toolResult: {
+          callId: 'call-w2',
+          name: 'bash',
+          output: 'w'.repeat(4_000),
+          isError: false,
+          durationMs: 4,
+        },
         archiveId: 'cx_w2',
         turnCount: 1,
         settings: { toolContextPolicies: {} } as unknown as AgentSettings,

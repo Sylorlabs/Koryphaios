@@ -1,5 +1,13 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { canonicalizePath } from '../../runtime/platform';
@@ -15,12 +23,17 @@ import {
 } from '../../eval/skills/skill-eval-execution';
 
 const cleanups: Array<() => void> = [];
-afterEach(() => { while (cleanups.length) cleanups.pop()?.(); });
-const skillPackage = loadV5SkillPackages().packages.find(item => item.sidecar.name === 'deterministic-debugging')!;
+afterEach(() => {
+  while (cleanups.length) cleanups.pop()?.();
+});
+const skillPackage = loadV5SkillPackages().packages.find(
+  (item) => item.sidecar.name === 'deterministic-debugging',
+)!;
 const scenario = skillPackage.evaluation.tasks[0]!;
 
 function fixture(
-  mutate: 'executor' | 'scorer' | 'replace-base' | 'fingerprint-collision' | 'infrastructure' | null,
+  mutate:
+    'executor' | 'scorer' | 'replace-base' | 'fingerprint-collision' | 'infrastructure' | null,
 ) {
   const projectRoot = canonicalizePath(mkdtempSync(join(tmpdir(), 'kory-base-integrity-')));
   cleanups.push(() => rmSync(projectRoot, { recursive: true, force: true }));
@@ -29,8 +42,8 @@ function fixture(
   let observedBase: string | undefined;
   const materializer: SkillEvalFixtureMaterializer = {
     id: 'base-integrity-test-fixture',
-    matches: candidate => candidate.id === scenario.id,
-    materialize: root => {
+    matches: (candidate) => candidate.id === scenario.id,
+    materialize: (root) => {
       if (mutate === 'fingerprint-collision') {
         writeFileSync(join(root, 'a'), 'one');
         writeFileSync(join(root, 'b'), 'two');
@@ -42,8 +55,15 @@ function fixture(
     scenarioIds: [scenario.id],
     score: ({ workingDirectory }) => {
       scores += 1;
-      if (mutate === 'scorer') writeFileSync(join(dirname(workingDirectory), 'base', 'state.txt'), 'forged baseline\n');
-      return { passed: true, quality: 1, verification: 1, integrityFailure: false, evidence: ['Synthetic integrity control only'] };
+      if (mutate === 'scorer')
+        writeFileSync(join(dirname(workingDirectory), 'base', 'state.txt'), 'forged baseline\n');
+      return {
+        passed: true,
+        quality: 1,
+        verification: 1,
+        integrityFailure: false,
+        evidence: ['Synthetic integrity control only'],
+      };
     },
   };
   const executor: SkillEvalExecutor = {
@@ -57,7 +77,8 @@ function fixture(
     execute: async ({ workingDirectory, experiment }) => {
       executions += 1;
       observedBase = join(dirname(workingDirectory), 'base');
-      if (mutate === 'executor') writeFileSync(join(observedBase, 'state.txt'), 'forged baseline\n');
+      if (mutate === 'executor')
+        writeFileSync(join(observedBase, 'state.txt'), 'forged baseline\n');
       if (mutate === 'fingerprint-collision') {
         writeFileSync(join(observedBase, 'a'), 'one\0b\0file\0two');
         rmSync(join(observedBase, 'b'), { force: true });
@@ -83,26 +104,38 @@ function fixture(
         };
       }
       writeFileSync(join(workingDirectory, 'state.txt'), `${experiment.variant}\n`);
-      return { output: 'Synthetic integrity control only', evidence: [], artifacts: [], durationMs: 0 };
+      return {
+        output: 'Synthetic integrity control only',
+        evidence: [],
+        artifacts: [],
+        durationMs: 0,
+      };
     },
   };
-  const run = () => runPairedSkillEvaluationV3({
+  const run = () =>
+    runPairedSkillEvaluationV3({
+      projectRoot,
+      skillPackage,
+      scenarioId: scenario.id,
+      skillRevisionHash: 'a'.repeat(64),
+      harnessVersion: 'base-integrity-control',
+      evaluationContractHash: 'b'.repeat(16),
+      evaluationContractVersion: 3,
+      materializers: [materializer],
+      scorers: [scorer],
+      executor,
+      persist: true,
+    }).then((result) => {
+      cleanups.push(result.cleanup);
+      return result;
+    });
+  return {
     projectRoot,
-    skillPackage,
-    scenarioId: scenario.id,
-    skillRevisionHash: 'a'.repeat(64),
-    harnessVersion: 'base-integrity-control',
-    evaluationContractHash: 'b'.repeat(16),
-    evaluationContractVersion: 3,
-    materializers: [materializer],
-    scorers: [scorer],
-    executor,
-    persist: true,
-  }).then(result => {
-    cleanups.push(result.cleanup);
-    return result;
-  });
-  return { projectRoot, run, executions: () => executions, scores: () => scores, base: () => observedBase };
+    run,
+    executions: () => executions,
+    scores: () => scores,
+    base: () => observedBase,
+  };
 }
 
 test('workspace fingerprints distinguish binary content from a different file-tree structure', () => {
@@ -137,13 +170,17 @@ test('candidate-only edits retain the captured original fingerprint and exact be
   const rows = listSkillEvaluationRuns(f.projectRoot);
   expect(rows).toHaveLength(2);
   for (const row of rows) {
-    const artifact = row.artifacts?.find(item => item.location.endsWith('run-manifest.json'));
+    const artifact = row.artifacts?.find((item) => item.location.endsWith('run-manifest.json'));
     expect(artifact).toBeDefined();
     const manifest = JSON.parse(readFileSync(artifact!.location, 'utf8'));
     expect(manifest.workspaceFingerprintFormat).toBe(SKILL_EVAL_WORKSPACE_FINGERPRINT_FORMAT);
     expect(manifest.initialFingerprint).toBe(result.initialFingerprint);
-    expect(manifest.changes).toEqual([expect.objectContaining({ path: 'state.txt', change: 'modified' })]);
-    expect(readFileSync(join(dirname(artifact!.location), 'before-files', 'state.txt'), 'utf8')).toBe('original\n');
+    expect(manifest.changes).toEqual([
+      expect.objectContaining({ path: 'state.txt', change: 'modified' }),
+    ]);
+    expect(
+      readFileSync(join(dirname(artifact!.location), 'before-files', 'state.txt'), 'utf8'),
+    ).toBe('original\n');
   }
 });
 

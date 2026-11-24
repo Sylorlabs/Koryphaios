@@ -78,7 +78,9 @@ export function loadAcpAgentDefinitions(root: string = acpStoreRoot()): AcpAgent
         id,
         label: typeof value.label === 'string' ? value.label : id,
         command: typeof value.command === 'string' ? value.command : '',
-        args: Array.isArray(value.args) ? value.args.filter((a): a is string => typeof a === 'string') : [],
+        args: Array.isArray(value.args)
+          ? value.args.filter((a): a is string => typeof a === 'string')
+          : [],
         envNames: Array.isArray(value.envNames)
           ? value.envNames.filter((n): n is string => typeof n === 'string')
           : [],
@@ -135,7 +137,9 @@ export function loadAcpAgentEnvSecrets(root: string = acpStoreRoot()): AcpEnvSec
     for (const [id, env] of Object.entries(parsed)) {
       if (!isRecord(env)) continue;
       out[id] = Object.fromEntries(
-        Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+        Object.entries(env).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        ),
       );
     }
     return out;
@@ -158,7 +162,9 @@ function saveAcpAgentEnvSecrets(root: string, secrets: AcpEnvSecrets): void {
 
 // ─── Verdicts ────────────────────────────────────────────────────────────────
 
-export function loadAcpProbeVerdicts(root: string = acpStoreRoot()): Record<string, AcpProbeVerdict> {
+export function loadAcpProbeVerdicts(
+  root: string = acpStoreRoot(),
+): Record<string, AcpProbeVerdict> {
   try {
     const parsed = readJsonFile(verdictsPath(root));
     return (parsed ?? {}) as Record<string, AcpProbeVerdict>;

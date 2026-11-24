@@ -143,8 +143,7 @@ describe('KoryManager model context preview provenance', () => {
     const manager = createManager(directory, {
       // Same boundary — the transcript didn't change, only the route did.
       getActiveBoundary: async () => ({ messageId: 'assistant-final', contextRevision: 2 }),
-      getContextMessages: async () =>
-        [{ role: 'user', content: 'tiny' } as never],
+      getContextMessages: async () => [{ role: 'user', content: 'tiny' } as never],
     });
     try {
       const preview = await manager.previewModelContext('route-switch', 'minimax-m3', 'codex');
@@ -253,7 +252,9 @@ describe('KoryManager model context preview provenance', () => {
         },
       });
       const saved = (await getContextArchive()!.getLastUsage('completed-boundary'))!;
-      expect(Object.values(saved.breakdown!).reduce((sum, tokens) => sum + tokens, 0)).toBe(saved.used);
+      expect(Object.values(saved.breakdown!).reduce((sum, tokens) => sum + tokens, 0)).toBe(
+        saved.used,
+      );
       expect(saved.breakdown?.cliHarness).toBeUndefined();
     } finally {
       manager.shutdown();

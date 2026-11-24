@@ -418,7 +418,10 @@ describe('OpenAI stream usage and completion framing', () => {
 
 describe('speed tiers in the request body', () => {
   const provider = () => new OpenAIProvider({ name: 'openai', apiKey: 'k', disabled: false });
-  const done = ['{"id":"1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}', '[DONE]'];
+  const done = [
+    '{"id":"1","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}',
+    '[DONE]',
+  ];
 
   it('sends service_tier="priority" when speedTier is priority', async () => {
     const bodies = installFetch(done);

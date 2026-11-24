@@ -41,7 +41,11 @@ export const API_ROUTE_PLUGINS: readonly ApiRoutePluginEntry[] = [
     factory: true,
   },
   { name: 'gitRoutes', module: 'routes/v1/git', export: 'gitRoutes' },
-  { name: 'sessionReviewRoutes', module: 'routes/v1/session-review', export: 'sessionReviewRoutes' },
+  {
+    name: 'sessionReviewRoutes',
+    module: 'routes/v1/session-review',
+    export: 'sessionReviewRoutes',
+  },
   { name: 'memoryRoutes', module: 'routes/v1/memory', export: 'memoryRoutes' },
   { name: 'spendRoutes', module: 'routes/v1/spend', export: 'spendRoutes' },
   { name: 'spendCapsRoutes', module: 'routes/v1/spend-caps', export: 'spendCapsRoutes' },

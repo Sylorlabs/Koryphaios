@@ -99,16 +99,23 @@ function run(
     PATH: root,
     REVIEW_TEST_CALL: callPath,
     REVIEW_TEST_STREAM:
-      options.rawStream ?? ((options.events ?? [textEvent]).map((ev) => JSON.stringify(ev)).join('\n') + '\n'),
+      options.rawStream ??
+      (options.events ?? [textEvent]).map((ev) => JSON.stringify(ev)).join('\n') + '\n',
     REVIEW_TEST_STDERR: options.stderr ?? '',
     REVIEW_TEST_EXIT: String(options.exitCode ?? 0),
     REVIEW_TEST_OVERSIZED: options.oversizedStream ? '1' : '0',
-    REVIEW_TEST_AGENTS: JSON.stringify(options.agents ?? [
-      { id: 'kory-blind-reviewer', mode: 'primary', permissions: [
-        { action: '*', resource: '*', effect: 'allow' },
-        { action: '*', resource: '*', effect: 'deny' },
-      ] },
-    ]),
+    REVIEW_TEST_AGENTS: JSON.stringify(
+      options.agents ?? [
+        {
+          id: 'kory-blind-reviewer',
+          mode: 'primary',
+          permissions: [
+            { action: '*', resource: '*', effect: 'allow' },
+            { action: '*', resource: '*', effect: 'deny' },
+          ],
+        },
+      ],
+    ),
   };
   if (options.binary !== 'path') {
     env.KORY_OPENCODE_REVIEW_BINARY =
@@ -249,9 +256,15 @@ test('nonzero provider exit redacts raw stdout and stderr even without a structu
 
 test('Beam Free exhausted quota emits a safe, nonretryable diagnostic', () => {
   const result = run({
-    events: [{ type: 'error', sessionID, error: {
-      message: `Free usage limit reached; api_key=${secrets[0]}`,
-    } }],
+    events: [
+      {
+        type: 'error',
+        sessionID,
+        error: {
+          message: `Free usage limit reached; api_key=${secrets[0]}`,
+        },
+      },
+    ],
     exitCode: 1,
   });
   expectFailure(result);
@@ -262,9 +275,15 @@ test('alternate free reviewer quota diagnostics identify the selected model', ()
   const model = 'opencode/deepseek-v4.1-flash-free';
   const result = run({
     model,
-    events: [{ type: 'error', sessionID, error: {
-      message: `Free usage limit reached; api_key=${secrets[0]}`,
-    } }],
+    events: [
+      {
+        type: 'error',
+        sessionID,
+        error: {
+          message: `Free usage limit reached; api_key=${secrets[0]}`,
+        },
+      },
+    ],
     exitCode: 1,
   });
   expectFailure(result);
@@ -290,9 +309,16 @@ test('session IDs on parts and replacement text events retain their existing con
 });
 
 test('rejects a missing or unrestricted reviewer agent before spawning model', () => {
-  for (const agents of [[], [{ id: 'kory-blind-reviewer', mode: 'primary', permissions: [
-    { action: '*', resource: '*', effect: 'allow' },
-  ] }]]) {
+  for (const agents of [
+    [],
+    [
+      {
+        id: 'kory-blind-reviewer',
+        mode: 'primary',
+        permissions: [{ action: '*', resource: '*', effect: 'allow' }],
+      },
+    ],
+  ]) {
     const result = run({ agents });
     expectFailure(result);
     expect(result.stderr).toContain('lacks an effective deny-all rule');
@@ -300,7 +326,9 @@ test('rejects a missing or unrestricted reviewer agent before spawning model', (
 });
 
 test('rejects a response with Markdown fences rather than laundering it into evidence', () => {
-  const result = run({ events: [{ ...textEvent, part: { ...textEvent.part, text: `\`\`\`json\n${output}\n\`\`\`` } }] });
+  const result = run({
+    events: [{ ...textEvent, part: { ...textEvent.part, text: `\`\`\`json\n${output}\n\`\`\`` } }],
+  });
   expectFailure(result);
   expect(result.stderr).toContain('not one strict JSON object');
 });

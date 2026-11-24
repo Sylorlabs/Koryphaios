@@ -12,10 +12,10 @@ ffprobe -v error -show_entries 'format=duration:stream=index,codec_type,codec_na
 
 Compare the contract with the sources, then record one row per shot and timed cue. For example:
 
-| Shot | Source interval (s) | Output interval (s) | Treatment | Timed content |
-| --- | --- | --- | --- | --- |
-| Intro | camera A, 0 to 3 | 0 to 3 | Native speed, fit frame | Narration, title, flash at 1 s |
-| Detail | camera B, 1 to 4 | 3 to 6 | Native speed, fit frame | Caption, music, flash at 5 s |
+| Shot   | Source interval (s) | Output interval (s) | Treatment               | Timed content                  |
+| ------ | ------------------- | ------------------- | ----------------------- | ------------------------------ |
+| Intro  | camera A, 0 to 3    | 0 to 3              | Native speed, fit frame | Narration, title, flash at 1 s |
+| Detail | camera B, 1 to 4    | 3 to 6              | Native speed, fit frame | Caption, music, flash at 5 s   |
 
 Use `output duration = (source out - source in) / speed` for a constant speed segment. Subtract transition overlaps when positioning the next shot. Explicitly map each source cue to output presentation time. Check audio transients and visual flashes both immediately before and during their expected output frame. For variable speed, derive mapping from the retiming curve rather than one constant offset. Track source frame boundaries with the selected timebase; a timestamp rounded to a decimal may land on a neighboring frame.
 

@@ -160,10 +160,22 @@ export type ComputerAction =
     };
 /** One step of a queue. Each step names its own window, so a queue can span several. */
 export type ComputerStep =
-  | { kind: 'click'; target: ComputerTarget; elementId?: string; x?: number; y?: number; button?: 'left' | 'right' | 'middle' }
+  | {
+      kind: 'click';
+      target: ComputerTarget;
+      elementId?: string;
+      x?: number;
+      y?: number;
+      button?: 'left' | 'right' | 'middle';
+    }
   | { kind: 'doubleClick'; target: ComputerTarget; elementId?: string; x?: number; y?: number }
   | { kind: 'move'; target: ComputerTarget; elementId?: string; x?: number; y?: number }
-  | { kind: 'drag'; target: ComputerTarget; elementId?: string; path: Array<{ x: number; y: number }> }
+  | {
+      kind: 'drag';
+      target: ComputerTarget;
+      elementId?: string;
+      path: Array<{ x: number; y: number }>;
+    }
   | { kind: 'type'; target: ComputerTarget; elementId?: string; text: string }
   | { kind: 'key'; target: ComputerTarget; elementId?: string; key: string }
   | { kind: 'scroll'; target: ComputerTarget; elementId?: string; delta: number }

@@ -166,7 +166,15 @@ async function measureCell(
       dataset: document.body.innerText.includes('Dataset: fixture-v1'),
       browserVersion: navigator.userAgent,
     }))) as Record<string, unknown>;
-    const row: Record<string, unknown> = { captureId, width, height, theme, state, ...layout, environment };
+    const row: Record<string, unknown> = {
+      captureId,
+      width,
+      height,
+      theme,
+      state,
+      ...layout,
+      environment,
+    };
     if (cell.screenshot === true) {
       const relative = `verification/captures/${captureId}.jpg`;
       const absolute = join(root, relative);
@@ -191,7 +199,8 @@ async function inspect(
   browser: Browser,
 ): Promise<Record<string, unknown>> {
   const requested = request.cell ? [request.cell] : (request.cells ?? []);
-  if (!requested.length) return { requestId: request.requestId, status: 'error', error: 'no cells' };
+  if (!requested.length)
+    return { requestId: request.requestId, status: 'error', error: 'no cells' };
   if (requested.length > MAX_CELLS)
     return { requestId: request.requestId, status: 'error', error: 'too many cells' };
   const result = await serveFixture(root, async (base) => {
@@ -282,7 +291,10 @@ export async function startVisualBrowserBroker(root: string): Promise<VisualBrow
       let invalidId: string | undefined;
       try {
         const parsed = JSON.parse(raw) as { requestId?: unknown };
-        if (typeof parsed?.requestId === 'string' && /^[a-zA-Z0-9_-]{1,48}$/u.test(parsed.requestId))
+        if (
+          typeof parsed?.requestId === 'string' &&
+          /^[a-zA-Z0-9_-]{1,48}$/u.test(parsed.requestId)
+        )
           invalidId = parsed.requestId;
       } catch {
         return;

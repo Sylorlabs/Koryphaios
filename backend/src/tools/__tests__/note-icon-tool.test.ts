@@ -38,7 +38,10 @@ function context(approved?: string[], mode: 'ask' | 'guarded' = 'guarded'): Tool
     settingsRoot: root,
     callerRole: 'manager',
     approvedToolCallIds: approved ? new Set(approved) : undefined,
-    permissionPolicy: resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, permissionMode: mode }),
+    permissionPolicy: resolveToolPermissionPolicy({
+      ...DEFAULT_AGENT_SETTINGS,
+      permissionMode: mode,
+    }),
   };
 }
 
@@ -60,7 +63,9 @@ async function setIcon(
 
 describe('set_note_icon agent tool', () => {
   test('is a write operation with an ask-by-default setting, like the other note edits', () => {
-    const definition = NOTE_WORKSPACE_TOOL_DEFINITIONS.find((tool) => tool.name === 'set_note_icon');
+    const definition = NOTE_WORKSPACE_TOOL_DEFINITIONS.find(
+      (tool) => tool.name === 'set_note_icon',
+    );
     expect(definition?.category).toBe('write');
     expect(DEFAULT_NOTE_TOOL_PERMISSIONS.set_note_icon).toBe('ask');
   });
@@ -71,16 +76,28 @@ describe('set_note_icon agent tool', () => {
     const note = await notes.createNote({ title: 'Agent icon', content: 'Body' }, root);
 
     // Ask mode gates every edit on an explicit approval; Guarded skips the default ask.
-    const denied = await setIcon(note.id, { kind: 'emoji', value: '🇯🇵' }, { approved: false, mode: 'ask' });
+    const denied = await setIcon(
+      note.id,
+      { kind: 'emoji', value: '🇯🇵' },
+      { approved: false, mode: 'ask' },
+    );
     expect(denied.error).toBeDefined();
     expect((await notes.getNote(note.id, root))?.icon).toBeUndefined();
 
     broadcasts.length = 0;
     const set = await setIcon(note.id, { kind: 'emoji', value: '👩🏽‍💻', label: 'Coder' });
     expect(set).toEqual({ noteId: note.id, icon: { kind: 'emoji', value: '👩🏽‍💻', label: 'Coder' } });
-    expect((await notes.getNote(note.id, root))?.icon).toEqual({ kind: 'emoji', value: '👩🏽‍💻', label: 'Coder' });
+    expect((await notes.getNote(note.id, root))?.icon).toEqual({
+      kind: 'emoji',
+      value: '👩🏽‍💻',
+      label: 'Coder',
+    });
     expect((await notes.getNote(note.id, root))?.revision).toBe(note.revision);
-    expect(broadcasts).toContainEqual({ action: 'update', noteId: note.id, sessionId: 'icon-tool-session' });
+    expect(broadcasts).toContainEqual({
+      action: 'update',
+      noteId: note.id,
+      sessionId: 'icon-tool-session',
+    });
 
     const cleared = await setIcon(note.id, null);
     expect(cleared).toEqual({ noteId: note.id, icon: null });

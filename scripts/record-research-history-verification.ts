@@ -45,13 +45,21 @@ for (const researchCase of RESEARCH_HISTORY_CASES) {
     continue;
   }
   const recorded = await recordResearchHistoryVerification(scenario, { corpusRoot });
-  results.push(recorded.verified
-    ? `- ${researchCase.scenarioId}: provenance recorded at ${recorded.path}`
-    : `- ${researchCase.scenarioId}: provenance NOT recorded (${recorded.blockers.join('; ')})`);
+  results.push(
+    recorded.verified
+      ? `- ${researchCase.scenarioId}: provenance recorded at ${recorded.path}`
+      : `- ${researchCase.scenarioId}: provenance NOT recorded (${recorded.blockers.join('; ')})`,
+  );
 }
 
-console.log(JSON.stringify({
-  corpusRoot,
-  results,
-  note: 'A record is written only after an independent archive or Git comparison succeeded.',
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      corpusRoot,
+      results,
+      note: 'A record is written only after an independent archive or Git comparison succeeded.',
+    },
+    null,
+    2,
+  ),
+);

@@ -148,7 +148,9 @@ export function resetAcpRegistryCacheForTesting(): void {
  * Fetch the official registry. Never throws: a failure returns `ok: false` with
  * the last good entries (if any) so the UI keeps showing what it knew.
  */
-export async function fetchAcpRegistry(opts: FetchRegistryOptions = {}): Promise<AcpRegistrySnapshot> {
+export async function fetchAcpRegistry(
+  opts: FetchRegistryOptions = {},
+): Promise<AcpRegistrySnapshot> {
   const now = opts.now ?? Date.now;
   if (!opts.force && cached && cached.expiresAt > now()) {
     return { ...cached.snapshot, source: 'cache' };
@@ -160,7 +162,10 @@ export async function fetchAcpRegistry(opts: FetchRegistryOptions = {}): Promise
   return inflight;
 }
 
-async function doFetch(opts: FetchRegistryOptions, now: () => number): Promise<AcpRegistrySnapshot> {
+async function doFetch(
+  opts: FetchRegistryOptions,
+  now: () => number,
+): Promise<AcpRegistrySnapshot> {
   const url = opts.url ?? OFFICIAL_ACP_REGISTRY_URL;
   const fetchedAt = now();
   const fail = (error: string): AcpRegistrySnapshot => {
@@ -173,7 +178,10 @@ async function doFetch(opts: FetchRegistryOptions, now: () => number): Promise<A
       entries: previous,
       error,
     };
-    cached = { snapshot: { ...snapshot, source: 'network' }, expiresAt: now() + REGISTRY_NEGATIVE_TTL_MS };
+    cached = {
+      snapshot: { ...snapshot, source: 'network' },
+      expiresAt: now() + REGISTRY_NEGATIVE_TTL_MS,
+    };
     serverLog.warn({ error }, 'ACP agent registry fetch failed');
     return snapshot;
   };
@@ -192,7 +200,9 @@ async function doFetch(opts: FetchRegistryOptions, now: () => number): Promise<A
       headers: { accept: 'application/json', 'user-agent': 'koryphaios' },
     });
     if (response.status >= 300 && response.status < 400) {
-      return fail(`registry responded with a redirect (HTTP ${response.status}); redirects are refused`);
+      return fail(
+        `registry responded with a redirect (HTTP ${response.status}); redirects are refused`,
+      );
     }
     if (!response.ok) return fail(`registry responded with HTTP ${response.status}`);
     if (new URL(response.url || url).host !== expectedHost) {
@@ -243,10 +253,28 @@ export interface AutodetectCandidate {
 /** Known ACP-capable agent CLIs that are not already a built-in Kory provider.
  *  Argument sets are candidates; a successful probe is the only verdict. */
 export const AUTODETECT_CANDIDATES: readonly AutodetectCandidate[] = [
-  { id: 'gemini', label: 'Gemini CLI', binary: 'gemini', args: ['--experimental-acp'], argsVerified: false },
+  {
+    id: 'gemini',
+    label: 'Gemini CLI',
+    binary: 'gemini',
+    args: ['--experimental-acp'],
+    argsVerified: false,
+  },
   { id: 'goose', label: 'Goose', binary: 'goose', args: ['acp'], argsVerified: false },
-  { id: 'copilot', label: 'GitHub Copilot CLI', binary: 'copilot', args: ['--acp'], argsVerified: false },
-  { id: 'codex-acp', label: 'Codex ACP adapter', binary: 'codex-acp', args: [], argsVerified: false },
+  {
+    id: 'copilot',
+    label: 'GitHub Copilot CLI',
+    binary: 'copilot',
+    args: ['--acp'],
+    argsVerified: false,
+  },
+  {
+    id: 'codex-acp',
+    label: 'Codex ACP adapter',
+    binary: 'codex-acp',
+    args: [],
+    argsVerified: false,
+  },
   {
     id: 'claude-agent-acp',
     label: 'Claude Agent ACP adapter',

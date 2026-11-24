@@ -16,12 +16,12 @@ The enforcement model is the same one the `opencode` provider uses:
 
 ## Sources
 
-| Source | What it is | What Kory does with it |
-| --- | --- | --- |
-| Official registry | `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json` | Read-only fetch with a 10 s timeout, redirects refused, a 2 MB cap, and a host check. Cached for 6 h on success and 10 min on failure. Entries show install instructions. Nothing is installed or downloaded by Kory. |
-| PATH autodetect | Known ACP-capable CLI names found on `PATH` (for example `gemini`, `goose`, `copilot`) | Listed as `available`. Listing is never enablement. The argument sets are candidates (`argsVerified: false`) until a probe succeeds. Agents already served by a built-in provider (`opencode`, `devin`) are not listed. |
-| Manual / custom | A command, arguments, env and policy entered by the user | Validated, saved, and probed when added. |
-| OpenAI-compatible endpoints | `custom:*` providers | Unchanged. |
+| Source                      | What it is                                                                             | What Kory does with it                                                                                                                                                                                                  |
+| --------------------------- | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Official registry           | `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`                 | Read-only fetch with a 10 s timeout, redirects refused, a 2 MB cap, and a host check. Cached for 6 h on success and 10 min on failure. Entries show install instructions. Nothing is installed or downloaded by Kory.   |
+| PATH autodetect             | Known ACP-capable CLI names found on `PATH` (for example `gemini`, `goose`, `copilot`) | Listed as `available`. Listing is never enablement. The argument sets are candidates (`argsVerified: false`) until a probe succeeds. Agents already served by a built-in provider (`opencode`, `devin`) are not listed. |
+| Manual / custom             | A command, arguments, env and policy entered by the user                               | Validated, saved, and probed when added.                                                                                                                                                                                |
+| OpenAI-compatible endpoints | `custom:*` providers                                                                   | Unchanged.                                                                                                                                                                                                              |
 
 The registry index is a JSON object with `version`, `agents[]` and `extensions`.
 Each agent has `id`, `name`, `version`, `description`, `repository`, `website`,
@@ -53,11 +53,11 @@ environment and re-probe. It is not selectable until it passes.
 
 ## Storage
 
-| Data | Location | Notes |
-| --- | --- | --- |
-| Definition (`id`, `label`, `command`, `args`, `envNames`, `cwdPolicy`, `permissionProfile`, `source`, `registryId`) | `koryphaios.json`, key `acpAgents` | No secret values. Other keys in the file are preserved. |
-| Env values | `<root>/.koryphaios/acp-agent-env.json`, mode 0600 | The secret store. Only the names are in config. |
-| Probe verdicts | `<root>/.koryphaios/acp-agent-verdicts.json`, mode 0600 | Local state. |
+| Data                                                                                                                | Location                                                | Notes                                                   |
+| ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------- |
+| Definition (`id`, `label`, `command`, `args`, `envNames`, `cwdPolicy`, `permissionProfile`, `source`, `registryId`) | `koryphaios.json`, key `acpAgents`                      | No secret values. Other keys in the file are preserved. |
+| Env values                                                                                                          | `<root>/.koryphaios/acp-agent-env.json`, mode 0600      | The secret store. Only the names are in config.         |
+| Probe verdicts                                                                                                      | `<root>/.koryphaios/acp-agent-verdicts.json`, mode 0600 | Local state.                                            |
 
 `<root>` is `KORYPHAIOS_DATA_DIR` when it is set, otherwise the project root.
 `syncProviderConfigsToConfig` skips `acp:*` providers, so ACP definitions persist
@@ -82,10 +82,10 @@ bound to that agent. Provider keys and Kory bridge grants are not inherited.
 Every profile answers `session/request_permission` fail-closed. Anything not on
 the profile's list is rejected.
 
-| Profile | Allowed kinds | Use |
-| --- | --- | --- |
+| Profile                 | Allowed kinds                                              | Use                                                                                                 |
+| ----------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | `bridge-only` (default) | `read`, `search`, `fetch`, `think`, `other`, `switch_mode` | Normal turns. Native edit, delete, move and execute are rejected. Kory tools go through the bridge. |
-| `read-only` | `read`, `search`, `think` | Used automatically for research-only and native-tools-disabled turns, and selectable per agent. |
+| `read-only`             | `read`, `search`, `think`                                  | Used automatically for research-only and native-tools-disabled turns, and selectable per agent.     |
 
 Research-only turns also set the agent's `plan` mode when it offers one, and wire
 no bridge. `nativeToolsDisabled` turns run in a private temp directory.
@@ -129,8 +129,14 @@ Returns the merged listing. `refresh=1` bypasses the registry cache.
         "envNames": ["MY_AGENT_TOKEN"],
         "cwdPolicy": "workspace",
         "permissionProfile": "bridge-only",
-        "probe": { "ok": true, "checkedAt": 1790000000000, "durationMs": 120,
-                   "models": ["fast", "deep"], "protocolVersion": 1, "agentName": "my-agent" }
+        "probe": {
+          "ok": true,
+          "checkedAt": 1790000000000,
+          "durationMs": 120,
+          "models": ["fast", "deep"],
+          "protocolVersion": 1,
+          "agentName": "my-agent"
+        }
       },
       {
         "id": "gemini",
@@ -148,8 +154,12 @@ Returns the merged listing. `refresh=1` bypasses the registry cache.
         "source": "registry",
         "status": "not-added",
         "version": "1.3.0",
-        "install": { "kind": "npx", "command": "npx", "args": ["-y", "agoragentic-mcp@1.3.0", "--acp"],
-                     "instructions": "Runs via npx: npx -y agoragentic-mcp@1.3.0 --acp" },
+        "install": {
+          "kind": "npx",
+          "command": "npx",
+          "args": ["-y", "agoragentic-mcp@1.3.0", "--acp"],
+          "instructions": "Runs via npx: npx -y agoragentic-mcp@1.3.0 --acp"
+        },
         "command": "npx",
         "args": ["-y", "agoragentic-mcp@1.3.0", "--acp"]
       }
@@ -226,19 +236,19 @@ agentName?, agentVersion?, models, error? }`.
 
 ## Module map
 
-| File | Role |
-| --- | --- |
-| `backend/src/providers/acp/protocol.ts` | ACP types, permission profiles, `session/update` mapping |
-| `backend/src/providers/acp/client.ts` | Generic transport (`AcpClient`), shared by opencode and `acp:<id>` |
-| `backend/src/providers/acp/agent-definitions.ts` | Validation, provider naming, probe projection |
-| `backend/src/providers/acp/agent-store.ts` | `koryphaios.json` definitions, env secrets, verdicts |
-| `backend/src/providers/acp/env.ts` | Default-deny child environment |
-| `backend/src/providers/acp/probe.ts` | Capability probe |
-| `backend/src/providers/acp/sources.ts` | Registry fetch and cache, PATH autodetect |
-| `backend/src/providers/acp/provider.ts` | `AcpAgentProvider` (`acp:<id>`) |
-| `backend/src/providers/acp/agent-service.ts` | List, add, remove and probe orchestration |
-| `backend/src/providers/opencode-acp.ts` | Thin opencode wrapper over `AcpClient` |
-| `backend/src/routes/v1/agents.ts` | `/api/agents` routes |
+| File                                             | Role                                                               |
+| ------------------------------------------------ | ------------------------------------------------------------------ |
+| `backend/src/providers/acp/protocol.ts`          | ACP types, permission profiles, `session/update` mapping           |
+| `backend/src/providers/acp/client.ts`            | Generic transport (`AcpClient`), shared by opencode and `acp:<id>` |
+| `backend/src/providers/acp/agent-definitions.ts` | Validation, provider naming, probe projection                      |
+| `backend/src/providers/acp/agent-store.ts`       | `koryphaios.json` definitions, env secrets, verdicts               |
+| `backend/src/providers/acp/env.ts`               | Default-deny child environment                                     |
+| `backend/src/providers/acp/probe.ts`             | Capability probe                                                   |
+| `backend/src/providers/acp/sources.ts`           | Registry fetch and cache, PATH autodetect                          |
+| `backend/src/providers/acp/provider.ts`          | `AcpAgentProvider` (`acp:<id>`)                                    |
+| `backend/src/providers/acp/agent-service.ts`     | List, add, remove and probe orchestration                          |
+| `backend/src/providers/opencode-acp.ts`          | Thin opencode wrapper over `AcpClient`                             |
+| `backend/src/routes/v1/agents.ts`                | `/api/agents` routes                                               |
 
 ## Tests
 

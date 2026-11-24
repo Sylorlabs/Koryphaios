@@ -21,8 +21,14 @@ import {
   createOpenCodeStatelessTextPatchSkillEvalExecutor,
   MAX_SERIALIZED_REQUEST_BYTES,
 } from '../../eval/skills/skill-eval-opencode-stateless';
-import { snapshotSkillEvalWorkspace, textPatchPrompt } from '../../eval/skills/skill-eval-text-patch';
-import type { SkillEvalExperimentV3, SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
+import {
+  snapshotSkillEvalWorkspace,
+  textPatchPrompt,
+} from '../../eval/skills/skill-eval-text-patch';
+import type {
+  SkillEvalExperimentV3,
+  SkillEvalScenarioV3,
+} from '../../eval/skills/skill-eval-harness';
 import type { SkillEvalExecutionObservation } from '../../eval/skills/skill-eval-execution';
 import { createExecutor } from '../../../../scripts/skill-v5-qualification-executor';
 

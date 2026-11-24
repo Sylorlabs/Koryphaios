@@ -29,7 +29,6 @@ Implement the control the task asks for in the artifact it names, at the path an
 
 When a task supplies synthetic identities or a queue and restore path, exercise them through the code path production uses. A described control is not a verified one.
 
-
 An aggregate event identity has to be pseudonymous and unique per event: derive it from the subject with a per event nonce so two identical calls produce different values, and never emit the account id, the email address or a stable device identifier into emitted events. Opting out deletes the derived profile and tombstones queued events so a later queue drain cannot rehydrate one, and a restore reapplies that suppression before serving.
 
 ## Boundaries

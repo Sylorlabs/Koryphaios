@@ -63,7 +63,12 @@ export const DEFAULT_PERMISSION_MATRIX: PermissionMatrix = {
   defaultLevel: 'ask',
 
   tools: {
-    ...Object.fromEntries(NOTE_WORKSPACE_TOOL_DEFINITIONS.map((tool) => [tool.name, { tool: tool.name, level: tool.category === 'read' ? 'auto' as const : 'ask' as const }])),
+    ...Object.fromEntries(
+      NOTE_WORKSPACE_TOOL_DEFINITIONS.map((tool) => [
+        tool.name,
+        { tool: tool.name, level: tool.category === 'read' ? ('auto' as const) : ('ask' as const) },
+      ]),
+    ),
     // Read operations - safe
     read_file: { tool: 'read_file', level: 'auto' },
     glob: { tool: 'glob', level: 'auto' },

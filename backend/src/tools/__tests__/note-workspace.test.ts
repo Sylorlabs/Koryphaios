@@ -184,10 +184,13 @@ describe('Notes workspace tools', () => {
   test('lists where a note appears across backlinks, canvases and saved views', async () => {
     reset();
     const target = await notes.createNote({ title: 'Appearance tool target' }, root);
-    await notes.createNote({
-      title: 'Appearance tool linker',
-      content: `[[${target.title}]]`,
-    }, root);
+    await notes.createNote(
+      {
+        title: 'Appearance tool linker',
+        content: `[[${target.title}]]`,
+      },
+      root,
+    );
     const board = await run('create_note_canvas', {
       document: canvasFromNotes('Appearance tool board', [target]),
     });

@@ -53,7 +53,9 @@ describe('summarizeImportable', () => {
     expect(summarizeImportable(null)).toEqual(NO_IMPORTABLE_CHATS);
     expect(summarizeImportable({ data: { projects: 'nope' } })).toEqual(NO_IMPORTABLE_CHATS);
     expect(
-      summarizeImportable({ data: { projects: [{ chats: [null, 4, { alreadyImported: false }] }] } }),
+      summarizeImportable({
+        data: { projects: [{ chats: [null, 4, { alreadyImported: false }] }] },
+      }),
     ).toEqual({ count: 1, providerNames: [] });
   });
 });
@@ -63,12 +65,8 @@ describe('importHintText', () => {
     expect(importHintText({ count: 3, providerNames: ['Claude Code', 'Codex'] })).toBe(
       'Import 3 chats from Claude Code / Codex',
     );
-    expect(importHintText({ count: 1, providerNames: ['Codex'] })).toBe(
-      'Import 1 chat from Codex',
-    );
-    expect(importHintText({ count: 2, providerNames: [] })).toBe(
-      'Import 2 chats from local CLIs',
-    );
+    expect(importHintText({ count: 1, providerNames: ['Codex'] })).toBe('Import 1 chat from Codex');
+    expect(importHintText({ count: 2, providerNames: [] })).toBe('Import 2 chats from local CLIs');
   });
 });
 

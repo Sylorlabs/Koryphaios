@@ -138,9 +138,7 @@ export class AsyncChildLedger {
     return this.list()
       .filter(
         (record) =>
-          record.delivery === 'queued' &&
-          record.batchId === batchId &&
-          TERMINAL.has(record.status),
+          record.delivery === 'queued' && record.batchId === batchId && TERMINAL.has(record.status),
       )
       .sort(byCompletion);
   }
@@ -187,7 +185,9 @@ export class AsyncChildLedger {
   } {
     if (agentIds === undefined) {
       return {
-        records: this.list().filter((record) => record.delivery !== 'delivered').sort(byStart),
+        records: this.list()
+          .filter((record) => record.delivery !== 'delivered')
+          .sort(byStart),
         unknown: [],
       };
     }
@@ -292,9 +292,10 @@ export class CompareGroupLedger {
       'Rank the attempts from best to worst against the objective. Judge them on evidence, not on how confident they sound, and name the best attempt in your report. Their summaries are below; inspect the real artifacts in your verification copy before ranking.',
     ];
     attempts.forEach((attempt, index) => {
-      const excerpt = attempt.result.length > COMPARE_RESULT_CHAR_LIMIT
-        ? `${attempt.result.slice(0, COMPARE_RESULT_CHAR_LIMIT)}\n[truncated]`
-        : attempt.result;
+      const excerpt =
+        attempt.result.length > COMPARE_RESULT_CHAR_LIMIT
+          ? `${attempt.result.slice(0, COMPARE_RESULT_CHAR_LIMIT)}\n[truncated]`
+          : attempt.result;
       lines.push(
         `Attempt ${index + 1} (${attempt.agentId}, ${attempt.model ?? 'pool model'}, ${attempt.status}):\n${excerpt}`,
       );
@@ -349,9 +350,10 @@ function renderRecord(record: AsyncChildRecord): string {
     result.length > ASYNC_RESULT_CHAR_LIMIT
       ? `${result.slice(0, ASYNC_RESULT_CHAR_LIMIT)}\n[truncated; ${result.length - ASYNC_RESULT_CHAR_LIMIT} more characters]`
       : result;
-  const task = record.task.length > TASK_PREVIEW_CHARS
-    ? `${record.task.slice(0, TASK_PREVIEW_CHARS)}…`
-    : record.task;
+  const task =
+    record.task.length > TASK_PREVIEW_CHARS
+      ? `${record.task.slice(0, TASK_PREVIEW_CHARS)}…`
+      : record.task;
   const model = record.routedModel ?? record.requestedModel;
   const label = model ? `${record.status}, ${model}` : record.status;
   return [`Worker ${record.agentId} (${label}).`, `Task: ${task}`, body].join('\n');

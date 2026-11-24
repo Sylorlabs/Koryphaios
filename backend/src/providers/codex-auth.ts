@@ -10,10 +10,7 @@ import {
 import type { Provider, ProviderEvent, ProviderMessage, StreamRequest } from './types';
 import { providerLog } from '../logger';
 import { getCliBridge, getKoryphaiosCodexHome, serializeCodexMcpProfile } from './cli-bridges';
-import {
-  koryBridgeUnavailableError,
-  resolveKoryBridgeScript,
-} from './kory-cli-mcp-config';
+import { koryBridgeUnavailableError, resolveKoryBridgeScript } from './kory-cli-mcp-config';
 import {
   appendPrivateDiagnostic,
   safeProviderDiagnostic,

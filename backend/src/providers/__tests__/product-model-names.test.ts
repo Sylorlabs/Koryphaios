@@ -32,9 +32,7 @@ describe('productModelCreditLabel', () => {
 
 describe('productModelDisplayNames (duplicate-model disambiguation)', () => {
   it('leaves a name used once untouched', () => {
-    const entries: ProductModelLabelInput[] = [
-      { id: 'a', name: 'Solo', credits: 'x0.01 credits' },
-    ];
+    const entries: ProductModelLabelInput[] = [{ id: 'a', name: 'Solo', credits: 'x0.01 credits' }];
     expect(productModelDisplayNames(entries)).toEqual(['Solo']);
   });
 
@@ -68,10 +66,7 @@ describe('productModelDisplayNames (duplicate-model disambiguation)', () => {
       { id: 'dup-a', name: 'Dup', credits: 'x0.03 credits' },
       { id: 'dup-b', name: 'Dup', credits: 'x0.03 credits' },
     ];
-    expect(productModelDisplayNames(entries)).toEqual([
-      'Dup (dup-a)',
-      'Dup (dup-b)',
-    ]);
+    expect(productModelDisplayNames(entries)).toEqual(['Dup (dup-a)', 'Dup (dup-b)']);
   });
 
   it('uses an ordinal guard when even the id repeats (malformed catalog)', () => {
@@ -79,9 +74,6 @@ describe('productModelDisplayNames (duplicate-model disambiguation)', () => {
       { id: 'dup', name: 'Dup', credits: 'x0.03 credits' },
       { id: 'dup', name: 'Dup', credits: 'x0.03 credits' },
     ];
-    expect(productModelDisplayNames(entries)).toEqual([
-      'Dup (dup #1)',
-      'Dup (dup #2)',
-    ]);
+    expect(productModelDisplayNames(entries)).toEqual(['Dup (dup #1)', 'Dup (dup #2)']);
   });
 });

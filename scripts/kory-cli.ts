@@ -80,7 +80,7 @@ Plan file for dispatch:
   SUMMARY.md/SUMMARY.json is written alongside them.
 `;
 
-/** 
+/**
  * Boolean flags must never consume the next token: `--json status` used to
  * assign "status" to json and drop the command, so every invocation printed
  * help. Keep this list explicit rather than guessing from the next token.
@@ -151,7 +151,10 @@ async function ensureBearer(): Promise<string> {
       `Cannot open a local session token (${response.status}). Is the backend running? Try: bun run user -- --no-window`,
     );
   }
-  const payload = (await response.json()) as { bearerToken?: string; data?: { bearerToken?: string } };
+  const payload = (await response.json()) as {
+    bearerToken?: string;
+    data?: { bearerToken?: string };
+  };
   const token = payload.bearerToken ?? payload.data?.bearerToken;
   if (!token) throw new Error('Backend returned no bearer token for /api/auth/session');
   bearer = token;
@@ -178,7 +181,10 @@ async function health(): Promise<{ ok: boolean; version?: string }> {
   try {
     const response = await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(4000) });
     if (!response.ok) return { ok: false };
-    const body = (await response.json().catch(() => ({}))) as { version?: string; data?: { version?: string } };
+    const body = (await response.json().catch(() => ({}))) as {
+      version?: string;
+      data?: { version?: string };
+    };
     return { ok: true, version: body.version ?? body.data?.version };
   } catch {
     return { ok: false };
@@ -201,11 +207,15 @@ function providerRows(rows: ProviderRow[]): ProviderRow[] {
 }
 
 function modelIds(row: ProviderRow): string[] {
-  return (row.models ?? []).map((model) =>
-    typeof model === 'string'
-      ? model
-      : ((model as { id?: string; model?: string }).id ?? (model as { model?: string }).model ?? ''),
-  ).filter((id) => id.length > 0);
+  return (row.models ?? [])
+    .map((model) =>
+      typeof model === 'string'
+        ? model
+        : ((model as { id?: string; model?: string }).id ??
+          (model as { model?: string }).model ??
+          ''),
+    )
+    .filter((id) => id.length > 0);
 }
 
 async function readProviders(): Promise<ProviderRow[]> {
@@ -230,9 +240,7 @@ function messageText(message: any): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content
-      .map((part: any) =>
-        typeof part === 'string' ? part : (part?.text ?? part?.content ?? ''),
-      )
+      .map((part: any) => (typeof part === 'string' ? part : (part?.text ?? part?.content ?? '')))
       .join('');
   }
   const parts = message?.parts ?? message?.displayParts ?? message?.contentParts;
@@ -277,7 +285,9 @@ async function resolveDevice(nameOrId: string): Promise<DevicePeer> {
     peers.find((row) => row.name.toLowerCase() === wanted) ??
     peers.find((row) => row.name.toLowerCase().startsWith(wanted));
   if (!peer)
-    throw new Error(`No linked computer matches ${JSON.stringify(nameOrId)}. Run: koryphaios targets`);
+    throw new Error(
+      `No linked computer matches ${JSON.stringify(nameOrId)}. Run: koryphaios targets`,
+    );
   return peer;
 }
 
@@ -474,16 +484,23 @@ class HeadlessAnswerer {
  */
 function headlessAnswer(question: string, options: unknown): string {
   const list = Array.isArray(options)
-    ? options.filter((option): option is string => typeof option === 'string' && option.trim().length > 0)
+    ? options.filter(
+        (option): option is string => typeof option === 'string' && option.trim().length > 0,
+      )
     : [];
   const permitted = list.filter(
-    (option) => !/danger|skip (all|the)? ?permissions?|disable|yolo|always allow|allowlist/i.test(option),
+    (option) =>
+      !/danger|skip (all|the)? ?permissions?|disable|yolo|always allow|allowlist/i.test(option),
   );
   const pool = permitted.length > 0 ? permitted : list;
   const permissionPrompt =
-    /requesting|permission|approve|allow|safety check|outside the working directory/i.test(question);
+    /requesting|permission|approve|allow|safety check|outside the working directory/i.test(
+      question,
+    );
   if (permissionPrompt) {
-    const once = pool.find((option) => /allow once|approve once|just this once|once\b/i.test(option));
+    const once = pool.find((option) =>
+      /allow once|approve once|just this once|once\b/i.test(option),
+    );
     if (once) return once;
   }
   const preferred = pool.find((option) =>
@@ -544,7 +561,10 @@ async function followSession(
       }
 
       const assistant = messages.filter(isAssistant).slice(options.baselineMessages);
-      const text = assistant.map(messageText).filter((chunk) => chunk.trim().length > 0).join('\n\n');
+      const text = assistant
+        .map(messageText)
+        .filter((chunk) => chunk.trim().length > 0)
+        .join('\n\n');
       const status = state?.status ?? (state?.phase === 'idle' ? 'idle' : 'unknown');
 
       if (text === lastText) stablePolls += 1;
@@ -566,7 +586,8 @@ async function followSession(
       // experiment gets counted as finished.
       const withheld = WITHHELD_NOTICE.test(text);
       if (settled && (text.trim().length > 0 || (stablePolls >= 2 && status !== 'idle'))) {
-        const failed = status === 'error' || (status === 'terminal' && state?.terminalReason === 'error');
+        const failed =
+          status === 'error' || (status === 'terminal' && state?.terminalReason === 'error');
         return {
           ok: !failed && !withheld && text.trim().length > 0,
           sessionId,
@@ -612,7 +633,8 @@ async function createSession(title: string, workingDirectory?: string): Promise<
   });
   const session = payload.data ?? payload;
   const id = session.id ?? session.session?.id;
-  if (!id) throw new Error(`Session creation returned no id: ${JSON.stringify(payload).slice(0, 300)}`);
+  if (!id)
+    throw new Error(`Session creation returned no id: ${JSON.stringify(payload).slice(0, 300)}`);
   return id as string;
 }
 
@@ -699,7 +721,9 @@ async function commandStatus(usage: Usage): Promise<number> {
   process.stdout.write(`runs        ${active.length} in flight\n`);
   process.stdout.write(`providers   ${willing.length} with models\n`);
   for (const row of configured) {
-    process.stdout.write(`  ${row.name.padEnd(22)} ${String(modelIds(row).length).padStart(5)} models\n`);
+    process.stdout.write(
+      `  ${row.name.padEnd(22)} ${String(modelIds(row).length).padStart(5)} models\n`,
+    );
   }
   const [provider, ...rest] = DEFAULT_MODEL.split('/');
   const target = providers.find((row) => row.name === provider);
@@ -734,7 +758,9 @@ async function commandModels(usage: Usage): Promise<number> {
     return 0;
   }
   if (Object.keys(output).length === 0) {
-    process.stdout.write(only ? `provider "${only}" exposes no models\n` : 'no provider exposes models\n');
+    process.stdout.write(
+      only ? `provider "${only}" exposes no models\n` : 'no provider exposes models\n',
+    );
     return 1;
   }
   for (const [name, ids] of Object.entries(output)) {
@@ -749,9 +775,14 @@ async function commandUnblock(usage: Usage): Promise<number> {
   const answer = textFlag(usage.flags, 'answer') ?? 'Proceed';
   const only = usage.positionals[0];
   const [sessions, states] = await Promise.all([readSessions(), readRunStates()]);
-  const titles = new Map(sessions.map((session) => [session.id as string, session.title as string]));
+  const titles = new Map(
+    sessions.map((session) => [session.id as string, session.title as string]),
+  );
   const waiting = states.filter(
-    (state) => state.status === 'waiting' && titles.has(state.sessionId) && (!only || state.sessionId === only),
+    (state) =>
+      state.status === 'waiting' &&
+      titles.has(state.sessionId) &&
+      (!only || state.sessionId === only),
   );
   if (waiting.length === 0) {
     process.stdout.write('no parked runs\n');
@@ -900,7 +931,8 @@ async function commandRun(usage: Usage): Promise<number> {
   const reasoning = textFlag(usage.flags, 'reasoning') ?? DEFAULT_REASONING;
   const timeoutSeconds = numberFlag(usage.flags, 'timeout', 3600);
   const cwd = textFlag(usage.flags, 'cwd');
-  const title = textFlag(usage.flags, 'title') ?? `cli: ${prompt.replace(/\s+/g, ' ').slice(0, 48)}`;
+  const title =
+    textFlag(usage.flags, 'title') ?? `cli: ${prompt.replace(/\s+/g, ' ').slice(0, 48)}`;
   if (!usage.flags.quiet) process.stderr.write(`→ ${model} @ ${reasoning}  (${BASE})\n`);
   const deviceName = textFlag(usage.flags, 'device');
   if (deviceName) {
@@ -928,9 +960,7 @@ async function commandRun(usage: Usage): Promise<number> {
       title,
       delegation: { placement, commit: 'none' },
     });
-    process.stderr.write(
-      `→ ${device.name} (${workspace.name}) placement=${placement}\n`,
-    );
+    process.stderr.write(`→ ${device.name} (${workspace.name}) placement=${placement}\n`);
     const submitted = await deviceRpc(device.id, 'prompt', {
       sessionId: chat.id,
       content: prompt,
@@ -1063,9 +1093,7 @@ async function commandCollect(usage: Usage): Promise<number> {
     return 0;
   }
   process.stdout.write(`${outDir}\n`);
-  process.stdout.write(
-    `${written} file(s) copied. Nothing was applied, committed, or pushed.\n`,
-  );
+  process.stdout.write(`${written} file(s) copied. Nothing was applied, committed, or pushed.\n`);
   return 0;
 }
 
@@ -1152,12 +1180,18 @@ async function commandDispatch(usage: Usage): Promise<number> {
       `- agents: ${plan.agents.length}\n- ok: ${summary.finished}\n- failed: ${summary.failed}\n\n` +
       `| agent | session | status | seconds | ok |\n| --- | --- | --- | --- | --- |\n` +
       results
-        .map((r) => `| ${r.sessionId || '—'} | ${r.sessionId || '—'} | ${r.status} | ${r.seconds} | ${r.ok ? 'yes' : 'no'} |`)
+        .map(
+          (r) =>
+            `| ${r.sessionId || '—'} | ${r.sessionId || '—'} | ${r.status} | ${r.seconds} | ${r.ok ? 'yes' : 'no'} |`,
+        )
         .join('\n') +
       '\n',
   );
   if (usage.flags.json) printJson(summary);
-  else process.stdout.write(`${summary.finished}/${plan.agents.length} agents finished; summary in ${outDir}\n`);
+  else
+    process.stdout.write(
+      `${summary.finished}/${plan.agents.length} agents finished; summary in ${outDir}\n`,
+    );
   return summary.failed === 0 ? 0 : 1;
 }
 

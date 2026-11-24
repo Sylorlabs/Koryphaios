@@ -339,7 +339,11 @@ async function stabilizeObservation(
   for (let sample = 1; sample <= maxSamples; sample++) {
     const inspected = command(observer, [String(app.pid)], 12_000);
     const observation = JSON.parse(inspected) as NativeObservation;
-    if (observation.errors.some((message) => message.includes('Native macOS console session is locked'))) {
+    if (
+      observation.errors.some((message) =>
+        message.includes('Native macOS console session is locked'),
+      )
+    ) {
       throw new Error(`Native interactive session unavailable: ${observation.errors.join('; ')}`);
     }
     if (

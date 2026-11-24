@@ -1105,7 +1105,15 @@ function phpRegressionDetectsStarter(
     writeFixtureFile(root, sourcePath, defectiveStarter);
     const execution = run(
       join(root, '.kory-runtime/php'),
-      ['-d', 'display_errors=1', '-d', 'zend.assertions=1', '-d', 'assert.exception=1', 'tests/regression.php'],
+      [
+        '-d',
+        'display_errors=1',
+        '-d',
+        'zend.assertions=1',
+        '-d',
+        'assert.exception=1',
+        'tests/regression.php',
+      ],
       root,
       8_000,
     );
@@ -1135,15 +1143,25 @@ function scorePhp(
   const regressions = authoredRegressionText(root, /\.php$/u, patterns);
   const candidateRegression = run(
     join(root, '.kory-runtime/php'),
-    ['-d', 'display_errors=1', '-d', 'zend.assertions=1', '-d', 'assert.exception=1', 'tests/regression.php'],
+    [
+      '-d',
+      'display_errors=1',
+      '-d',
+      'zend.assertions=1',
+      '-d',
+      'assert.exception=1',
+      'tests/regression.php',
+    ],
     root,
     8_000,
   );
   const candidateTestsPassed = candidateRegression.code === 0 && !candidateRegression.timedOut;
   const detectsStarter =
-    regressions && candidateTestsPassed &&
+    regressions &&
+    candidateTestsPassed &&
     phpRegressionDetectsStarter(root, sourcePath, defectiveStarter);
-  if (!intact(root, fixed)) return fail(['Candidate regression modified an immutable PHP runtime/contract input.'], true);
+  if (!intact(root, fixed))
+    return fail(['Candidate regression modified an immutable PHP runtime/contract input.'], true);
   const hiddenPath = `__kory_hidden_${randomUUID().replaceAll('-', '')}.php`;
   writeFixtureFile(root, hiddenPath, hidden);
   try {
@@ -1155,7 +1173,8 @@ function scorePhp(
     );
     const runtimePassed =
       execution.code === 0 && !execution.timedOut && /KORY_PHP_OK/u.test(execution.stdout);
-    const passed = composer.code === 0 && runtimePassed && regressions && candidateTestsPassed && detectsStarter;
+    const passed =
+      composer.code === 0 && runtimePassed && regressions && candidateTestsPassed && detectsStarter;
     return {
       passed,
       quality: passed ? 1 : runtimePassed && composer.code === 0 && candidateTestsPassed ? 0.75 : 0,
@@ -1165,7 +1184,9 @@ function scorePhp(
         `Composer validation: ${composer.code === 0 ? 'pass' : 'fail'}`,
         `PHP ${V5_HOST_RUNTIME_VERSIONS.php} runtime checks: ${runtimePassed ? 'pass' : execution.timedOut ? 'timeout' : 'fail'}`,
         `candidate regression coverage: ${regressions ? 'present' : 'missing'}; execution: ${candidateTestsPassed ? 'pass' : candidateRegression.timedOut ? 'timeout' : 'fail'}`,
-        `${execution.stdout}\n${execution.stderr}\n${candidateRegression.stdout}\n${candidateRegression.stderr}\n${composer.stdout}\n${composer.stderr}`.slice(-5000),
+        `${execution.stdout}\n${execution.stderr}\n${candidateRegression.stdout}\n${candidateRegression.stderr}\n${composer.stdout}\n${composer.stderr}`.slice(
+          -5000,
+        ),
         `candidate regressions reject original defective starter: ${detectsStarter ? 'yes' : 'no'}`,
       ],
     };
@@ -1210,7 +1231,8 @@ function scoreDotnet(
     18_000,
   );
   const assemblyPath = join(root, 'bin', 'Release', 'net10.0', 'KoryFixture.dll');
-  const projectBuilt = projectBuild.code === 0 && !projectBuild.timedOut && existsSync(assemblyPath);
+  const projectBuilt =
+    projectBuild.code === 0 && !projectBuild.timedOut && existsSync(assemblyPath);
   const hiddenRoot = mkdtempSync(join(tmpdir(), 'kory-dotnet-hidden-'));
   const compiledAssembly = projectBuilt
     ? canonicalizePath(assemblyPath)
@@ -1234,7 +1256,10 @@ function scoreDotnet(
         )
       : { code: null, stdout: '', stderr: 'Candidate project build failed.', timedOut: false };
     const runtimePassed =
-      projectBuilt && execution.code === 0 && !execution.timedOut && /KORY_DOTNET_OK/u.test(execution.stdout);
+      projectBuilt &&
+      execution.code === 0 &&
+      !execution.timedOut &&
+      /KORY_DOTNET_OK/u.test(execution.stdout);
     const passed = runtimePassed && regressions && regressionExecuted && noSyncBlocking;
     return {
       passed,
@@ -1246,7 +1271,9 @@ function scoreDotnet(
         `.NET SDK ${V5_HOST_RUNTIME_VERSIONS.dotnet} compiled runtime checks: ${runtimePassed ? 'pass' : execution.timedOut ? 'timeout' : 'fail'}`,
         `sync-over-async workaround: ${noSyncBlocking ? 'absent' : 'present'}`,
         `candidate regression coverage: ${regressions ? 'present' : 'missing'}; execution: ${regressionExecuted ? 'pass' : regressionRun.timedOut ? 'timeout' : 'fail'}`,
-        `${projectBuild.stdout}\n${projectBuild.stderr}\n${execution.stdout}\n${execution.stderr}\n${regressionRun.stdout}\n${regressionRun.stderr}`.slice(-6000),
+        `${projectBuild.stdout}\n${projectBuild.stderr}\n${execution.stdout}\n${execution.stderr}\n${regressionRun.stdout}\n${regressionRun.stderr}`.slice(
+          -6000,
+        ),
       ],
     };
   } finally {
@@ -1370,19 +1397,27 @@ export const V5_LANGUAGE_HOST_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministi
     id: 'php-engineering/actual-php-worker-lifecycle-scorer@5',
     scenarioIds: [PHP_WORKER_SCENARIO],
     score: ({ workingDirectory }) =>
-      scorePhp(workingDirectory, PHP_WORKER_HIDDEN, PHP_WORKER_README, [
-        /tenant|alternat|request/iu,
-        /exception|fiber|recycle|cache/iu,
-      ], 'src/Worker.php', PHP_WORKER_STARTER),
+      scorePhp(
+        workingDirectory,
+        PHP_WORKER_HIDDEN,
+        PHP_WORKER_README,
+        [/tenant|alternat|request/iu, /exception|fiber|recycle|cache/iu],
+        'src/Worker.php',
+        PHP_WORKER_STARTER,
+      ),
   },
   {
     id: 'php-engineering/actual-php-strict-json-scorer@6',
     scenarioIds: [PHP_JSON_SCENARIO],
     score: ({ workingDirectory }) =>
-      scorePhp(workingDirectory, PHP_JSON_HIDDEN, PHP_JSON_README, [
-        /missing|null|false|boolean|numeric|string/iu,
-        /overflow|invalid|utf|compat|valid/iu,
-      ], 'src/RequestDecoder.php', PHP_JSON_STARTER),
+      scorePhp(
+        workingDirectory,
+        PHP_JSON_HIDDEN,
+        PHP_JSON_README,
+        [/missing|null|false|boolean|numeric|string/iu, /overflow|invalid|utf|compat|valid/iu],
+        'src/RequestDecoder.php',
+        PHP_JSON_STARTER,
+      ),
   },
   {
     id: 'csharp-dotnet-engineering/actual-dotnet-async-disposal-scorer@6',

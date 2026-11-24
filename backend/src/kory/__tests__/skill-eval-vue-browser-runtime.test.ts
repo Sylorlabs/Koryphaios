@@ -24,33 +24,51 @@ afterEach(() => {
 function fixture(number: 1 | 2, runtime = false) {
   const root = mkdtempSync(join(tmpdir(), 'kory-vue-native-test-'));
   roots.push(root);
-  const pkg = loadV5SkillPackages().packages.find((item) => item.sidecar.name === 'vue-engineering');
+  const pkg = loadV5SkillPackages().packages.find(
+    (item) => item.sidecar.name === 'vue-engineering',
+  );
   if (!pkg) throw new Error('The real Vue skill package was not loaded');
   const id = VUE_NATIVE_BROWSER_EVAL_CONSTANTS.scenarios[number - 1];
   const scenario = buildSkillEvalSuiteV3(pkg).scenarios.find((item) => item.id === id);
   if (!scenario) throw new Error(`Vue skill scenario ${id} is unavailable`);
-  const materializer = VUE_NATIVE_BROWSER_SKILL_EVAL_MATERIALIZERS.find((item) => item.matches(scenario));
-  const scorer = VUE_NATIVE_BROWSER_SKILL_EVAL_SCORERS.find((item) => item.scenarioIds.includes(id));
+  const materializer = VUE_NATIVE_BROWSER_SKILL_EVAL_MATERIALIZERS.find((item) =>
+    item.matches(scenario),
+  );
+  const scorer = VUE_NATIVE_BROWSER_SKILL_EVAL_SCORERS.find((item) =>
+    item.scenarioIds.includes(id),
+  );
   if (!materializer || !scorer) throw new Error('Vue native sidecar did not match its scenario');
   if (runtime) materializer.materialize(root, scenario);
   else writeVueBrowserFixtureContract(root, number);
-  const score = () => scorer.score({
-    scenario, experiment: {} as never, workingDirectory: root,
-    observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
-  });
+  const score = () =>
+    scorer.score({
+      scenario,
+      experiment: {} as never,
+      workingDirectory: root,
+      observation: { output: '', evidence: [], artifacts: [], durationMs: 0 },
+    });
   return { root, id, materializer, score };
 }
 
 function verified(root: string, number: 1 | 2) {
-  writeFixtureFile(root, 'verification/result.json', `${JSON.stringify({
-    status: 'verified',
-    vueVersion: VUE_NATIVE_BROWSER_EVAL_CONSTANTS.vueVersion,
-    broaderSkill: 'frontend-engineering',
-    nearNeighbor: number === 1 ? 'angular-engineering' : 'react-engineering',
-    recovery: number === 1
-      ? 'A delayed request resolves after abort; the watcher invalidates the generation before rendering and retries failed detail requests.'
-      : 'Only an ID change or explicit parent reset replaces local edits. Invalid commits focus the name; cancellation restores parent state.',
-  }, null, 2)}\n`);
+  writeFixtureFile(
+    root,
+    'verification/result.json',
+    `${JSON.stringify(
+      {
+        status: 'verified',
+        vueVersion: VUE_NATIVE_BROWSER_EVAL_CONSTANTS.vueVersion,
+        broaderSkill: 'frontend-engineering',
+        nearNeighbor: number === 1 ? 'angular-engineering' : 'react-engineering',
+        recovery:
+          number === 1
+            ? 'A delayed request resolves after abort; the watcher invalidates the generation before rendering and retries failed detail requests.'
+            : 'Only an ID change or explicit parent reset replaces local edits. Invalid commits focus the name; cancellation restores parent state.',
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }
 
 /** Correct independent Vue candidate, run through Bun production bundling and Chromium. */
@@ -154,7 +172,9 @@ describe('isolated native Vue 3 + Chromium skill evaluation sidecar', () => {
       expect(materializer.readinessBlockers).toEqual(blockers);
     }
     if (blockers.length) {
-      expect(blockers.every((blocker) => typeof blocker === 'string' && blocker.length > 10)).toBe(true);
+      expect(blockers.every((blocker) => typeof blocker === 'string' && blocker.length > 10)).toBe(
+        true,
+      );
     } else {
       expect(blockers).toEqual([]);
     }
@@ -164,7 +184,9 @@ describe('isolated native Vue 3 + Chromium skill evaluation sidecar', () => {
     const emptyCache = mkdtempSync(join(tmpdir(), 'kory-vue-empty-cache-'));
     roots.push(emptyCache);
     const previousCache = process.env.BUN_INSTALL_CACHE_DIR;
-    const launch = spyOn(chromium, 'launch').mockRejectedValue(new Error('Unexpected browser launch'));
+    const launch = spyOn(chromium, 'launch').mockRejectedValue(
+      new Error('Unexpected browser launch'),
+    );
     try {
       process.env.BUN_INSTALL_CACHE_DIR = emptyCache;
       expect(vueNativeBrowserReadiness().join('\n')).toContain('Missing pinned vue@3.5.30');
@@ -184,7 +206,9 @@ describe('isolated native Vue 3 + Chromium skill evaluation sidecar', () => {
   });
 
   test('both Vue contracts reject tampered harnesses before runtime preparation', async () => {
-    const launch = spyOn(chromium, 'launch').mockRejectedValue(new Error('Unexpected browser launch'));
+    const launch = spyOn(chromium, 'launch').mockRejectedValue(
+      new Error('Unexpected browser launch'),
+    );
     try {
       for (const number of [1, 2] as const) {
         const { root, score } = fixture(number);
@@ -201,42 +225,66 @@ describe('isolated native Vue 3 + Chromium skill evaluation sidecar', () => {
     }
   });
 
-  browserTest('scenario 1: broken watcher is red; fixed candidate proves real race, history, focus and unmount', async () => {
-    const { root, score } = fixture(1, true);
-    const red = await score();
-    expect(red.passed).toBe(false);
-    expect(red.integrityFailure).toBe(false);
-    expect(red.evidence.some((line) => /out-of-order response cannot overwrite latest route: fail/.test(line)), red.evidence.join('\n')).toBe(true);
+  browserTest(
+    'scenario 1: broken watcher is red; fixed candidate proves real race, history, focus and unmount',
+    async () => {
+      const { root, score } = fixture(1, true);
+      const red = await score();
+      expect(red.passed).toBe(false);
+      expect(red.integrityFailure).toBe(false);
+      expect(
+        red.evidence.some((line) =>
+          /out-of-order response cannot overwrite latest route: fail/.test(line),
+        ),
+        red.evidence.join('\n'),
+      ).toBe(true);
 
-    writeFixtureFile(root, 'src/App.js', ROUTE_FIXED);
-    verified(root, 1);
-    const green = await score();
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    expect(green.integrityFailure).toBe(false);
-    expect(green.quality).toBe(1);
-    expect(green.verification).toBe(1);
-    expect(green.evidence.some((line) => line.includes('Chromium Vue execution without uncaught page exceptions: pass'))).toBe(true);
+      writeFixtureFile(root, 'src/App.js', ROUTE_FIXED);
+      verified(root, 1);
+      const green = await score();
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      expect(green.integrityFailure).toBe(false);
+      expect(green.quality).toBe(1);
+      expect(green.verification).toBe(1);
+      expect(
+        green.evidence.some((line) =>
+          line.includes('Chromium Vue execution without uncaught page exceptions: pass'),
+        ),
+      ).toBe(true);
+    },
+    90_000,
+  );
 
-  }, 90_000);
+  browserTest(
+    'scenario 2: broken deep watchers are red; fixed child proves draft ownership and single emit',
+    async () => {
+      const { root, score } = fixture(2, true);
+      const red = await score();
+      expect(red.passed).toBe(false);
+      expect(red.integrityFailure).toBe(false);
 
-  browserTest('scenario 2: broken deep watchers are red; fixed child proves draft ownership and single emit', async () => {
-    const { root, score } = fixture(2, true);
-    const red = await score();
-    expect(red.passed).toBe(false);
-    expect(red.integrityFailure).toBe(false);
+      writeFixtureFile(root, 'src/App.js', DRAFT_FIXED);
+      verified(root, 2);
+      const green = await score();
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      expect(green.integrityFailure).toBe(false);
+      expect(green.quality).toBe(1);
+      expect(green.verification).toBe(1);
+      expect(
+        green.evidence.some((line) =>
+          line.includes('single explicit commit without watcher feedback: pass'),
+        ),
+      ).toBe(true);
 
-    writeFixtureFile(root, 'src/App.js', DRAFT_FIXED);
-    verified(root, 2);
-    const green = await score();
-    expect(green.passed, green.evidence.join('\n')).toBe(true);
-    expect(green.integrityFailure).toBe(false);
-    expect(green.quality).toBe(1);
-    expect(green.verification).toBe(1);
-    expect(green.evidence.some((line) => line.includes('single explicit commit without watcher feedback: pass'))).toBe(true);
-
-    writeFixtureFile(root, 'verification/result.json', '{"status":"not-run"}\n');
-    const unsupportedClaim = await score();
-    expect(unsupportedClaim.passed).toBe(false);
-    expect(unsupportedClaim.evidence.some((line) => line.includes('candidate provided Vue/version/scope/recovery declaration: fail'))).toBe(true);
-  }, 90_000);
+      writeFixtureFile(root, 'verification/result.json', '{"status":"not-run"}\n');
+      const unsupportedClaim = await score();
+      expect(unsupportedClaim.passed).toBe(false);
+      expect(
+        unsupportedClaim.evidence.some((line) =>
+          line.includes('candidate provided Vue/version/scope/recovery declaration: fail'),
+        ),
+      ).toBe(true);
+    },
+    90_000,
+  );
 });

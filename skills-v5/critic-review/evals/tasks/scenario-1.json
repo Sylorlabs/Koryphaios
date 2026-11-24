@@ -58,10 +58,7 @@
         "no finding is invented to look thorough",
         "the review stays in review scope and does not edit the delivery"
       ],
-      "blindTo": [
-        "skill-variant",
-        "expected-outcome"
-      ]
+      "blindTo": ["skill-variant", "expected-outcome"]
     }
   ],
   "requiredEvidence": [

@@ -126,17 +126,27 @@ describe('Swift runtime readiness and caller-selected compiler contract', () => 
     mkdirSync(sdkRoot);
     writeFileSync(join(sdkRoot, 'SDKSettings.json'), '{}');
     process.env.SDKROOT = '/untrusted/sdk';
-    const result = runSwiftProgram(root, ['source.swift'], join(root, 'candidate'), 'KORY_SWIFT_OK', {
-      developerDir, sdkRoot,
-    });
+    const result = runSwiftProgram(
+      root,
+      ['source.swift'],
+      join(root, 'candidate'),
+      'KORY_SWIFT_OK',
+      {
+        developerDir,
+        sdkRoot,
+      },
+    );
     expect(result.passed).toBe(true);
     const compile = spawn.mock.calls[0]!;
     expect(compile[1]).toContain('-sdk');
     expect(compile[1]).toContain(platform.canonicalizePath(sdkRoot));
     expect((compile[2] as childProcess.SpawnSyncOptions).env!.SDKROOT).toBeUndefined();
-    expect(runSwiftProgram(root, ['source.swift'], join(root, 'candidate'), 'KORY_SWIFT_OK', {
-      developerDir, sdkRoot: '/missing/sdk',
-    }).passed).toBe(false);
+    expect(
+      runSwiftProgram(root, ['source.swift'], join(root, 'candidate'), 'KORY_SWIFT_OK', {
+        developerDir,
+        sdkRoot: '/missing/sdk',
+      }).passed,
+    ).toBe(false);
     expect(spawn).toHaveBeenCalledTimes(2);
   });
 

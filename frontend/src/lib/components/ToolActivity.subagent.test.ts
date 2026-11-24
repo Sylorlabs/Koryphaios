@@ -21,11 +21,21 @@ const explorer: SubagentTranscript = {
   task: 'Find every caller of parseConfig.',
   model: 'claude-haiku',
   turns: [
-    { role: 'user', text: 'Search the repo for parseConfig.', createdAt: Date.UTC(2026, 0, 1, 10, 50) },
+    {
+      role: 'user',
+      text: 'Search the repo for parseConfig.',
+      createdAt: Date.UTC(2026, 0, 1, 10, 50),
+    },
     {
       role: 'assistant',
       parts: [
-        { kind: 'reasoning', text: 'I should grep first.', startedAt: 1, endedAt: 1, timeUnknown: true },
+        {
+          kind: 'reasoning',
+          text: 'I should grep first.',
+          startedAt: 1,
+          endedAt: 1,
+          timeUnknown: true,
+        },
         {
           kind: 'tool',
           callId: 'nested-grep',
@@ -67,14 +77,22 @@ function taskRow(subagent: SubagentTranscript): FeedEntryLocal {
       subagent,
     },
   ];
-  return partsToFeedEntries({ sessionId: 'chat', messageId: 'm1', parts, agentName: 'Kory', glowClass: '' })[0];
+  return partsToFeedEntries({
+    sessionId: 'chat',
+    messageId: 'm1',
+    parts,
+    agentName: 'Kory',
+    glowClass: '',
+  })[0];
 }
 
 describe('ToolActivity sub-agent transcript', () => {
   it('renders collapsed, then expands into nested turns, reasoning, tools and a nested sub-agent', async () => {
     const { container } = render(ToolActivity, { entry: taskRow(explorer) });
 
-    const summary = screen.getByRole('button', { name: /Sub-agent · Explore · 2 turns · claude-haiku/ });
+    const summary = screen.getByRole('button', {
+      name: /Sub-agent · Explore · 2 turns · claude-haiku/,
+    });
     expect(summary.getAttribute('aria-expanded')).toBe('false');
     expect(summary.getAttribute('aria-controls')).toBeNull();
     // Lazy: nothing nested is rendered while collapsed.
@@ -128,7 +146,9 @@ describe('ToolActivity sub-agent transcript', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Sub-agent · Bulk · 120 turns/ }));
     const region = screen.getByRole('region', { name: 'Bulk sub-agent transcript' });
     expect(region.querySelectorAll('li.turn')).toHaveLength(50);
-    await fireEvent.click(within(region).getByRole('button', { name: /Show 50 more turns \(70 remaining\)/ }));
+    await fireEvent.click(
+      within(region).getByRole('button', { name: /Show 50 more turns \(70 remaining\)/ }),
+    );
     expect(region.querySelectorAll('li.turn')).toHaveLength(100);
     await fireEvent.click(within(region).getByRole('button', { name: /Show 20 more turns/ }));
     expect(region.querySelectorAll('li.turn')).toHaveLength(120);

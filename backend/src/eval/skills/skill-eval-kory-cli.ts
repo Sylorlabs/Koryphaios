@@ -1,5 +1,13 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync, lstatSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  lstatSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { SkillEvalExecutor } from './skill-eval-execution';
@@ -123,26 +131,44 @@ interface UsableProvider {
  * authenticated, verified and publishing that exact model, which is the same bar the
  * manager's `resolveProvider` applies before it accepts a turn.
  */
-async function usableProviderFor(base: string, model: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+async function usableProviderFor(
+  base: string,
+  model: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
   const separator = model.indexOf('/');
   if (separator <= 0) return { ok: false, reason: `${model} is not a provider/model id` };
   const provider = model.slice(0, separator);
   const modelId = model.slice(separator + 1);
   try {
     const tokenResponse = await fetch(`${base}/api/auth/session`, { method: 'POST' });
-    if (!tokenResponse.ok) return { ok: false, reason: `backend refused a local session token (${tokenResponse.status})` };
-    const tokenPayload = (await tokenResponse.json()) as { data?: { bearerToken?: string }; bearerToken?: string };
+    if (!tokenResponse.ok)
+      return {
+        ok: false,
+        reason: `backend refused a local session token (${tokenResponse.status})`,
+      };
+    const tokenPayload = (await tokenResponse.json()) as {
+      data?: { bearerToken?: string };
+      bearerToken?: string;
+    };
     const bearer = tokenPayload.data?.bearerToken ?? tokenPayload.bearerToken;
     if (!bearer) return { ok: false, reason: 'backend returned no local session token' };
     const response = await fetch(`${base}/api/providers`, { headers: { authorization: bearer } });
-    if (!response.ok) return { ok: false, reason: `provider status request failed (${response.status})` };
+    if (!response.ok)
+      return { ok: false, reason: `provider status request failed (${response.status})` };
     const payload = (await response.json()) as { data?: unknown };
-    const rows = Array.isArray(payload.data) ? (payload.data as Array<Record<string, unknown>>) : [];
+    const rows = Array.isArray(payload.data)
+      ? (payload.data as Array<Record<string, unknown>>)
+      : [];
     const row = rows.find((item) => item?.name === provider);
-    if (!row) return { ok: false, reason: `provider ${provider} is not configured on this backend` };
-    if (row.authenticated !== true) return { ok: false, reason: `provider ${provider} has no verified credential` };
+    if (!row)
+      return { ok: false, reason: `provider ${provider} is not configured on this backend` };
+    if (row.authenticated !== true)
+      return { ok: false, reason: `provider ${provider} has no verified credential` };
     if (row.connectionState !== 'verified') {
-      return { ok: false, reason: `provider ${provider} is ${String(row.connectionState ?? 'unknown')}, not verified` };
+      return {
+        ok: false,
+        reason: `provider ${provider} is ${String(row.connectionState ?? 'unknown')}, not verified`,
+      };
     }
     const models = Array.isArray(row.models) ? (row.models as string[]) : [];
     if (models.length > 0 && !models.includes(modelId)) {
@@ -150,7 +176,10 @@ async function usableProviderFor(base: string, model: string): Promise<{ ok: tru
     }
     return { ok: true };
   } catch (error: unknown) {
-    return { ok: false, reason: `provider status request failed: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      ok: false,
+      reason: `provider status request failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 
@@ -175,7 +204,9 @@ function runnerPath(options: KoryCliAgenticOptions): string {
   return resolve(dirname(new URL(import.meta.url).pathname), '../../../../scripts/kory-cli.ts');
 }
 
-export function createKoryCliAgenticExecutor(options: KoryCliAgenticOptions = {}): SkillEvalExecutor {
+export function createKoryCliAgenticExecutor(
+  options: KoryCliAgenticOptions = {},
+): SkillEvalExecutor {
   const model = (options.model ?? KORY_CLI_DEFAULT_MODEL).trim();
   const reasoning = (options.reasoning ?? 'high').trim();
   const wallClockMs = options.wallClockMs ?? 3_600_000;
@@ -213,7 +244,10 @@ export function createKoryCliAgenticExecutor(options: KoryCliAgenticOptions = {}
         const infrastructureFailure: SkillInfrastructureFailure = {
           kind: 'provider',
           retryable: true,
-          evidence: [`The named subject ${model} cannot run on this backend: ${availability.reason}`, ...lines],
+          evidence: [
+            `The named subject ${model} cannot run on this backend: ${availability.reason}`,
+            ...lines,
+          ],
           detail: `The named subject ${model} cannot run: ${availability.reason}`,
         };
         return {
@@ -336,12 +370,22 @@ export function createKoryCliAgenticExecutor(options: KoryCliAgenticOptions = {}
         const start = output.lastIndexOf('{\n  "ok"');
         if (start < 0) return null;
         try {
-          return JSON.parse(output.slice(start)) as { ok?: boolean; status?: string; text?: string; error?: string };
+          return JSON.parse(output.slice(start)) as {
+            ok?: boolean;
+            status?: string;
+            text?: string;
+            error?: string;
+          };
         } catch {
           return null;
         }
       })();
-      if (reply && reply.ok === false && !String(reply.text ?? '').trim() && !changed.some((path) => !path.startsWith('.koryphaios/'))) {
+      if (
+        reply &&
+        reply.ok === false &&
+        !String(reply.text ?? '').trim() &&
+        !changed.some((path) => !path.startsWith('.koryphaios/'))
+      ) {
         const timedOut = reply.status === 'timeout';
         const infrastructureFailure: SkillInfrastructureFailure = {
           kind: timedOut ? 'timeout' : 'setup',
@@ -360,7 +404,9 @@ export function createKoryCliAgenticExecutor(options: KoryCliAgenticOptions = {}
       if (
         reply &&
         reply.ok === false &&
-        /withheld|did not complete/iu.test(`${String(reply.error ?? '')} ${String(reply.text ?? '')}`)
+        /withheld|did not complete/iu.test(
+          `${String(reply.error ?? '')} ${String(reply.text ?? '')}`,
+        )
       ) {
         const withheld: SkillInfrastructureFailure = {
           kind: 'setup',
@@ -368,7 +414,8 @@ export function createKoryCliAgenticExecutor(options: KoryCliAgenticOptions = {}
           evidence: [
             `Kory CLI withheld the turn on ${model}: ${JSON.stringify(reply).slice(0, 400)}`,
           ],
-          detail: 'The Kory backend withheld the turn because the provider generation did not complete',
+          detail:
+            'The Kory backend withheld the turn because the provider generation did not complete',
         };
         return { output, evidence, artifacts: [], durationMs, infrastructureFailure: withheld };
       }
@@ -390,11 +437,17 @@ export function createKoryCliAgenticExecutor(options: KoryCliAgenticOptions = {}
         };
         return { output, evidence, artifacts: [], durationMs, infrastructureFailure };
       }
-      if (/401|unauthori[sz]ed|invalid api key|not configured|no provider|model .* not found/iu.test(diagnostic)) {
+      if (
+        /401|unauthori[sz]ed|invalid api key|not configured|no provider|model .* not found/iu.test(
+          diagnostic,
+        )
+      ) {
         const infrastructureFailure: SkillInfrastructureFailure = {
           kind: 'provider',
           retryable: false,
-          evidence: [`The provider rejected the kory-cli turn on ${model}: ${diagnostic.slice(-300)}`],
+          evidence: [
+            `The provider rejected the kory-cli turn on ${model}: ${diagnostic.slice(-300)}`,
+          ],
           detail: `The provider rejected the kory-cli turn on ${model}`,
         };
         return { output, evidence, artifacts: [], durationMs, infrastructureFailure };

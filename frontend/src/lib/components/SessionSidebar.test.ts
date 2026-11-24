@@ -206,9 +206,7 @@ describe('SessionSidebar session controls', () => {
 
     await fireEvent.contextMenu(workspaceRow, { clientX: 24, clientY: 48 });
 
-    expect(
-      screen.getByRole('menu', { name: 'Actions for workspace workspace' }),
-    ).toBeVisible();
+    expect(screen.getByRole('menu', { name: 'Actions for workspace workspace' })).toBeVisible();
   });
 
   it('opens project icon actions from the keyboard context-menu command', async () => {
@@ -281,9 +279,7 @@ describe('SessionSidebar session controls', () => {
 
   /** Each chat row carries one overflow control; every row action lives in it. */
   async function chooseChatAction(name: RegExp) {
-    await fireEvent.click(
-      screen.getAllByRole('button', { name: /^Chat actions for / })[0],
-    );
+    await fireEvent.click(screen.getAllByRole('button', { name: /^Chat actions for / })[0]);
     await fireEvent.click(screen.getByRole('menuitem', { name }));
   }
 
@@ -307,9 +303,7 @@ describe('SessionSidebar session controls', () => {
     render(SessionSidebar);
 
     await fireEvent.click(screen.getAllByRole('button', { name: /^Chat actions for / })[0]);
-    const labels = screen
-      .getAllByRole('menuitem')
-      .map((item) => item.textContent?.trim() ?? '');
+    const labels = screen.getAllByRole('menuitem').map((item) => item.textContent?.trim() ?? '');
     expect(labels).toEqual(['Rename', 'Copy chat ID', 'Archive', 'Delete chat']);
 
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Archive' }));
@@ -385,10 +379,7 @@ describe('SessionSidebar session controls', () => {
   it('always asks before deleting, even after the warning was dismissed once', async () => {
     // A suppression recorded by an older build (or a stale flag) must not turn
     // a chat deletion into a single-click action.
-    localStorage.setItem(
-      'koryphaios-session-action-warnings-v1',
-      JSON.stringify({ delete: true }),
-    );
+    localStorage.setItem('koryphaios-session-action-warnings-v1', JSON.stringify({ delete: true }));
     render(SessionSidebar);
 
     await chooseChatAction(/^Delete chat$/);

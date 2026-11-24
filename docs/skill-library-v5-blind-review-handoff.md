@@ -326,6 +326,7 @@ issues, without reinterpreting historical qualification failures:
   stopping the reported ID `adbb09185e6b96be6` returned **No task found**; do not
   claim it was successfully stopped or rely on any unreceived delegated result.
   The useful framing finding was independently reproduced by main before repair.
+
 - Concurrency semantics: next-task preparation independently reproduced full-score
   false positives under credential-stripped Bun **1.3.14**. Save scorer **@6**
   accepted a stress/iteration comment and a plan artifact explicitly saying it was
@@ -417,14 +418,14 @@ The importer's bounded read-only current-source snapshot at
 and source identities were stable across that observation. Complete exact-current
 eligible pairs were:
 
-| Promotion package | First full task | Second full task |
-| --- | ---: | ---: |
-| debugging | 0 | 2 |
-| deterministic-debugging | 1 | 1 |
-| authorization-security | 2 | 2 |
-| api-contract-design | 1 | 0 |
-| concurrency-debugging | 0 | 0 |
-| data-pipeline-engineering | 2 | 3 |
+| Promotion package         | First full task | Second full task |
+| ------------------------- | --------------: | ---------------: |
+| debugging                 |               0 |                2 |
+| deterministic-debugging   |               1 |                1 |
+| authorization-security    |               2 |                2 |
+| api-contract-design       |               1 |                0 |
+| concurrency-debugging     |               0 |                0 |
+| data-pipeline-engineering |               2 |                3 |
 
 All **14** pairs passed manifest/output/public-contract/full domain-tagged snapshot
 binding. This is not 14 assignments, semantic success approvals or promotion credit.
@@ -440,12 +441,12 @@ A separate next-common-batch read-only snapshot succeeded at
 tracked registered skill sources, selected sidecars/tasks and installed sources
 across that observation:
 
-| Promotion package | First full task | Second full task |
-| --- | ---: | ---: |
-| testing-engineering | 2 | 2 |
-| security-review | 2 | 1 |
-| refactor-implementation | 2 | 2 |
-| typescript-javascript-engineering | 1 | 1 |
+| Promotion package                 | First full task | Second full task |
+| --------------------------------- | --------------: | ---------------: |
+| testing-engineering               |               2 |                2 |
+| security-review                   |               2 |                1 |
+| refactor-implementation           |               2 |                2 |
+| typescript-javascript-engineering |               1 |                1 |
 
 These are **13 complete eligible pairs / 26 arms** with durable anonymous source
 bindings, not new assignments, blind adjudications, semantic approvals or promotion
@@ -456,14 +457,14 @@ Codex quota was used. Both complete TypeScript candidate runs record **passed:fa
 (task1 baseline true; task2 baseline false); eligibility is not successful
 qualification. Current epoch-3 task hashes from that observation are:
 
-| Exact task | Contract hash |
-| --- | --- |
-| testing-engineering-full-task-1 | ec940672d36da692 |
-| testing-engineering-full-task-2 | 89721e34206e19f7 |
-| security-review-full-task-1-individual | 6ad7cd861b638377 |
-| security-review-full-task-2-individual | a0f5b3743db13d8b |
-| refactor-implementation-full-task-1-individual | 96f49f2b2ef6de90 |
-| refactor-implementation-full-task-2-individual | ca7f93fc1f6d4a36 |
+| Exact task                                               | Contract hash    |
+| -------------------------------------------------------- | ---------------- |
+| testing-engineering-full-task-1                          | ec940672d36da692 |
+| testing-engineering-full-task-2                          | 89721e34206e19f7 |
+| security-review-full-task-1-individual                   | 6ad7cd861b638377 |
+| security-review-full-task-2-individual                   | a0f5b3743db13d8b |
+| refactor-implementation-full-task-1-individual           | 96f49f2b2ef6de90 |
+| refactor-implementation-full-task-2-individual           | ca7f93fc1f6d4a36 |
 | typescript-javascript-engineering-full-task-1-individual | 68b46e33eac57f30 |
 | typescript-javascript-engineering-full-task-2-individual | 8f6c90c56ace13c7 |
 

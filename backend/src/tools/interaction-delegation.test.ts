@@ -70,7 +70,8 @@ describe('delegate_to_worker wait and compare', () => {
 
   test('a compare attempt that failed is reported as an error, even when grouped', async () => {
     const ctx = {
-      delegateToWorker: async () => '[compare g · attempt 1 · openai:x]\nWORKER_FAILED (domain=general): boom',
+      delegateToWorker: async () =>
+        '[compare g · attempt 1 · openai:x]\nWORKER_FAILED (domain=general): boom',
     } as unknown as ToolContext;
     const result = await new DelegateToWorkerTool().run(
       ctx,
@@ -89,7 +90,9 @@ describe('delegate_to_worker wait and compare', () => {
   });
 
   test('the schema advertises wait, compare and model', () => {
-    const schema = new DelegateToWorkerTool().inputSchema as { properties: Record<string, unknown> };
+    const schema = new DelegateToWorkerTool().inputSchema as {
+      properties: Record<string, unknown>;
+    };
     expect(Object.keys(schema.properties)).toEqual(
       expect.arrayContaining(['model', 'wait', 'compare', 'worktree']),
     );
@@ -127,7 +130,10 @@ describe('wait_for_agents', () => {
   });
 
   test('is an error when the host did not bind it', async () => {
-    const result = await new WaitForAgentsTool().run({} as ToolContext, call('wait_for_agents', {}));
+    const result = await new WaitForAgentsTool().run(
+      {} as ToolContext,
+      call('wait_for_agents', {}),
+    );
     expect(result.isError).toBe(true);
   });
 

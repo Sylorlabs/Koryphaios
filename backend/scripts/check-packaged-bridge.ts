@@ -20,8 +20,7 @@ const tools = [
 const server = Bun.serve({
   port: 0,
   fetch(req) {
-    if (new URL(req.url).pathname === '/api/v1/mcp-bridge/catalog')
-      return Response.json({ tools });
+    if (new URL(req.url).pathname === '/api/v1/mcp-bridge/catalog') return Response.json({ tools });
     return new Response('not found', { status: 404 });
   },
 });

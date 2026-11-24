@@ -19,24 +19,45 @@ describe('displayed review transport', () => {
     const socket = { data: { id: 'review-client' } } as ServerWebSocket<WSClientData>;
     const dependencies = {
       sessions: { get: async () => ({ id: 'review-session' }) },
-      kory: { handleSessionResponse: async (...args: unknown[]) => { calls.push(args); } },
+      kory: {
+        handleSessionResponse: async (...args: unknown[]) => {
+          calls.push(args);
+        },
+      },
     } as unknown as Parameters<typeof handleWSMessage>[2];
     for (const accepted of [true, false]) {
-      await handleWSMessage(socket, JSON.stringify({
-        type: accepted ? 'session.accept_changes' : 'session.reject_changes',
-        sessionId: 'review-session', reviewId: 'displayed-review', reviewRevision: 'displayed-revision',
-      }), dependencies);
+      await handleWSMessage(
+        socket,
+        JSON.stringify({
+          type: accepted ? 'session.accept_changes' : 'session.reject_changes',
+          sessionId: 'review-session',
+          reviewId: 'displayed-review',
+          reviewRevision: 'displayed-revision',
+        }),
+        dependencies,
+      );
     }
-    expect(calls).toEqual([true, false].map((accepted) => [
-      'review-session', accepted, { reviewId: 'displayed-review', reviewRevision: 'displayed-revision' },
-    ]));
+    expect(calls).toEqual(
+      [true, false].map((accepted) => [
+        'review-session',
+        accepted,
+        { reviewId: 'displayed-review', reviewRevision: 'displayed-revision' },
+      ]),
+    );
   });
 
   test('subscription replay filters stale publications with the same review ID', async () => {
     const sessions = new SessionStore();
-    const session = await sessions.create('local-user', 'replay revision', undefined, '/synthetic-project');
+    const session = await sessions.create(
+      'local-user',
+      'replay revision',
+      undefined,
+      '/synthetic-project',
+    );
     const input = {
-      sessionId: session.id, projectRoot: '/synthetic-project', changes: [],
+      sessionId: session.id,
+      projectRoot: '/synthetic-project',
+      changes: [],
       rollback: { kind: 'unavailable' as const, reason: 'synthetic fixture' },
     };
     const old = await ensurePendingSessionReview(input);
@@ -45,15 +66,31 @@ describe('displayed review transport', () => {
     const sent: WSMessage[] = [];
     const socket = { data: { id: 'review-replay-client' } } as ServerWebSocket<WSClientData>;
     const dependencies = {
-      sessions, runs: { get: () => undefined },
+      sessions,
+      runs: { get: () => undefined },
       wsManager: {
-        subscribeClientToSession: (_client: string, _session: string, _cursor: unknown, predicate: typeof filter) => { filter = predicate; },
-        sendToClientEphemeral: (_client: string, event: WSMessage) => { sent.push(event); },
+        subscribeClientToSession: (
+          _client: string,
+          _session: string,
+          _cursor: unknown,
+          predicate: typeof filter,
+        ) => {
+          filter = predicate;
+        },
+        sendToClientEphemeral: (_client: string, event: WSMessage) => {
+          sent.push(event);
+        },
       },
     } as unknown as Parameters<typeof handleWSMessage>[2];
-    await handleWSMessage(socket, JSON.stringify({ type: 'subscribe_session', sessionId: session.id }), dependencies);
+    await handleWSMessage(
+      socket,
+      JSON.stringify({ type: 'subscribe_session', sessionId: session.id }),
+      dependencies,
+    );
     const event = (reviewRevision?: string): WSMessage => ({
-      type: 'session.changes', sessionId: session.id, timestamp: 1,
+      type: 'session.changes',
+      sessionId: session.id,
+      timestamp: 1,
       payload: { changes: [], reviewId: current.reviewId, reviewRevision },
     });
     expect(filter).toBeDefined();
@@ -61,7 +98,8 @@ describe('displayed review transport', () => {
     expect(filter!(event())).toBe(false);
     expect(filter!(event(current.reviewRevision))).toBe(true);
     expect(sent.find((message) => message.type === 'session.changes')?.payload).toMatchObject({
-      reviewId: current.reviewId, reviewRevision: current.reviewRevision,
+      reviewId: current.reviewId,
+      reviewRevision: current.reviewRevision,
     });
   });
 });
@@ -84,7 +122,12 @@ describe('transcript replay coverage', () => {
     messages?: unknown;
   }): Promise<(event: WSMessage) => boolean> {
     const sessions = new SessionStore();
-    const session = await sessions.create('local-user', 'replay coverage', undefined, '/synthetic-project');
+    const session = await sessions.create(
+      'local-user',
+      'replay coverage',
+      undefined,
+      '/synthetic-project',
+    );
     let filter: ((event: WSMessage) => boolean) | undefined;
     const dependencies = {
       sessions,

@@ -118,9 +118,12 @@ describe('executable lookup', () => {
     try {
       process.env.KORY_SKILL_EVAL_JAVA_HOME = home;
       process.env.PATH = '/nonexistent';
-      asHost('darwin', () => expect(javaToolchainExecutables()).toEqual({
-        javac: join(bin, 'javac'), java: join(bin, 'java'),
-      }));
+      asHost('darwin', () =>
+        expect(javaToolchainExecutables()).toEqual({
+          javac: join(bin, 'javac'),
+          java: join(bin, 'java'),
+        }),
+      );
     } finally {
       if (oldHome === undefined) delete process.env.KORY_SKILL_EVAL_JAVA_HOME;
       else process.env.KORY_SKILL_EVAL_JAVA_HOME = oldHome;

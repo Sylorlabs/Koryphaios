@@ -41,31 +41,28 @@ export const authRoutes = new Elysia({ prefix: '/api/auth' })
       },
     };
   })
-  .post(
-    '/session',
-    async ({ request, set, server }) => {
-      const peerIp = requestPeer(request) ?? server?.requestIP(request)?.address ?? null;
-      if (!canBootstrapLocalSession(request, peerIp)) {
-        if (set) set.status = 403;
-        return { ok: false, error: 'Session creation is restricted to local network.' };
-      }
+  .post('/session', async ({ request, set, server }) => {
+    const peerIp = requestPeer(request) ?? server?.requestIP(request)?.address ?? null;
+    if (!canBootstrapLocalSession(request, peerIp)) {
+      if (set) set.status = 403;
+      return { ok: false, error: 'Session creation is restricted to local network.' };
+    }
 
-      const permissions = ['*'];
-      const session = localAuth.createSession(permissions);
-      const sessionData = localAuth['sessions'].get(session.sessionId);
-      const bearerToken = buildLocalBearerToken(session);
+    const permissions = ['*'];
+    const session = localAuth.createSession(permissions);
+    const sessionData = localAuth['sessions'].get(session.sessionId);
+    const bearerToken = buildLocalBearerToken(session);
 
-      return {
-        ok: true,
-        data: {
-          bearerToken,
-          sessionId: session.sessionId,
-          signature: session.signature,
-          expiresAt: sessionData?.expiresAt,
-        },
-      };
-    },
-  )
+    return {
+      ok: true,
+      data: {
+        bearerToken,
+        sessionId: session.sessionId,
+        signature: session.signature,
+        expiresAt: sessionData?.expiresAt,
+      },
+    };
+  })
   .delete('/session', async ({ request, set }) => {
     const authHeader = request.headers.get('authorization');
     const validation = localAuth.validateRequest(authHeader);

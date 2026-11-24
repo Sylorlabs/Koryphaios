@@ -198,8 +198,8 @@ function spawnSandboxedCommand(
       blockNetwork,
       blockSubprocesses: false,
       allowWindowCapture:
-      process.env.KORY_COMPUTER_USE_WINDOW_CAPTURE === '1' ||
-      process.env.KORY_SKILL_EVAL_COMPUTER_USE === '1',
+        process.env.KORY_COMPUTER_USE_WINDOW_CAPTURE === '1' ||
+        process.env.KORY_SKILL_EVAL_COMPUTER_USE === '1',
     });
     return wrapChildProcess(proc, cleanup);
   }
@@ -350,7 +350,14 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       processName?: string;
     };
     if (ctx.reviewWorkspaceRoot && isBackground) {
-      return { callId: call.id, name: this.name, output: 'Review commands must finish within their timeout so their disposable workspace can be released.', isError: true, durationMs: 0 };
+      return {
+        callId: call.id,
+        name: this.name,
+        output:
+          'Review commands must finish within their timeout so their disposable workspace can be released.',
+        isError: true,
+        durationMs: 0,
+      };
     }
 
     // 1. Resolve and Validate Working Directory
@@ -509,12 +516,20 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         const question =
           `${ctx.callerRole === 'manager' ? 'Kory' : (ctx.agentName ?? 'The agent')} is requesting terminal access outside the working directory.\n\n` +
           (outsideWorkspace ? `Working directory:\n${requestedCwd}\n` : '') +
-          (outsideOperands.length ? `Command path operands:\n${outsideOperands.join('\n')}\n` : '') +
+          (outsideOperands.length
+            ? `Command path operands:\n${outsideOperands.join('\n')}\n`
+            : '') +
           '\nAllow this invocation only?';
         let selection: string;
         try {
           selection = ctx.waitForToolApproval
-            ? await ctx.waitForToolApproval(ctx, call, question, ['Allow once', 'Reject'], ctx.signal)
+            ? await ctx.waitForToolApproval(
+                ctx,
+                call,
+                question,
+                ['Allow once', 'Reject'],
+                ctx.signal,
+              )
             : ctx.waitForUserInput
               ? await ctx.waitForUserInput(question, ['Allow once', 'Reject'], {
                   allowOther: false,
@@ -786,15 +801,15 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
       // unsandboxed manager commands that legitimately need shell features.
       proc = effectiveSandboxed
         ? spawnSandboxedCommand(
-             limitedCommand,
-             requestedCwd,
-             authorizedRoot,
-             mandatoryWorkspaceRoot,
-             Boolean(preferenceSandboxed),
-             externalCwdApproved || ctx.permissionPolicy?.mode === 'yolo'
-               ? [requestedCwd, ...outsideOperands]
-               : [],
-           )
+            limitedCommand,
+            requestedCwd,
+            authorizedRoot,
+            mandatoryWorkspaceRoot,
+            Boolean(preferenceSandboxed),
+            externalCwdApproved || ctx.permissionPolicy?.mode === 'yolo'
+              ? [requestedCwd, ...outsideOperands]
+              : [],
+          )
         : spawnUnsandboxedCommand(limitedCommand, requestedCwd);
 
       const timeoutPromise = new Promise<never>(
@@ -879,8 +894,7 @@ Network access via curl/wget is blocked unless explicitly authorized.`;
         toolResult = {
           callId: call.id,
           name: this.name,
-          output:
-            'Stopped by user. The command was left running so it can finish independently.',
+          output: 'Stopped by user. The command was left running so it can finish independently.',
           isError: false,
           durationMs: 0,
         };

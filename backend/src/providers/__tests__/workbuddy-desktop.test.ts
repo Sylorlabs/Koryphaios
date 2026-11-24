@@ -209,9 +209,11 @@ describe('workbuddy-desktop adapter offline contracts', () => {
       expect(located!.appPath).toBe(app);
       const runtime = resolveWorkBuddyDesktopRuntime(located!);
       expect(runtime).not.toBeNull();
-       expect(runtime!.electronBin).toBe(
-         hostOS() === 'darwin' ? join(app, 'Contents', 'MacOS', 'Electron') : join(app, 'workbuddy-ai'),
-       );
+      expect(runtime!.electronBin).toBe(
+        hostOS() === 'darwin'
+          ? join(app, 'Contents', 'MacOS', 'Electron')
+          : join(app, 'workbuddy-ai'),
+      );
       expect(runtime!.cliBin).toContain('codebuddy');
       expect(runtime!.version).toBe('5.8.4');
       // Models resolve from the bundled product.json.

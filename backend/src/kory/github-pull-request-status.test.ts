@@ -42,8 +42,15 @@ describe('parsePullRequestStatus (recorded gh pr view JSON)', () => {
       ['deploy/preview', 'error'],
       ['codecov/patch', 'pending'],
     ]);
-    expect(status.checks[0]).toMatchObject({ source: 'check-run', workflowName: 'CI', runId: '7710001' });
-    expect(status.checks[4]).toMatchObject({ source: 'status-context', url: 'https://ci.example.test/builds/88' });
+    expect(status.checks[0]).toMatchObject({
+      source: 'check-run',
+      workflowName: 'CI',
+      runId: '7710001',
+    });
+    expect(status.checks[4]).toMatchObject({
+      source: 'status-context',
+      url: 'https://ci.example.test/builds/88',
+    });
     expect(status.checks[4]!.runId).toBeUndefined();
   });
 
@@ -90,19 +97,25 @@ describe('parsePullRequestStatus (recorded gh pr view JSON)', () => {
 
   test('refuses a payload for a different PR number or an unknown state', () => {
     expect(() =>
-      parsePullRequestStatus(fixture('open-failing.json'), { repository: REPO, number: 1, observedAt: 0 }),
+      parsePullRequestStatus(fixture('open-failing.json'), {
+        repository: REPO,
+        number: 1,
+        observedAt: 0,
+      }),
     ).toThrow(ValidationError);
     const weird = { ...(fixture('merged-clean.json') as object), state: 'DRAFTED' };
-    expect(() => parsePullRequestStatus(weird, { repository: REPO, number: 398, observedAt: 0 })).toThrow(
-      ValidationError,
-    );
-    expect(() => parsePullRequestStatus(null, { repository: REPO, number: 1, observedAt: 0 })).toThrow(
-      ValidationError,
-    );
+    expect(() =>
+      parsePullRequestStatus(weird, { repository: REPO, number: 398, observedAt: 0 }),
+    ).toThrow(ValidationError);
+    expect(() =>
+      parsePullRequestStatus(null, { repository: REPO, number: 1, observedAt: 0 }),
+    ).toThrow(ValidationError);
   });
 
   test('bounds long review bodies', () => {
-    const data = structuredClone(fixture('open-failing.json')) as { reviews: Array<{ body: string }> };
+    const data = structuredClone(fixture('open-failing.json')) as {
+      reviews: Array<{ body: string }>;
+    };
     data.reviews[1]!.body = 'x'.repeat(5000);
     const status = parsePullRequestStatus(data, { repository: REPO, number: 412, observedAt: 0 });
     expect(status.reviews[1]!.body.length).toBeLessThanOrEqual(2001);
@@ -110,7 +123,13 @@ describe('parsePullRequestStatus (recorded gh pr view JSON)', () => {
 
   test('requests only the documented field set', () => {
     expect(PULL_REQUEST_STATUS_FIELDS).toEqual(
-      expect.arrayContaining(['statusCheckRollup', 'reviews', 'comments', 'reviewDecision', 'mergeable']),
+      expect.arrayContaining([
+        'statusCheckRollup',
+        'reviews',
+        'comments',
+        'reviewDecision',
+        'mergeable',
+      ]),
     );
   });
 });

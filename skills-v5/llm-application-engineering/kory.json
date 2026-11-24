@@ -5,24 +5,13 @@
   "skillKind": "rulebook",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "ai",
-    "llm",
-    "code"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["ai", "llm", "code"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 6100,
-  "broader": [
-    "implementation"
-  ],
+  "broader": ["implementation"],
   "facets": [],
-  "requires": [
-    "verification",
-    "llm-evaluation"
-  ],
+  "requires": ["verification", "llm-evaluation"],
   "conflicts": [],
   "activation": [
     "llm application",
@@ -86,13 +75,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "rag-retrieval-systems"
-        ],
-        "tags": [
-          "ambiguous",
-          "neighbor-boundary"
-        ]
+        "adjacentSkills": ["rag-retrieval-systems"],
+        "tags": ["ambiguous", "neighbor-boundary"]
       },
       {
         "id": "llm-application-engineering-ambiguous-2",
@@ -100,13 +84,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "agentic-systems"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["ambiguous", "scope-control"]
       },
       {
         "id": "llm-application-engineering-ambiguous-3",
@@ -114,13 +93,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "llm-evaluation"
-        ],
-        "tags": [
-          "ambiguous",
-          "scope-control"
-        ]
+        "adjacentSkills": ["llm-evaluation"],
+        "tags": ["ambiguous", "scope-control"]
       }
     ],
     "adversarial": [
@@ -130,13 +104,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "implementation"
-        ],
-        "tags": [
-          "adversarial",
-          "neighbor-boundary"
-        ]
+        "adjacentSkills": ["implementation"],
+        "tags": ["adversarial", "neighbor-boundary"]
       },
       {
         "id": "llm-application-engineering-adversarial-2",
@@ -144,13 +113,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "verification"
-        ],
-        "tags": [
-          "adversarial",
-          "scope-control"
-        ]
+        "adjacentSkills": ["verification"],
+        "tags": ["adversarial", "scope-control"]
       },
       {
         "id": "llm-application-engineering-adversarial-3",
@@ -158,13 +122,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "ml-evaluation"
-        ],
-        "tags": [
-          "adversarial",
-          "scope-control"
-        ]
+        "adjacentSkills": ["ml-evaluation"],
+        "tags": ["adversarial", "scope-control"]
       }
     ]
   },

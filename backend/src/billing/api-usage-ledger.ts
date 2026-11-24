@@ -414,7 +414,10 @@ export function recordedImageUsageCostUsd(sessionId: string | undefined, since: 
   return total;
 }
 
-function providerFilter(excludedProviders?: ReadonlySet<string>): { clause: string; values: string[] } {
+function providerFilter(excludedProviders?: ReadonlySet<string>): {
+  clause: string;
+  values: string[];
+} {
   const values = [...(excludedProviders ?? [])]
     .map((provider) => provider.trim().toLowerCase())
     .filter(Boolean);
@@ -510,7 +513,12 @@ export async function apiUsageDaily(
          FROM api_usage WHERE ts >= ? AND ${filter.clause}
          GROUP BY day, kind ORDER BY day DESC`,
       )
-      .all(since, ...filter.values) as Array<{ day: string; kind: string; count: number; cost: number | null }>;
+      .all(since, ...filter.values) as Array<{
+      day: string;
+      kind: string;
+      count: number;
+      cost: number | null;
+    }>;
 
     const buckets = new Map<string, ApiUsageDailyBucket>();
     for (const row of rows) {
@@ -583,7 +591,9 @@ async function listAllApiUsage(excludedProviders?: ReadonlySet<string>): Promise
   const filter = providerFilter(excludedProviders);
   for (;;) {
     const page = withDb()
-      .prepare(`SELECT * FROM api_usage WHERE ${filter.clause} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`)
+      .prepare(
+        `SELECT * FROM api_usage WHERE ${filter.clause} ORDER BY ts DESC, id DESC LIMIT ? OFFSET ?`,
+      )
       .all(...filter.values, pageSize, all.length) as Array<Record<string, unknown>>;
     if (page.length === 0) break;
     all.push(...page.map(rowToEntry));

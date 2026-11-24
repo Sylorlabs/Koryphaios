@@ -22,15 +22,33 @@ function createManager(): { manager: WSManager; persisted: WSMessage[] } {
 describe('WSManager session identity (Invariant 4)', () => {
   test('drops a session-scoped event that has no sessionId', () => {
     const { manager, persisted } = createManager();
-    manager.broadcast({ type: 'stream.delta', timestamp: 1, payload: { agentId: 'kory-manager', content: 'x' } } as WSMessage);
-    manager.broadcast({ type: 'stream.complete', timestamp: 2, payload: { agentId: 'kory-manager' } } as WSMessage);
-    manager.broadcast({ type: 'agent.status', timestamp: 3, sessionId: '   ', payload: { agentId: 'w', status: 'done' } } as WSMessage);
+    manager.broadcast({
+      type: 'stream.delta',
+      timestamp: 1,
+      payload: { agentId: 'kory-manager', content: 'x' },
+    } as WSMessage);
+    manager.broadcast({
+      type: 'stream.complete',
+      timestamp: 2,
+      payload: { agentId: 'kory-manager' },
+    } as WSMessage);
+    manager.broadcast({
+      type: 'agent.status',
+      timestamp: 3,
+      sessionId: '   ',
+      payload: { agentId: 'w', status: 'done' },
+    } as WSMessage);
     expect(persisted).toEqual([]);
   });
 
   test('publishes a session-scoped event that carries its sessionId', () => {
     const { manager, persisted } = createManager();
-    manager.broadcast({ type: 'stream.delta', timestamp: 1, sessionId: 'session-1', payload: { agentId: 'kory-manager', content: 'x' } } as WSMessage);
+    manager.broadcast({
+      type: 'stream.delta',
+      timestamp: 1,
+      sessionId: 'session-1',
+      payload: { agentId: 'kory-manager', content: 'x' },
+    } as WSMessage);
     expect(persisted.map((m) => m.type)).toEqual(['stream.delta']);
   });
 

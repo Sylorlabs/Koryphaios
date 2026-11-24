@@ -71,7 +71,10 @@ describe('fork_chat tool', () => {
   });
 
   it('is a control-plane tool allowed in every permission mode, like rename_session', () => {
-    const policy = resolveToolPermissionPolicy({ ...DEFAULT_AGENT_SETTINGS, permissionMode: 'plan' });
+    const policy = resolveToolPermissionPolicy({
+      ...DEFAULT_AGENT_SETTINGS,
+      permissionMode: 'plan',
+    });
     expect(decideToolPermission(policy, 'fork_chat').action).toBe('allow');
   });
 
@@ -79,6 +82,8 @@ describe('fork_chat tool', () => {
     const entry = KORY_TOOLS.find((candidate) => candidate.name === 'kory__fork_chat');
     expect(entry?.role).toBe('manager');
     expect(toolsForRole('manager').map((candidate) => candidate.name)).toContain('kory__fork_chat');
-    expect(toolsForRole('critic').map((candidate) => candidate.name)).not.toContain('kory__fork_chat');
+    expect(toolsForRole('critic').map((candidate) => candidate.name)).not.toContain(
+      'kory__fork_chat',
+    );
   });
 });

@@ -88,7 +88,8 @@ describe('clock schedules are local, not UTC', () => {
 });
 
 describe('next occurrence (host zone)', () => {
-  const at = (y: number, mo: number, d: number, h = 0, mi = 0) => new Date(y, mo, d, h, mi).getTime();
+  const at = (y: number, mo: number, d: number, h = 0, mi = 0) =>
+    new Date(y, mo, d, h, mi).getTime();
 
   test('an interval is "after + interval"', () => {
     expect(nextRunAfter({ kind: 'interval', intervalMs: 90_000 }, 1_000)).toBe(91_000);
@@ -106,9 +107,9 @@ describe('next occurrence (host zone)', () => {
       at(2026, 10, 30, 9),
     );
     // */20 steps within an hour.
-    expect(nextRunAfter({ kind: 'cron', expression: '*/20 14 * * *' }, at(2026, 10, 24, 14, 5))).toBe(
-      at(2026, 10, 24, 14, 20),
-    );
+    expect(
+      nextRunAfter({ kind: 'cron', expression: '*/20 14 * * *' }, at(2026, 10, 24, 14, 5)),
+    ).toBe(at(2026, 10, 24, 14, 20));
   });
 
   test('day-of-month and day-of-week are OR-ed when both are restricted (standard cron)', () => {
@@ -141,7 +142,9 @@ describe('next occurrence (host zone)', () => {
     const now = at(2026, 10, 24, 12);
     expect(() => assertValidSchedule({ kind: 'once', at: now - 1 }, now)).toThrow('future');
     expect(() => assertValidSchedule({ kind: 'daily', time: '25:00' }, now)).toThrow('HH:MM');
-    expect(() => assertValidSchedule({ kind: 'interval', intervalMs: 10 }, now)).toThrow('one second');
+    expect(() => assertValidSchedule({ kind: 'interval', intervalMs: 10 }, now)).toThrow(
+      'one second',
+    );
     expect(() => assertValidSchedule({ kind: 'cron', expression: '0 9 31 2 *' }, now)).toThrow(
       'never fires',
     );

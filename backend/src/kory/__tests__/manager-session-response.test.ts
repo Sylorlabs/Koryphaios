@@ -120,11 +120,18 @@ describe('KoryManager session-scoped keep/reject decisions', () => {
   for (const accepted of [true, false]) {
     test(`a stale displayed revision cannot ${accepted ? 'accept' : 'reject'} a refreshed review`, async () => {
       const repo = makeDirectory('kory-response-stale-revision');
-      const durable = await new SessionStore().create('local-user', 'revision race', undefined, repo);
+      const durable = await new SessionStore().create(
+        'local-user',
+        'revision race',
+        undefined,
+        repo,
+      );
       const publication = {
         sessionId: durable.id,
         projectRoot: repo,
-        changes: [{ path: 'retained.txt', operation: 'edit' as const, linesAdded: 1, linesDeleted: 0 }],
+        changes: [
+          { path: 'retained.txt', operation: 'edit' as const, linesAdded: 1, linesDeleted: 0 },
+        ],
         rollback: { kind: 'git' as const, baselineHash: 'must-not-be-used' },
       };
       const displayed = await ensurePendingSessionReview(publication);
@@ -134,11 +141,12 @@ describe('KoryManager session-scoped keep/reject decisions', () => {
       writeFileSync(join(repo, 'retained.txt'), 'keep this file');
       const manager = createManager(repo, sessionStore([session(durable.id, repo)]));
       try {
-        await expect(manager.handleSessionResponse(durable.id, accepted, displayed)).rejects.toThrow(
-          'review has changed',
-        );
+        await expect(
+          manager.handleSessionResponse(durable.id, accepted, displayed),
+        ).rejects.toThrow('review has changed');
         expect(await getSessionReview(durable.id)).toMatchObject({
-          status: 'pending', reviewRevision: replacement.reviewRevision,
+          status: 'pending',
+          reviewRevision: replacement.reviewRevision,
         });
         expect(readFileSync(join(repo, 'retained.txt'), 'utf8')).toBe('keep this file');
         const lease = manager.tryAcquireSessionMutationBarrier(durable.id);
@@ -152,16 +160,26 @@ describe('KoryManager session-scoped keep/reject decisions', () => {
 
   test('an identity-less decision cannot authorize the current durable review', async () => {
     const repo = makeDirectory('kory-response-missing-identity');
-    const durable = await new SessionStore().create('local-user', 'missing identity', undefined, repo);
+    const durable = await new SessionStore().create(
+      'local-user',
+      'missing identity',
+      undefined,
+      repo,
+    );
     const displayed = await ensurePendingSessionReview({
-      sessionId: durable.id, projectRoot: repo, changes: [],
+      sessionId: durable.id,
+      projectRoot: repo,
+      changes: [],
       rollback: { kind: 'unavailable', reason: 'no rollback needed' },
     });
     const manager = createManager(repo, sessionStore([session(durable.id, repo)]));
     try {
-      await expect(manager.handleSessionResponse(durable.id, true)).rejects.toThrow('review identity');
+      await expect(manager.handleSessionResponse(durable.id, true)).rejects.toThrow(
+        'review identity',
+      );
       expect(await getSessionReview(durable.id)).toMatchObject({
-        status: 'pending', reviewRevision: displayed.reviewRevision,
+        status: 'pending',
+        reviewRevision: displayed.reviewRevision,
       });
     } finally {
       manager.shutdown();
@@ -256,7 +274,9 @@ describe('KoryManager session-scoped keep/reject decisions', () => {
 
       // A legacy in-memory projection must be displayed with its new identity
       // before any decision is authorized, even in a still-running manager.
-      await expect(manager.handleSessionResponse(sessionId, false)).rejects.toThrow('review identity');
+      await expect(manager.handleSessionResponse(sessionId, false)).rejects.toThrow(
+        'review identity',
+      );
       const displayed = await getSessionReview(sessionId);
       expect(displayed?.status).toBe('pending');
       await manager.handleSessionResponse(sessionId, false, displayed!);

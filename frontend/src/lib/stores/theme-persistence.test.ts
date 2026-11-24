@@ -165,16 +165,16 @@ describe('theme mode and scheme behaviour', () => {
     setSystemScheme('light');
     expect(theme.activeScheme).toBe('light');
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
-    expect(
-      document.documentElement.style.getPropertyValue('--color-surface-0'),
-    ).toBe(THEME_PRESETS[theme.light.preset]['--color-surface-0']);
+    expect(document.documentElement.style.getPropertyValue('--color-surface-0')).toBe(
+      THEME_PRESETS[theme.light.preset]['--color-surface-0'],
+    );
 
     setSystemScheme('dark');
     expect(theme.activeScheme).toBe('dark');
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
-    expect(
-      document.documentElement.style.getPropertyValue('--color-surface-0'),
-    ).toBe(THEME_PRESETS[theme.dark.preset]['--color-surface-0']);
+    expect(document.documentElement.style.getPropertyValue('--color-surface-0')).toBe(
+      THEME_PRESETS[theme.dark.preset]['--color-surface-0'],
+    );
     cleanup?.();
   });
 

@@ -181,8 +181,7 @@ export class KoryphaiosMCPServer extends EventEmitter {
       // A plain z.object({}) silently strips every unknown key before the
       // registry handler sees it, which makes plugin tools appear to succeed
       // while receiving an empty argument object.
-      const inputSchema =
-        KoryphaiosMCPServer.TOOL_SCHEMAS[tool.name] ?? z.object({}).passthrough();
+      const inputSchema = KoryphaiosMCPServer.TOOL_SCHEMAS[tool.name] ?? z.object({}).passthrough();
       server.registerTool(
         tool.name,
         { description: tool.description, inputSchema },
@@ -195,7 +194,7 @@ export class KoryphaiosMCPServer extends EventEmitter {
             content: result.content,
             isError: result.isError,
           } as any;
-        },
+        }
       );
     }
   }
@@ -217,7 +216,7 @@ export class KoryphaiosMCPServer extends EventEmitter {
         async (uri: URL) => {
           const content = await this.resourceManager.readResource(uri.toString());
           return { contents: [content] } as any;
-        },
+        }
       );
     }
   }
@@ -235,8 +234,8 @@ export class KoryphaiosMCPServer extends EventEmitter {
         // PromptResult allows role: 'system' which the SDK's GetPromptResult
         // doesn't; cast to satisfy the SDK's narrower type.
         async (args: Record<string, unknown>) => {
-          return await this.promptRegistry.executePrompt(prompt.name, args) as any;
-        },
+          return (await this.promptRegistry.executePrompt(prompt.name, args)) as any;
+        }
       );
     }
   }

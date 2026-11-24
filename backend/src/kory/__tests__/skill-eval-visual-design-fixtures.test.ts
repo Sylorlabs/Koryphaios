@@ -29,8 +29,12 @@ async function materialized(scenarioId: string) {
   const scenario = suite.scenarios.find((item) => item.id === scenarioId)!;
   const root = mkdtempSync(join(tmpdir(), 'kory-visual-direction-'));
   roots.push(root);
-  const materializer = VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS.find((item) => item.matches(scenario))!;
-  const scorer = VISUAL_DESIGN_SKILL_EVAL_SCORERS.find((item) => item.scenarioIds.includes(scenario.id))!;
+  const materializer = VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS.find((item) =>
+    item.matches(scenario),
+  )!;
+  const scorer = VISUAL_DESIGN_SKILL_EVAL_SCORERS.find((item) =>
+    item.scenarioIds.includes(scenario.id),
+  )!;
   await materializer.materialize(root, scenario);
   const score = (workingDirectory = root) =>
     scorer.score({
@@ -65,8 +69,16 @@ function completeDirection(root: string) {
     identity: {
       shared: ['title treatment', 'sidebar geometry', 'label and value rhythm'],
       adapted: [
-        { platform: 'macos', decision: 'Keep the native bezel and metric spacing.', rationale: 'Platform control metrics already carry familiarity here.' },
-        { platform: 'windows', decision: 'Adopt the platform dialog chrome and padding.', rationale: 'Windows users read its modal metrics as the expected affordance.' },
+        {
+          platform: 'macos',
+          decision: 'Keep the native bezel and metric spacing.',
+          rationale: 'Platform control metrics already carry familiarity here.',
+        },
+        {
+          platform: 'windows',
+          decision: 'Adopt the platform dialog chrome and padding.',
+          rationale: 'Windows users read its modal metrics as the expected affordance.',
+        },
       ],
     },
     system: {
@@ -136,8 +148,12 @@ describe('visual direction real-source fixtures', () => {
     // small but not zero; every authored requirement must still fail.
     expect(red.verification).toBeLessThan(0.5);
     expect(red.quality).toBeLessThan(0.3);
-    expect(red.evidence).toContain('evaluator supplied source, tokens and captures: pass — all seven captures and the source are present');
-    expect(red.evidence.some((line) => line.startsWith('surface identity recorded honestly: fail'))).toBe(true);
+    expect(red.evidence).toContain(
+      'evaluator supplied source, tokens and captures: pass — all seven captures and the source are present',
+    );
+    expect(
+      red.evidence.some((line) => line.startsWith('surface identity recorded honestly: fail')),
+    ).toBe(true);
   });
 
   test('a complete artifact passes only when every truncation claim matches the render', async () => {

@@ -22,7 +22,11 @@ export function indentLines(text: string, prefix: string): string[] {
 }
 
 /** Keep at most `maxLines` lines and `maxChars` characters, marking any cut. */
-export function boundLines(lines: readonly string[], maxLines: number, maxChars: number): {
+export function boundLines(
+  lines: readonly string[],
+  maxLines: number,
+  maxChars: number,
+): {
   lines: string[];
   truncated: boolean;
 } {

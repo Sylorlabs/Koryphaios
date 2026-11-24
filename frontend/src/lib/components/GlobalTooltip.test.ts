@@ -52,7 +52,9 @@ describe('global tooltip side placement', () => {
   it('places an opted-in tooltip to the right of its trigger, vertically centred', async () => {
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1200);
     vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800);
-    vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 160, 30));
+    vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      rect(0, 0, 160, 30),
+    );
     const { unmount } = render(GlobalTooltip);
     const navItem = document.createElement('button');
     navItem.title = 'Providers and models';
@@ -75,7 +77,9 @@ describe('global tooltip side placement', () => {
   it('falls back to the left when the right side would overflow the viewport', async () => {
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1200);
     vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800);
-    vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 160, 30));
+    vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      rect(0, 0, 160, 30),
+    );
     const { unmount } = render(GlobalTooltip);
     const navItem = document.createElement('button');
     navItem.title = 'Edge item';
@@ -96,7 +100,9 @@ describe('global tooltip side placement', () => {
   it('keeps the default top placement for triggers without the attribute', async () => {
     vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1200);
     vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(800);
-    vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 160, 30));
+    vi.spyOn(HTMLDivElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      rect(0, 0, 160, 30),
+    );
     const { unmount } = render(GlobalTooltip);
     const button = document.createElement('button');
     button.title = 'Plain action';

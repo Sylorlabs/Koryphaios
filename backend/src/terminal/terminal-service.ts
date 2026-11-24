@@ -45,12 +45,18 @@ export class TerminalService {
 
   create(table: TerminalTable, input: CreateTerminalInput): TerminalSession {
     if (!input.cwd || !existsSync(input.cwd) || !statSync(input.cwd).isDirectory()) {
-      throw new ValidationError('The terminal folder does not exist. Open the chat again and retry.');
+      throw new ValidationError(
+        'The terminal folder does not exist. Open the chat again and retry.',
+      );
     }
     if (table.size >= TERMINAL_MAX_PER_CHAT) {
-      throw new ConflictError(`This chat already has ${TERMINAL_MAX_PER_CHAT} terminals. Close one first.`);
+      throw new ConflictError(
+        `This chat already has ${TERMINAL_MAX_PER_CHAT} terminals. Close one first.`,
+      );
     }
-    const shell = input.command ? { command: input.command, args: input.args ?? [] } : interactiveShell();
+    const shell = input.command
+      ? { command: input.command, args: input.args ?? [] }
+      : interactiveShell();
     const id = nanoid(12);
     const sessionId = input.sessionId;
     const session = new TerminalSession({

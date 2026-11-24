@@ -47,7 +47,14 @@ function agentConfig(overrides: Record<string, unknown> = {}, probeOk = true): P
       source: 'manual',
       ...overrides,
       ...(probeOk
-        ? { probe: { ok: true, checkedAt: Date.now(), protocolVersion: 1, models: ['fake-small', 'fake-large'] } }
+        ? {
+            probe: {
+              ok: true,
+              checkedAt: Date.now(),
+              protocolVersion: 1,
+              models: ['fake-small', 'fake-large'],
+            },
+          }
         : {}),
     },
   } as unknown as ProviderConfig;
@@ -83,7 +90,10 @@ describe('acp:<id> provider: handshake and streaming', () => {
     const provider = new AcpAgentProvider(agentConfig(), envLoader());
     const events = await collect(provider.streamResponse(request()));
 
-    const text = events.filter((e) => e.type === 'content_delta').map((e: any) => e.content).join('');
+    const text = events
+      .filter((e) => e.type === 'content_delta')
+      .map((e: any) => e.content)
+      .join('');
     expect(text).toContain('Hello from fake agent');
     expect(events.some((e) => e.type === 'thinking_delta')).toBe(true);
 
@@ -139,7 +149,11 @@ describe('acp:<id> provider: handshake and streaming', () => {
   it('switches to the plan mode for research-only turns', async () => {
     resetState();
     const provider = new AcpAgentProvider(agentConfig(), envLoader());
-    await collect(provider.streamResponse(request({ capabilityProfile: 'research-only' } as Partial<StreamRequest>)));
+    await collect(
+      provider.streamResponse(
+        request({ capabilityProfile: 'research-only' } as Partial<StreamRequest>),
+      ),
+    );
     expect(readState().config.mode).toBe('plan');
   });
 });
@@ -158,7 +172,11 @@ describe('acp:<id> provider: permission veto and bridge', () => {
     resetState();
     const provider = new AcpAgentProvider(agentConfig(), envLoader());
     await collect(provider.streamResponse(request()));
-    const servers = readState().newSession.mcpServers as Array<{ name: string; args: string[]; env: Array<{ name: string; value: string }> }>;
+    const servers = readState().newSession.mcpServers as Array<{
+      name: string;
+      args: string[];
+      env: Array<{ name: string; value: string }>;
+    }>;
     expect(servers).toHaveLength(1);
     expect(servers[0]!.name).toBe('kory');
     expect(servers[0]!.args).toContain('acp:fake');
@@ -168,7 +186,11 @@ describe('acp:<id> provider: permission veto and bridge', () => {
   it('wires no MCP bridge for research-only turns', async () => {
     resetState();
     const provider = new AcpAgentProvider(agentConfig(), envLoader());
-    await collect(provider.streamResponse(request({ capabilityProfile: 'research-only' } as Partial<StreamRequest>)));
+    await collect(
+      provider.streamResponse(
+        request({ capabilityProfile: 'research-only' } as Partial<StreamRequest>),
+      ),
+    );
     expect(readState().newSession.mcpServers).toEqual([]);
   });
 
@@ -210,7 +232,9 @@ describe('ACP client transport', () => {
       providerName: 'acp:missing',
       label: 'Missing',
     });
-    await expect(client.connect()).rejects.toThrow(/command not found|failed to start|not connected/);
+    await expect(client.connect()).rejects.toThrow(
+      /command not found|failed to start|not connected/,
+    );
     await client.disconnect();
   });
 });
@@ -225,7 +249,11 @@ describe('capability probe verdicts', () => {
 
   it('records ok, protocol, agent identity and the offered models', async () => {
     resetState();
-    const verdict = await probeAcpAgent(target(), { baseEnv: { PATH: process.env.PATH ?? '' }, secretEnv: { FAKE_ACP_STATE: statePath }, timeoutMs: 5000 });
+    const verdict = await probeAcpAgent(target(), {
+      baseEnv: { PATH: process.env.PATH ?? '' },
+      secretEnv: { FAKE_ACP_STATE: statePath },
+      timeoutMs: 5000,
+    });
     expect(verdict.ok).toBe(true);
     expect(verdict.protocolVersion).toBe(1);
     expect(verdict.agentName).toBe('fake-acp');
@@ -236,30 +264,44 @@ describe('capability probe verdicts', () => {
   });
 
   it('fails when the agent speaks a different protocol version', async () => {
-    const verdict = await probeAcpAgent(target(), { secretEnv: { FAKE_ACP_STATE: statePath, FAKE_ACP_PROTOCOL: '2' }, timeoutMs: 5000 });
+    const verdict = await probeAcpAgent(target(), {
+      secretEnv: { FAKE_ACP_STATE: statePath, FAKE_ACP_PROTOCOL: '2' },
+      timeoutMs: 5000,
+    });
     expect(verdict.ok).toBe(false);
     expect(verdict.error).toContain('protocol 2');
   });
 
   it('fails when the command is missing', async () => {
-    const verdict = await probeAcpAgent(target([], join(dir, 'no-such-agent')), { timeoutMs: 5000 });
+    const verdict = await probeAcpAgent(target([], join(dir, 'no-such-agent')), {
+      timeoutMs: 5000,
+    });
     expect(verdict.ok).toBe(false);
     expect(verdict.error).toBeTruthy();
   });
 
   it('times out an agent that never answers initialize', async () => {
-    const verdict = await probeAcpAgent(target(), { secretEnv: { FAKE_ACP_STATE: statePath, FAKE_ACP_MODE: 'hang-init' }, timeoutMs: 400 });
+    const verdict = await probeAcpAgent(target(), {
+      secretEnv: { FAKE_ACP_STATE: statePath, FAKE_ACP_MODE: 'hang-init' },
+      timeoutMs: 400,
+    });
     expect(verdict.ok).toBe(false);
     expect(verdict.error).toMatch(/timed out|timeout/);
   });
 
   it('fails an agent that exits during the handshake', async () => {
-    const verdict = await probeAcpAgent(target(), { secretEnv: { FAKE_ACP_STATE: statePath, FAKE_ACP_MODE: 'exit-init' }, timeoutMs: 5000 });
+    const verdict = await probeAcpAgent(target(), {
+      secretEnv: { FAKE_ACP_STATE: statePath, FAKE_ACP_MODE: 'exit-init' },
+      timeoutMs: 5000,
+    });
     expect(verdict.ok).toBe(false);
   });
 
   it('keeps an agent with no model option ok, with an empty model list', async () => {
-    const verdict = await probeAcpAgent(target(), { secretEnv: { FAKE_ACP_STATE: statePath, FAKE_ACP_MODELS: '' }, timeoutMs: 5000 });
+    const verdict = await probeAcpAgent(target(), {
+      secretEnv: { FAKE_ACP_STATE: statePath, FAKE_ACP_MODELS: '' },
+      timeoutMs: 5000,
+    });
     expect(verdict.ok).toBe(true);
     expect(verdict.models).toEqual([]);
   });
@@ -269,14 +311,21 @@ describe('probe helpers', () => {
   it('extracts unique model ids from model config options only', () => {
     expect(
       modelIdsFromConfigOptions([
-        { id: 'model', name: 'Model', type: 'select', options: [{ value: 'a' }, { value: 'b' }, { value: 'a' }] },
+        {
+          id: 'model',
+          name: 'Model',
+          type: 'select',
+          options: [{ value: 'a' }, { value: 'b' }, { value: 'a' }],
+        },
         { id: 'mode', name: 'Mode', type: 'select', options: [{ value: 'plan' }] },
       ]),
     ).toEqual(['a', 'b']);
   });
 
   it('redacts token-shaped strings and bounds probe errors', () => {
-    expect(sanitizeProbeError('auth failed for sk-abcdef123456789')).not.toContain('sk-abcdef123456789');
+    expect(sanitizeProbeError('auth failed for sk-abcdef123456789')).not.toContain(
+      'sk-abcdef123456789',
+    );
     expect(sanitizeProbeError('x'.repeat(1000)).length).toBeLessThanOrEqual(300);
   });
 });

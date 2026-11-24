@@ -160,12 +160,12 @@ describe('splitDevinModelSlug', () => {
       sidekick: '-sidekick-glm-5-2',
     });
     // The sidekick's own effort token is identity, not the lead tier.
-    expect(splitDevinModelSlug('fusion-claude-opus-5-5-medium-sidekick-swe-2-medium')).toMatchObject(
-      {
-        family: 'fusion-claude-opus-5-5-sidekick-swe-2-medium',
-        effort: 'medium',
-      },
-    );
+    expect(
+      splitDevinModelSlug('fusion-claude-opus-5-5-medium-sidekick-swe-2-medium'),
+    ).toMatchObject({
+      family: 'fusion-claude-opus-5-5-sidekick-swe-2-medium',
+      effort: 'medium',
+    });
   });
 });
 
@@ -256,10 +256,7 @@ describe('collapseDevinReasoningTiers', () => {
         'fusion-c-medium-fast-sidekick-gpt-d-high-priority',
         'Fusion (C Medium Fast + D High Fast)',
       ),
-      def(
-        'fusion-c-high-fast-sidekick-gpt-d-high-priority',
-        'Fusion (C High Fast + D High Fast)',
-      ),
+      def('fusion-c-high-fast-sidekick-gpt-d-high-priority', 'Fusion (C High Fast + D High Fast)'),
     ]);
     // Exactly one model — no per-pairing `fusion-*` ids survive.
     expect(out.map((m) => m.id)).toEqual(['fusion']);
@@ -378,12 +375,12 @@ describe('fast/priority speed families fold into the standard model', () => {
     ]);
     // Fusion carries no fast tier — the slots own the speed coupling.
     const fusion = out.find((m) => m.id === 'fusion')!;
-    expect(fusion.fusion?.pairings[
-      'claude-opus-5-5|std|swe-2|medium'
-    ]?.medium).toBe('fusion-claude-opus-5-5-medium-sidekick-swe-2-medium');
-    expect(
-      fusion.fusion?.pairings['claude-opus-5-5|fast|swe-2|medium']?.high,
-    ).toBe('fusion-claude-opus-5-5-high-fast-sidekick-swe-2-medium');
+    expect(fusion.fusion?.pairings['claude-opus-5-5|std|swe-2|medium']?.medium).toBe(
+      'fusion-claude-opus-5-5-medium-sidekick-swe-2-medium',
+    );
+    expect(fusion.fusion?.pairings['claude-opus-5-5|fast|swe-2|medium']?.high).toBe(
+      'fusion-claude-opus-5-5-high-fast-sidekick-swe-2-medium',
+    );
     expect(fusion.speedTiers).toBeUndefined();
     expect(fusion.aliases).toEqual(
       expect.arrayContaining([
@@ -579,9 +576,7 @@ describe('SendMessageRequestSchema fusion strictness', () => {
       content: 'hi',
       clientMessageId: 'cm_test-123',
     };
-    expect(
-      SendMessageRequestSchema.safeParse({ ...base, fusion }).success,
-    ).toBe(true);
+    expect(SendMessageRequestSchema.safeParse({ ...base, fusion }).success).toBe(true);
     expect(
       SendMessageRequestSchema.safeParse({
         ...base,

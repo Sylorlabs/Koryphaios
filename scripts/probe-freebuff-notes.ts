@@ -137,32 +137,30 @@ try {
             let pasted = false;
             let capturePolls = 0;
             return {
-               ...runtime,
-               tmux: async (args) => {
-                 let result: string;
-                 try {
-                   result = await runtime.tmux(args);
-                 } catch (error) {
-                   if (args[0] === 'has-session') {
-                     const pane = await runtime.tmux([
-                       'capture-pane',
-                       '-p',
-                       '-J',
-                       '-t',
-                       runtime.session,
-                     ]).catch(() => '');
-                     console.log(JSON.stringify({
-                       stage: 'private_runtime_exit',
-                       paneCharacters: pane.length,
-                       freebucksVisible: /Freebucks/i.test(pane),
-                       insufficientFreebucks: /not enough freebucks/i.test(pane),
-                       errorVisible: /error|failed|unavailable/i.test(pane),
-                       loginVisible: /sign in|log in/i.test(pane),
-                       errorCode: (error as { code?: string | number }).code,
-                     }));
-                   }
-                   throw error;
-                 }
+              ...runtime,
+              tmux: async (args) => {
+                let result: string;
+                try {
+                  result = await runtime.tmux(args);
+                } catch (error) {
+                  if (args[0] === 'has-session') {
+                    const pane = await runtime
+                      .tmux(['capture-pane', '-p', '-J', '-t', runtime.session])
+                      .catch(() => '');
+                    console.log(
+                      JSON.stringify({
+                        stage: 'private_runtime_exit',
+                        paneCharacters: pane.length,
+                        freebucksVisible: /Freebucks/i.test(pane),
+                        insufficientFreebucks: /not enough freebucks/i.test(pane),
+                        errorVisible: /error|failed|unavailable/i.test(pane),
+                        loginVisible: /sign in|log in/i.test(pane),
+                        errorCode: (error as { code?: string | number }).code,
+                      }),
+                    );
+                  }
+                  throw error;
+                }
                 if (args[0] === 'paste-buffer') pasted = true;
                 if (pasted && args[0] === 'capture-pane' && ++capturePolls % 5 === 1) {
                   const prompt = readFileSync(join(options.runRoot, 'prompt.txt'), 'utf8');
@@ -207,7 +205,9 @@ try {
                       startupState: freebuffStartupState(pane),
                       freebucksVisible: /Freebucks/i.test(pane),
                       confirmationVisible: /confirm|start session|purchase|take over/i.test(pane),
-                      sessionStarting: /starting your model session|your message is saved/i.test(pane),
+                      sessionStarting: /starting your model session|your message is saved/i.test(
+                        pane,
+                      ),
                       sessionConfirm: /enter: confirm and send/i.test(pane),
                       sessionRetry: /enter: retry/i.test(pane),
                       takeoverVisible: /take over/i.test(pane),
@@ -220,29 +220,41 @@ try {
                       agentStarted: rows.some(
                         (row) => typeof row.msg === 'string' && row.msg.startsWith('Start agent '),
                       ),
-                       mainFinished: rows.some((row) => row.msg === 'Main prompt finished'),
-                       mainOutputTypes: rows
-                         .filter((row) => row.msg === 'Main prompt finished')
-                         .map((row) => {
-                           const data = row.data && typeof row.data === 'object'
-                             ? row.data as Record<string, unknown>
-                             : {};
-                           const values = Object.values(data).filter((value): value is string => typeof value === 'string');
-                           return {
-                             outputType: typeof data.outputType === 'string' ? data.outputType : 'missing',
-                             quotaMentioned: values.some((value) => /freebucks?|quota|balance|limit/i.test(value)),
-                             modelMentioned: values.some((value) => /model|catalog|entitlement/i.test(value)),
-                             errorMentioned: values.some((value) => /error|failed|unavailable/i.test(value)),
-                           };
-                         }),
-                       rootEndCount: rows.filter((row) => {
-                         if (typeof row.msg !== 'string' || !row.msg.startsWith('End agent ')) return false;
-                         const data = row.data && typeof row.data === 'object'
-                           ? row.data as Record<string, unknown>
-                           : {};
-                         return data.agentId === 'main-agent';
-                       }).length,
-                       logRows: rows.length,
+                      mainFinished: rows.some((row) => row.msg === 'Main prompt finished'),
+                      mainOutputTypes: rows
+                        .filter((row) => row.msg === 'Main prompt finished')
+                        .map((row) => {
+                          const data =
+                            row.data && typeof row.data === 'object'
+                              ? (row.data as Record<string, unknown>)
+                              : {};
+                          const values = Object.values(data).filter(
+                            (value): value is string => typeof value === 'string',
+                          );
+                          return {
+                            outputType:
+                              typeof data.outputType === 'string' ? data.outputType : 'missing',
+                            quotaMentioned: values.some((value) =>
+                              /freebucks?|quota|balance|limit/i.test(value),
+                            ),
+                            modelMentioned: values.some((value) =>
+                              /model|catalog|entitlement/i.test(value),
+                            ),
+                            errorMentioned: values.some((value) =>
+                              /error|failed|unavailable/i.test(value),
+                            ),
+                          };
+                        }),
+                      rootEndCount: rows.filter((row) => {
+                        if (typeof row.msg !== 'string' || !row.msg.startsWith('End agent '))
+                          return false;
+                        const data =
+                          row.data && typeof row.data === 'object'
+                            ? (row.data as Record<string, unknown>)
+                            : {};
+                        return data.agentId === 'main-agent';
+                      }).length,
+                      logRows: rows.length,
                     }),
                   );
                 }
@@ -260,7 +272,8 @@ try {
   const selectedModel = requestedModel
     ? models.find((model) => model.id === requestedModel || model.apiModelId === requestedModel)
     : models[0];
-  if (!selectedModel) throw new Error('The requested live probe model is not available in the account catalog.');
+  if (!selectedModel)
+    throw new Error('The requested live probe model is not available in the account catalog.');
   console.log(
     JSON.stringify({
       stage: 'live_turn',

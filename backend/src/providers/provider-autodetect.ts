@@ -56,7 +56,8 @@ export function envVarMaterial(
   name: ProviderName,
   kind: 'apiKey' | 'authToken',
 ): { envVar: string; value: string } | null {
-  const envVars = kind === 'apiKey' ? (ENV_API_KEY_MAP[name] ?? []) : (ENV_AUTH_TOKEN_MAP[name] ?? []);
+  const envVars =
+    kind === 'apiKey' ? (ENV_API_KEY_MAP[name] ?? []) : (ENV_AUTH_TOKEN_MAP[name] ?? []);
   for (const envVar of envVars) {
     const value = process.env[envVar];
     if (!value) continue;

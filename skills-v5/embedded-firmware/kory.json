@@ -5,26 +5,13 @@
   "skillKind": "workflow",
   "selectionMode": "conditional",
   "invocationMode": "model-invoked",
-  "domains": [
-    "code",
-    "embedded",
-    "firmware"
-  ],
-  "targetMedia": [
-    "any"
-  ],
+  "domains": ["code", "embedded", "firmware"],
+  "targetMedia": ["any"],
   "pathScopes": [],
   "contextBudget": 4300,
-  "broader": [
-    "compiler-runtime-backend"
-  ],
-  "facets": [
-    "embedded-device-security"
-  ],
-  "requires": [
-    "verification",
-    "simulation-device-testing"
-  ],
+  "broader": ["compiler-runtime-backend"],
+  "facets": ["embedded-device-security"],
+  "requires": ["verification", "simulation-device-testing"],
   "conflicts": [],
   "activation": [
     "embedded firmware",
@@ -64,13 +51,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "agentic-systems"
-        ],
-        "tags": [
-          "ambiguous",
-          "hierarchy-boundary"
-        ]
+        "adjacentSkills": ["agentic-systems"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
       },
       {
         "id": "embedded-firmware-ambiguous-2",
@@ -78,13 +60,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "android-compose"
-        ],
-        "tags": [
-          "ambiguous",
-          "hierarchy-boundary"
-        ]
+        "adjacentSkills": ["android-compose"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
       },
       {
         "id": "embedded-firmware-ambiguous-3",
@@ -92,13 +69,8 @@
         "expectedSelection": true,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "angular-engineering"
-        ],
-        "tags": [
-          "ambiguous",
-          "hierarchy-boundary"
-        ]
+        "adjacentSkills": ["angular-engineering"],
+        "tags": ["ambiguous", "hierarchy-boundary"]
       }
     ],
     "adversarial": [
@@ -108,13 +80,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "bun-deno-runtime"
-        ],
-        "tags": [
-          "adversarial",
-          "hierarchy-boundary"
-        ]
+        "adjacentSkills": ["bun-deno-runtime"],
+        "tags": ["adversarial", "hierarchy-boundary"]
       },
       {
         "id": "embedded-firmware-adversarial-2",
@@ -122,13 +89,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "c-cpp-systems-engineering"
-        ],
-        "tags": [
-          "adversarial",
-          "hierarchy-boundary"
-        ]
+        "adjacentSkills": ["c-cpp-systems-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
       },
       {
         "id": "embedded-firmware-adversarial-3",
@@ -136,13 +98,8 @@
         "expectedSelection": false,
         "expectedSkills": [],
         "forbiddenSkills": [],
-        "adjacentSkills": [
-          "csharp-dotnet-engineering"
-        ],
-        "tags": [
-          "adversarial",
-          "hierarchy-boundary"
-        ]
+        "adjacentSkills": ["csharp-dotnet-engineering"],
+        "tags": ["adversarial", "hierarchy-boundary"]
       }
     ]
   },

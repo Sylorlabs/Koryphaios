@@ -61,7 +61,6 @@ export function reviewerWallClockDeadline(): number {
   return DEADLINE_MS;
 }
 
-
 function fail(message: string): never {
   throw new Error(message);
 }

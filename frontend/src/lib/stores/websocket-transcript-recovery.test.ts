@@ -243,7 +243,11 @@ describe('transcript recovery after reload and reconnect', () => {
 
     const pendingCall = { id: 'call-2', name: 'read_file', input: { path: 'src/app.ts' } };
     // A new turn: the persisted answer above is settled and cannot take events.
-    appendEvent('stream.tool_call', { agentId: 'kory-manager', messageId: 'answer-2', toolCall: pendingCall });
+    appendEvent('stream.tool_call', {
+      agentId: 'kory-manager',
+      messageId: 'answer-2',
+      toolCall: pendingCall,
+    });
     appendEvent('system.error', { error: 'Provider connection interrupted.' });
     const second = await connectSocket();
     second.open();
@@ -282,9 +286,12 @@ describe('transcript recovery after reload and reconnect', () => {
   it('restores registered MCP identities with archived tool history', async () => {
     wsStore.activateSessionFeed(state.activeSessionId);
     state.contextResponse = Promise.resolve({
-      ok: true, lastUsage: null,
+      ok: true,
+      lastUsage: null,
       mcpServers: [{ name: 'Research_team', tools: ['lookup_topic'] }],
-      data: [{ id: 'registry-tool', ts: 300, label: 'mcp_Research_team_lookup_topic', content: 'found' }],
+      data: [
+        { id: 'registry-tool', ts: 300, label: 'mcp_Research_team_lookup_topic', content: 'found' },
+      ],
     });
     // A legacy answer without persisted parts has no tool rows of its own, so
     // its archived tool activity is still the only evidence and must render.
@@ -294,17 +301,27 @@ describe('transcript recovery after reload and reconnect', () => {
     );
     const archived = feedStore.feed.find((entry) => entry.id === 'arch-registry-tool');
     expect(archived).toBeDefined();
-    expect(toolPresentation(archived!)).toMatchObject({ mcpIdentity: 'Research_team MCP · lookup_topic' });
+    expect(toolPresentation(archived!)).toMatchObject({
+      mcpIdentity: 'Research_team MCP · lookup_topic',
+    });
   });
 
   it.each(['before', 'after'])(
-    'retains Antigravity usage replayed %s history while the composer is starting', async (order) => {
+    'retains Antigravity usage replayed %s history while the composer is starting',
+    async (order) => {
       wsStore.activateSessionFeed(state.activeSessionId);
       wsStore.clearManagerContextPreview(state.activeSessionId);
       appendEvent('stream.usage', {
-        agentId: 'kory-manager', provider: 'antigravity', model: 'gemini-3-1-pro',
-        tokensIn: 88_000, tokensOut: 1_000, tokensUsed: 89_000,
-        usageKnown: true, estimated: true, contextKnown: true, contextWindow: 1_048_576,
+        agentId: 'kory-manager',
+        provider: 'antigravity',
+        model: 'gemini-3-1-pro',
+        tokensIn: 88_000,
+        tokensOut: 1_000,
+        tokensUsed: 89_000,
+        usageKnown: true,
+        estimated: true,
+        contextKnown: true,
+        contextWindow: 1_048_576,
       });
       const socket = await connectSocket();
       if (order === 'before') await wsStore.loadSessionMessages(state.activeSessionId, history());
@@ -312,8 +329,17 @@ describe('transcript recovery after reload and reconnect', () => {
       socket.open();
       await wsStore.loadSessionMessages(state.activeSessionId, history());
       expect(agentStore.getContextUsage().isReliable).toBe(false);
-      wsStore.beginManagerContextPreview(state.activeSessionId, 'antigravity', 'gemini-3-1-pro', 1_048_576);
-      expect(agentStore.getContextUsage()).toMatchObject({ used: 89_000, max: 1_048_576, estimated: true });
+      wsStore.beginManagerContextPreview(
+        state.activeSessionId,
+        'antigravity',
+        'gemini-3-1-pro',
+        1_048_576,
+      );
+      expect(agentStore.getContextUsage()).toMatchObject({
+        used: 89_000,
+        max: 1_048_576,
+        estimated: true,
+      });
     },
   );
 
@@ -350,7 +376,9 @@ describe('transcript recovery after reload and reconnect', () => {
           }),
         }),
       );
-      expect(agentStore.getAgent(state.activeSessionId, 'kory-manager')?.sessionId).toBe(state.activeSessionId);
+      expect(agentStore.getAgent(state.activeSessionId, 'kory-manager')?.sessionId).toBe(
+        state.activeSessionId,
+      );
       expect(agentStore.getContextUsage()).toMatchObject({
         used: 80_000,
         max: 200_000,
@@ -371,21 +399,17 @@ describe('transcript recovery after reload and reconnect', () => {
     await waitFor(() =>
       expect(feedStore.feed.some((entry) => entry.id === 'turn-answer-1-2')).toBe(true),
     );
-    agentStore.updateUsage(
-      state.activeSessionId,
-      'kory-manager',
-      {
-        agentId: 'kory-manager',
-        provider: 'openai',
-        model: 'model-1',
-        tokensIn: 89_000,
-        tokensOut: 1_000,
-        tokensUsed: 90_000,
-        usageKnown: true,
-        contextKnown: true,
-        contextWindow: 200_000,
-      },
-    );
+    agentStore.updateUsage(state.activeSessionId, 'kory-manager', {
+      agentId: 'kory-manager',
+      provider: 'openai',
+      model: 'model-1',
+      tokensIn: 89_000,
+      tokensOut: 1_000,
+      tokensUsed: 90_000,
+      usageKnown: true,
+      contextKnown: true,
+      contextWindow: 200_000,
+    });
     resolveContext({
       ok: true,
       data: [],

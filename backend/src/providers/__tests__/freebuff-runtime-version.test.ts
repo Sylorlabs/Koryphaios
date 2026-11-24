@@ -105,8 +105,7 @@ describe('Freebuff latest-version resolution', () => {
   it('never honors a redirect, including a non-https one', async () => {
     for (const location of ['http://evil.example/latest', 'https://registry.npmjs.org/other']) {
       resetFreebuffVersionCacheForTests();
-      const fetchImpl = async () =>
-        new Response('', { status: 302, headers: { location } });
+      const fetchImpl = async () => new Response('', { status: 302, headers: { location } });
       expect(await resolveLatestFreebuffVersion({ fetchImpl })).toBeNull();
     }
   });

@@ -32,7 +32,14 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { resolve } from 'node:path';
 
 const PROJECT_ROOT = resolve(import.meta.dir, '..');

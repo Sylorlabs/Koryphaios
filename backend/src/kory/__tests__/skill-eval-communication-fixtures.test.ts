@@ -2,7 +2,10 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { communicationPacket, scoreCommunication } from '../../eval/skills/skill-eval-communication-fixtures';
+import {
+  communicationPacket,
+  scoreCommunication,
+} from '../../eval/skills/skill-eval-communication-fixtures';
 import { writeFixtureFile } from '../../eval/skills/skill-eval-fixture-helpers';
 
 const roots: string[] = [];

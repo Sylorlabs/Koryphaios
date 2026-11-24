@@ -50,7 +50,9 @@ function replacePackageInstructions(
   }
   const span = body.slice(prefix.length, body.length - tail.length);
   if (span.trim() !== pkg.instructions.trim()) {
-    throw new Error(`${name} runtime instructions span differs from the loaded V5 package instructions`);
+    throw new Error(
+      `${name} runtime instructions span differs from the loaded V5 package instructions`,
+    );
   }
   return sourceContent.replace(span, pkg.instructions.trim());
 }
@@ -66,21 +68,36 @@ for (const name of requested) {
     const nextSourceContent = replacePackageInstructions(
       current.sourceContent,
       name,
-      pkg as unknown as { instructions: string; directory: string; supportingResources: readonly unknown[] },
+      pkg as unknown as {
+        instructions: string;
+        directory: string;
+        supportingResources: readonly unknown[];
+      },
     );
     if (nextSourceContent === current.sourceContent) {
-      throw new Error(`${name} runtime content did not change; package instructions already current`);
+      throw new Error(
+        `${name} runtime content did not change; package instructions already current`,
+      );
     }
 
     const draft = saveSkillDocumentDraft(projectRoot, 'personal', name, {
-      document: { kind: 'markdown', extension: 'md', renderer: 'markdown', mediaType: 'text/markdown' },
+      document: {
+        kind: 'markdown',
+        extension: 'md',
+        renderer: 'markdown',
+        mediaType: 'text/markdown',
+      },
       sourceContent: nextSourceContent,
       coreInstructions: pkg.instructions.trim(),
       expectedHash: current.hash,
     });
     results.push({ skill: name, ok: true, detail: 'draft saved', draftHash: draft.hash });
   } catch (error: unknown) {
-    results.push({ skill: name, ok: false, detail: error instanceof Error ? error.message : String(error) });
+    results.push({
+      skill: name,
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 console.log(JSON.stringify(results, null, 2));

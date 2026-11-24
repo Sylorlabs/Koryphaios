@@ -52,22 +52,40 @@ describe('speech-audio V5 independent, unregistered real-model sidecar', () => {
     expect(measured.cer).toBeGreaterThan(0);
     expect(measured.silenceHallucinatedWords).toBeNull();
     expect(speechRecognitionErrors('', 'a hallucinated phrase')).toEqual({
-      wer: null, cer: null, silenceHallucinatedWords: 3,
+      wer: null,
+      cer: null,
+      silenceHallucinatedWords: 3,
     });
-    expect(speechRecognitionErrors('', '')).toEqual({ wer: null, cer: null, silenceHallucinatedWords: 0 });
+    expect(speechRecognitionErrors('', '')).toEqual({
+      wer: null,
+      cer: null,
+      silenceHallucinatedWords: 0,
+    });
   });
 
   test('fails closed without genuine pinned ASR model/runtime and reference metadata', () => {
-    const result = runSpeechRecognitionProbe({
-      path: '/no-such-audio.wav', sha256: '0'.repeat(64),
-      sourceProvenance: 'test source', recordingRights: 'test rights',
-      referenceTranscript: 'hi', referenceProvenance: 'independent reference',
-      language: 'en', speakerDescription: 'single speaker', acousticCondition: 'quiet',
-      device: 'test device', criticalEntities: [], slices: ['clean'],
-    }, {
-      path: '/missing-model.bin', sha256: '0'.repeat(64),
-      id: 'pinned-model', language: 'en',
-    });
+    const result = runSpeechRecognitionProbe(
+      {
+        path: '/no-such-audio.wav',
+        sha256: '0'.repeat(64),
+        sourceProvenance: 'test source',
+        recordingRights: 'test rights',
+        referenceTranscript: 'hi',
+        referenceProvenance: 'independent reference',
+        language: 'en',
+        speakerDescription: 'single speaker',
+        acousticCondition: 'quiet',
+        device: 'test device',
+        criticalEntities: [],
+        slices: ['clean'],
+      },
+      {
+        path: '/missing-model.bin',
+        sha256: '0'.repeat(64),
+        id: 'pinned-model',
+        language: 'en',
+      },
+    );
     expect(result.probePassed).toBe(false);
     expect(result.evidence).toBeUndefined();
     expect(result.blockers.join(' ')).toContain('Missing regular input file');
@@ -84,17 +102,27 @@ describe('speech-audio V5 independent, unregistered real-model sidecar', () => {
         expect(sha(realRecordingPath!)).toBe(PINNED_JFK_WAV_SHA256);
         expect(sha(modelPath!)).toBe(PINNED_TINY_EN_SHA256);
         const sample = {
-          path: realRecordingPath!, sha256: PINNED_JFK_WAV_SHA256,
-          sourceProvenance: 'whisper.cpp 1.9.4 packaged jfk.wav, recorded 1961 JFK inaugural speech',
+          path: realRecordingPath!,
+          sha256: PINNED_JFK_WAV_SHA256,
+          sourceProvenance:
+            'whisper.cpp 1.9.4 packaged jfk.wav, recorded 1961 JFK inaugural speech',
           recordingRights: 'public speech fixture, used solely for local eval',
-          referenceTranscript: 'And so, my fellow Americans, ask not what your country can do for you; ask what you can do for your country.',
-          referenceProvenance: 'John F. Kennedy 1961 inaugural address text (independent of ASR output)',
-          language: 'en', speakerDescription: 'one real English-language adult speaker',
-          acousticCondition: 'archival speech recording', device: 'unknown original capture',
-          criticalEntities: ['Americans', 'country'], slices: ['real-recording', 'English', 'archival'],
+          referenceTranscript:
+            'And so, my fellow Americans, ask not what your country can do for you; ask what you can do for your country.',
+          referenceProvenance:
+            'John F. Kennedy 1961 inaugural address text (independent of ASR output)',
+          language: 'en',
+          speakerDescription: 'one real English-language adult speaker',
+          acousticCondition: 'archival speech recording',
+          device: 'unknown original capture',
+          criticalEntities: ['Americans', 'country'],
+          slices: ['real-recording', 'English', 'archival'],
         };
         const model = {
-          path: modelPath!, sha256: PINNED_TINY_EN_SHA256, id: 'ggml-tiny.en', language: 'en',
+          path: modelPath!,
+          sha256: PINNED_TINY_EN_SHA256,
+          id: 'ggml-tiny.en',
+          language: 'en',
         };
         const measured = runSpeechRecognitionProbe(sample, model, root);
         expect(measured.blockers).toEqual([]);
@@ -108,32 +136,64 @@ describe('speech-audio V5 independent, unregistered real-model sidecar', () => {
         expect(measured.evidence?.segments.length).toBeGreaterThan(0);
         expect(measured.evidence?.wer).toBeLessThan(0.6);
         expect(measured.evidence?.criticalEntities).toEqual([
-          { text: 'Americans', found: true }, { text: 'country', found: true },
+          { text: 'Americans', found: true },
+          { text: 'country', found: true },
         ]);
         expect(existsSync(measured.evidence!.evidenceFile)).toBe(true);
 
-        const forged = runSpeechRecognitionProbe({ ...sample, sha256: '0'.repeat(64) }, model, root);
+        const forged = runSpeechRecognitionProbe(
+          { ...sample, sha256: '0'.repeat(64) },
+          model,
+          root,
+        );
         expect(forged.probePassed).toBe(false);
         expect(forged.blockers.join(' ')).toContain('SHA-256 mismatch');
-        const unpinnedModel = runSpeechRecognitionProbe(sample, { ...model, sha256: 'f'.repeat(64) }, root);
+        const unpinnedModel = runSpeechRecognitionProbe(
+          sample,
+          { ...model, sha256: 'f'.repeat(64) },
+          root,
+        );
         expect(unpinnedModel.probePassed).toBe(false);
         expect(unpinnedModel.blockers.join(' ')).toContain('SHA-256 mismatch');
 
         // Genuine zero-speech acoustic stimulus and a real model response: no invented transcript.
         const silence = join(root, 'silence.wav');
-        const generated = spawnSync('ffmpeg', [
-          '-v', 'error', '-y', '-f', 'lavfi', '-i', 'anullsrc=r=16000:cl=mono',
-          '-t', '2', '-c:a', 'pcm_s16le', silence,
-        ], { encoding: 'utf8', timeout: 8000 });
+        const generated = spawnSync(
+          'ffmpeg',
+          [
+            '-v',
+            'error',
+            '-y',
+            '-f',
+            'lavfi',
+            '-i',
+            'anullsrc=r=16000:cl=mono',
+            '-t',
+            '2',
+            '-c:a',
+            'pcm_s16le',
+            silence,
+          ],
+          { encoding: 'utf8', timeout: 8000 },
+        );
         expect(generated.status, generated.stderr).toBe(0);
-        const negative = runSpeechRecognitionProbe({
-          ...sample, path: silence, sha256: sha(silence), referenceTranscript: '',
-          referenceProvenance: 'Generated 2 s zero-speech signal, exact signal oracle',
-          sourceProvenance: 'FFmpeg anullsrc acoustic negative control',
-          recordingRights: 'locally generated zero-speech fixture',
-          acousticCondition: 'digital silence', speakerDescription: 'no speakers',
-          criticalEntities: [], slices: ['negative', 'silence'],
-        }, model, root);
+        const negative = runSpeechRecognitionProbe(
+          {
+            ...sample,
+            path: silence,
+            sha256: sha(silence),
+            referenceTranscript: '',
+            referenceProvenance: 'Generated 2 s zero-speech signal, exact signal oracle',
+            sourceProvenance: 'FFmpeg anullsrc acoustic negative control',
+            recordingRights: 'locally generated zero-speech fixture',
+            acousticCondition: 'digital silence',
+            speakerDescription: 'no speakers',
+            criticalEntities: [],
+            slices: ['negative', 'silence'],
+          },
+          model,
+          root,
+        );
         expect(negative.probePassed).toBe(true);
         expect(negative.evidence?.wer).toBeNull();
         expect(negative.evidence?.silenceHallucinatedWords).toBeGreaterThanOrEqual(0);
@@ -149,13 +209,17 @@ describe('speech-audio V5 independent, unregistered real-model sidecar', () => {
     () => {
       const root = mkdtempSync(join(tmpdir(), 'kory-speech-tts-test-'));
       try {
-        const result = runSpeechSynthesisProbe({
-          sourceText: 'Turn right at number 41.',
-          normalizedSpokenText: 'Turn right at number forty one.',
-          voice: process.env.KORY_SPEECH_SYSTEM_VOICE || 'Samantha',
-          locale: 'en_US',
-          voiceRights: 'Use of installed operating-system distributed voice for a local test; no custom voice or cloning',
-        }, root);
+        const result = runSpeechSynthesisProbe(
+          {
+            sourceText: 'Turn right at number 41.',
+            normalizedSpokenText: 'Turn right at number forty one.',
+            voice: process.env.KORY_SPEECH_SYSTEM_VOICE || 'Samantha',
+            locale: 'en_US',
+            voiceRights:
+              'Use of installed operating-system distributed voice for a local test; no custom voice or cloning',
+          },
+          root,
+        );
         expect(result.blockers).toEqual([]);
         expect(result.probePassed).toBe(true);
         expect(result.evidence?.synthesisWallMs).toBeGreaterThan(0);
@@ -168,20 +232,43 @@ describe('speech-audio V5 independent, unregistered real-model sidecar', () => {
         expect(existsSync(result.evidence!.evidenceFile)).toBe(true);
 
         const truncated = join(root, 'truncated.wav');
-        const cut = spawnSync('ffmpeg', [
-          '-v', 'error', '-y', '-i', result.evidence!.encoded.path,
-          '-t', '0.5', '-c:a', 'pcm_mulaw', truncated,
-        ], { encoding: 'utf8', timeout: 8000 });
+        const cut = spawnSync(
+          'ffmpeg',
+          [
+            '-v',
+            'error',
+            '-y',
+            '-i',
+            result.evidence!.encoded.path,
+            '-t',
+            '0.5',
+            '-c:a',
+            'pcm_mulaw',
+            truncated,
+          ],
+          { encoding: 'utf8', timeout: 8000 },
+        );
         expect(cut.status, cut.stderr).toBe(0);
         const rejected = inspectSpeechDelivery(truncated, result.evidence!.source.durationSeconds);
         expect(rejected.passed).toBe(false);
         expect(rejected.blockers.join(' ')).toContain('truncation');
-        expect(inspectSpeechDelivery(result.evidence!.encoded.path, result.evidence!.source.durationSeconds).passed).toBe(true);
+        expect(
+          inspectSpeechDelivery(
+            result.evidence!.encoded.path,
+            result.evidence!.source.durationSeconds,
+          ).passed,
+        ).toBe(true);
 
-        const noVoice = runSpeechSynthesisProbe({
-          sourceText: 'hello', normalizedSpokenText: 'hello',
-          voice: 'a-voice-that-is-not-installed-99821', locale: 'en_US', voiceRights: 'system testing',
-        }, root);
+        const noVoice = runSpeechSynthesisProbe(
+          {
+            sourceText: 'hello',
+            normalizedSpokenText: 'hello',
+            voice: 'a-voice-that-is-not-installed-99821',
+            locale: 'en_US',
+            voiceRights: 'system testing',
+          },
+          root,
+        );
         expect(noVoice.probePassed).toBe(false);
         expect(noVoice.blockers.length).toBeGreaterThan(0);
       } finally {

@@ -1053,7 +1053,12 @@ export class WorkerPipelineService {
               model: routing.model,
               tokensIn: res.usage?.tokensIn,
               tokensOut: res.usage?.tokensOut,
-              verification: harness.verificationEligible && !criticResult.skipped && criticResult.independent !== false ? 'verified' : 'unverified',
+              verification:
+                harness.verificationEligible &&
+                !criticResult.skipped &&
+                criticResult.independent !== false
+                  ? 'verified'
+                  : 'unverified',
               workerTranscript: formatMessagesForCritic(res.workerMessages ?? []),
               criticFeedback: harness.verificationEligible
                 ? criticResult.feedback
@@ -1135,7 +1140,12 @@ export class WorkerPipelineService {
             model: routing.model,
             tokensIn: result.usage?.tokensIn,
             tokensOut: result.usage?.tokensOut,
-            verification: harness.verificationEligible && !criticResult.skipped && criticResult.independent !== false ? 'verified' : 'unverified',
+            verification:
+              harness.verificationEligible &&
+              !criticResult.skipped &&
+              criticResult.independent !== false
+                ? 'verified'
+                : 'unverified',
             workerTranscript: formatMessagesForCritic(result.workerMessages ?? []),
             criticFeedback: harness.verificationEligible
               ? criticResult.feedback

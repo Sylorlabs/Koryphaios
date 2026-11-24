@@ -11,7 +11,15 @@
  */
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 const ARG = new Map();
@@ -59,7 +67,10 @@ function note(id, passed, detail) {
 }
 function run(binary, args) {
   try {
-    return execFileSync(binary, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    return execFileSync(binary, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
   } catch (error) {
     return String(error?.stdout ?? '').trim();
   }
@@ -68,13 +79,21 @@ const xdotool = (...args) => run('xdotool', args);
 
 function windowIds(title) {
   const listed = xdotool('search', '--onlyvisible', '--name', '^' + title + '$');
-  return listed.split('\n').map((line) => line.trim()).filter(Boolean);
+  return listed
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 const appWindow = () => windowIds(WINDOW_TITLE)[0] ?? '';
 const dialogWindow = () => windowIds(DIALOG_TITLE)[0] ?? '';
 function geometry(id) {
   const text = xdotool('getwindowgeometry', '--shell', id);
-  const values = new Map(text.split('\n').map((line) => line.split('=')).filter((pair) => pair.length === 2));
+  const values = new Map(
+    text
+      .split('\n')
+      .map((line) => line.split('='))
+      .filter((pair) => pair.length === 2),
+  );
   return {
     x: Number(values.get('X')),
     y: Number(values.get('Y')),
@@ -94,8 +113,10 @@ const statusText = () => {
 let requestSerial = 0;
 function request(action, extra = {}) {
   requestSerial += 1;
-  writeFileSync(join(root, '.kory-control.json'),
-    JSON.stringify({ action, nonce: `${nonce}:${requestSerial}`, ...extra }));
+  writeFileSync(
+    join(root, '.kory-control.json'),
+    JSON.stringify({ action, nonce: `${nonce}:${requestSerial}`, ...extra }),
+  );
 }
 async function waitFor(predicate, timeoutMs, intervalMs = 200) {
   const deadline = Date.now() + timeoutMs;
@@ -108,12 +129,18 @@ async function waitFor(predicate, timeoutMs, intervalMs = 200) {
 }
 
 function unlinkSyncSafe(path) {
-  try { unlinkSync(path); } catch {}
+  try {
+    unlinkSync(path);
+  } catch {}
 }
 
 function stop(child) {
-  try { process.kill(-child.pid, 'SIGTERM'); } catch {}
-  try { child.kill('SIGTERM'); } catch {}
+  try {
+    process.kill(-child.pid, 'SIGTERM');
+  } catch {}
+  try {
+    child.kill('SIGTERM');
+  } catch {}
 }
 
 function activate(windowId) {
@@ -130,7 +157,8 @@ function startDisplay() {
   const lock = `/tmp/.X${DISPLAY.replace(':', '')}-lock`;
   if (existsSync(lock)) return () => {};
   const server = spawn('Xvfb', [DISPLAY, '-screen', '0', '1600x1100x24', '-nolisten', 'tcp'], {
-    stdio: 'ignore', detached: true,
+    stdio: 'ignore',
+    detached: true,
   });
   server.unref();
   const deadline = Date.now() + 8000;
@@ -145,8 +173,12 @@ function startDisplay() {
   wm.unref();
   execFileSync('sleep', ['1']);
   return () => {
-    try { process.kill(server.pid, 'SIGTERM'); } catch {}
-    try { process.kill(wm.pid, 'SIGTERM'); } catch {}
+    try {
+      process.kill(server.pid, 'SIGTERM');
+    } catch {}
+    try {
+      process.kill(wm.pid, 'SIGTERM');
+    } catch {}
   };
 }
 
@@ -162,7 +194,9 @@ function executablePath() {
 function tauriVersion() {
   for (const candidate of [join(root, 'src-tauri', 'Cargo.lock'), join(root, 'Cargo.lock')]) {
     if (!existsSync(candidate)) continue;
-    const match = /\[\[package\]\]\nname = "tauri"\nversion = "([^"]+)"/u.exec(readFileSync(candidate, 'utf8'));
+    const match = /\[\[package\]\]\nname = "tauri"\nversion = "([^"]+)"/u.exec(
+      readFileSync(candidate, 'utf8'),
+    );
     if (match) return match[1];
   }
   return '';
@@ -195,8 +229,13 @@ function capture(target, windowId) {
   let bytes = Buffer.alloc(0);
   for (let attempt = 0; attempt < 6; attempt += 1) {
     run('import', ['-window', 'root', target]);
-    run('convert', [target, '-crop', `${geometry.width}x${geometry.height}+${geometry.x}+${geometry.y}`,
-      '+repage', target]);
+    run('convert', [
+      target,
+      '-crop',
+      `${geometry.width}x${geometry.height}+${geometry.x}+${geometry.y}`,
+      '+repage',
+      target,
+    ]);
     bytes = readFileSync(target);
     if (bytes.subarray(1, 4).toString('latin1') !== 'PNG') throw new Error('Capture is not a PNG');
     if (bytes.length > 1000) break;
@@ -210,16 +249,20 @@ function capture(target, windowId) {
 }
 
 function windowGeometry(windowId) {
-  const shell = execFileSync('xdotool', ['getwindowgeometry', '--shell', windowId], { encoding: 'utf8' });
+  const shell = execFileSync('xdotool', ['getwindowgeometry', '--shell', windowId], {
+    encoding: 'utf8',
+  });
   const read = (key) => Number(new RegExp(`^${key}=(-?\\d+)$`, 'mu').exec(shell)?.[1] ?? 0);
   const width = read('WIDTH');
   const height = read('HEIGHT');
-  if (!(width > 0 && height > 0)) throw new Error('Window server reported no geometry for the native window');
+  if (!(width > 0 && height > 0))
+    throw new Error('Window server reported no geometry for the native window');
   return { x: read('X'), y: read('Y'), width, height };
 }
 
 // ---------------------------------------------------------------- the run
-const noisy = /dconf-WARNING|libEGL warning|DRI3|Failed to commit changes to dconf|dbus|Gtk-WARNING/u;
+const noisy =
+  /dconf-WARNING|libEGL warning|DRI3|Failed to commit changes to dconf|dbus|Gtk-WARNING/u;
 const stopDisplay = startDisplay();
 writeFileSync(join(root, '.kory-control.json'), JSON.stringify({ action: 'idle', nonce }));
 try {
@@ -231,18 +274,27 @@ try {
   event('window:created');
 
   const version = tauriVersion();
-  note('tauri-packaged-runtime', /^2\.\d+/u.test(version),
-    `Ran the packaged executable ${binary} built against Tauri ${version || 'unknown'}`);
+  note(
+    'tauri-packaged-runtime',
+    /^2\.\d+/u.test(version),
+    `Ran the packaged executable ${binary} built against Tauri ${version || 'unknown'}`,
+  );
 
   const frame = geometry(windowId);
-  note('native-window-lifecycle', frame.width > 100 && frame.height > 100,
+  note(
+    'native-window-lifecycle',
+    frame.width > 100 && frame.height > 100,
     `The window server reported window ${windowId} titled ${JSON.stringify(WINDOW_TITLE)} at ` +
-    `${frame.width}x${frame.height}`);
+      `${frame.width}x${frame.height}`,
+  );
 
   const first = capture(capturePath, windowId);
   event('renderer:capture');
-  note('native-renderer-and-capture', first.width > 100 && first.height > 100,
-    `Captured ${first.width}x${first.height} pixels from the window server for the live window`);
+  note(
+    'native-renderer-and-capture',
+    first.width > 100 && first.height > 100,
+    `Captured ${first.width}x${first.height} pixels from the window server for the live window`,
+  );
 
   // The renderer answers only once its listeners exist, so the first request is a readiness probe
   // rather than an assumption that a window on screen also means a live command surface.
@@ -253,15 +305,22 @@ try {
 
   async function openPicker(directory) {
     request('open', { directory });
-    const id = await waitFor(() => {
-      const found = dialogWindow();
-      if (!found && process.env.KORY_VM_DEBUG === '1') {
-        process.stderr.write(`windows: ${xdotool('search', '--onlyvisible', '--name', '.+')
-          .split('\n').map((w) => `[${w}] ${xdotool('getwindowname', w)}`).join(' ')} | status: ` +
-          `${statusText().slice(0, 60)}\n`);
-      }
-      return found;
-    }, 30_000, 1000);
+    const id = await waitFor(
+      () => {
+        const found = dialogWindow();
+        if (!found && process.env.KORY_VM_DEBUG === '1') {
+          process.stderr.write(
+            `windows: ${xdotool('search', '--onlyvisible', '--name', '.+')
+              .split('\n')
+              .map((w) => `[${w}] ${xdotool('getwindowname', w)}`)
+              .join(' ')} | status: ` + `${statusText().slice(0, 60)}\n`,
+          );
+        }
+        return found;
+      },
+      30_000,
+      1000,
+    );
     if (!id) throw new Error(`The native folder picker never appeared for ${directory}`);
     activate(id);
     event('dialog:opened');
@@ -294,7 +353,10 @@ try {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await openPicker(directory);
       await acceptDefault(directory);
-      const settled = await waitFor(() => (statusText() !== last && statusText() ? statusText() : ''), 8000);
+      const settled = await waitFor(
+        () => (statusText() !== last && statusText() ? statusText() : ''),
+        8000,
+      );
       last = settled;
       if (settled.includes(expected)) return settled;
       const lingering = dialogWindow();
@@ -314,33 +376,58 @@ try {
     // treat a cancellation that lands in the answer slot as noise rather than as the answer.
     await waitFor(() => !dialogWindow(), 8_000, 200);
     request('read');
-    let answer = await waitFor(() => (statusText() !== previous && statusText() ? statusText() : ''), 12_000);
-    for (let attempt = 0; attempt < 2 && /No folder selected/u.test(answer) && !dialogWindow(); attempt += 1) {
+    let answer = await waitFor(
+      () => (statusText() !== previous && statusText() ? statusText() : ''),
+      12_000,
+    );
+    for (
+      let attempt = 0;
+      attempt < 2 && /No folder selected/u.test(answer) && !dialogWindow();
+      attempt += 1
+    ) {
       request('read');
-      answer = await waitFor(() => (statusText() !== 'No folder selected' && statusText() ? statusText() : ''), 8_000);
+      answer = await waitFor(
+        () => (statusText() !== 'No folder selected' && statusText() ? statusText() : ''),
+        8_000,
+      );
     }
     return answer;
   }
 
   const firstPicker = await openPicker(root);
-  note('native-folder-dialog-opened', Boolean(firstPicker),
-    'The operating system picker opened as its own native window over the application window');
+  note(
+    'native-folder-dialog-opened',
+    Boolean(firstPicker),
+    'The operating system picker opened as its own native window over the application window',
+  );
   xdotool('key', 'Escape');
   await waitFor(() => !dialogWindow(), 12_000, 200);
   event('dialog:cancelled');
-  const cancelled = await waitFor(() => (/No folder selected/u.test(statusText()) ? statusText() : ''), 8000);
-  note('native-dialog-cancel-is-none', /No folder selected/u.test(cancelled),
-    `After a native cancel the status region read ${JSON.stringify(cancelled.slice(0, 160))}`);
+  const cancelled = await waitFor(
+    () => (/No folder selected/u.test(statusText()) ? statusText() : ''),
+    8000,
+  );
+  note(
+    'native-dialog-cancel-is-none',
+    /No folder selected/u.test(cancelled),
+    `After a native cancel the status region read ${JSON.stringify(cancelled.slice(0, 160))}`,
+  );
 
   const insidePath = join(root, 'safe-workspace', 'inside');
   const chosen = await choose(insidePath, 'inside');
   event('dialog:accepted');
-  note('native-folder-selection', chosen.includes('inside'),
-    `After accepting the folder the status region read ${JSON.stringify(chosen.slice(0, 180))}`);
+  note(
+    'native-folder-selection',
+    chosen.includes('inside'),
+    `After accepting the folder the status region read ${JSON.stringify(chosen.slice(0, 180))}`,
+  );
 
   const readInside = await readAfter(chosen);
-  note('allowed-command-inside-root', /contained workspace fixture/u.test(readInside),
-    `Reading the selected workspace returned ${JSON.stringify(readInside.slice(0, 160))}`);
+  note(
+    'allowed-command-inside-root',
+    /contained workspace fixture/u.test(readInside),
+    `Reading the selected workspace returned ${JSON.stringify(readInside.slice(0, 160))}`,
+  );
 
   // The link the application remembers is retargeted after it was chosen, which is the moment a
   // path check at choose time cannot help.
@@ -348,23 +435,36 @@ try {
   const chosenLink = await choose(link, 'selected-link');
   event('dialog:accepted');
   if (!chosenLink) {
-    note('symlink-swap-at-use-denied', false,
-      'The picker did not report the link path, so retargeting it would prove nothing');
+    note(
+      'symlink-swap-at-use-denied',
+      false,
+      'The picker did not report the link path, so retargeting it would prove nothing',
+    );
   } else {
-    try { renameSync(link, `${link}.orig`); } catch {}
+    try {
+      renameSync(link, `${link}.orig`);
+    } catch {}
     unlinkSyncSafe(link);
     symlinkSync(join(root, 'outside-workspace'), link);
     event('fs:symlink-retargeted');
     const readSwapped = await readAfter(chosenLink);
-    note('symlink-swap-at-use-denied', !/ESCAPED WORKSPACE/u.test(readSwapped),
+    note(
+      'symlink-swap-at-use-denied',
+      !/ESCAPED WORKSPACE/u.test(readSwapped),
       `After retargeting the selected link outside the workspace the read returned ` +
-      `${JSON.stringify(readSwapped.slice(0, 160))}`);
+        `${JSON.stringify(readSwapped.slice(0, 160))}`,
+    );
     unlinkSyncSafe(link);
-    try { renameSync(`${link}.orig`, link); } catch {}
+    try {
+      renameSync(`${link}.orig`, link);
+    } catch {}
   }
 
   // The packaged surface is read from the artifacts that ship, not from the running process.
-  const capabilities = readFileSync(join(root, 'src-tauri', 'capabilities', 'default.json'), 'utf8');
+  const capabilities = readFileSync(
+    join(root, 'src-tauri', 'capabilities', 'default.json'),
+    'utf8',
+  );
   const handler = readFileSync(join(root, 'src-tauri', 'src', 'lib.rs'), 'utf8');
   const exposed = [...handler.matchAll(/#\[tauri::command\][\s\S]*?fn\s+([a-z_]+)/gu)]
     .map((item) => item[1])
@@ -373,11 +473,13 @@ try {
   request('probe');
   await sleep(1200);
   const probed = statusText();
-  note('unexposed-command-denied',
+  note(
+    'unexposed-command-denied',
     denies && exposed.length === 2 && /denied|not found|refus/iu.test(probed),
     `Packaged capability set grants ${JSON.stringify(capabilities.match(/"[a-z]+:[a-z-]+"/gu) ?? [])} ` +
-    `and the native handler exposes only ${JSON.stringify(exposed)}; a probe answered ` +
-    `${JSON.stringify(probed.slice(0, 120))}`);
+      `and the native handler exposes only ${JSON.stringify(exposed)}; a probe answered ` +
+      `${JSON.stringify(probed.slice(0, 120))}`,
+  );
 
   stop(app);
   event('window:closed');
@@ -387,12 +489,19 @@ try {
   event('window:reopened');
   await sleep(1500);
   request('read');
-  const reopened = await waitFor(() => (/contained workspace fixture|No such file|denied|No folder/u
-    .test(statusText()) ? statusText() : ''), 12_000);
-  note('reopen-without-stale-state', Boolean(reopenedWindow) &&
-    !/contained workspace fixture/u.test(reopened),
+  const reopened = await waitFor(
+    () =>
+      /contained workspace fixture|No such file|denied|No folder/u.test(statusText())
+        ? statusText()
+        : '',
+    12_000,
+  );
+  note(
+    'reopen-without-stale-state',
+    Boolean(reopenedWindow) && !/contained workspace fixture/u.test(reopened),
     `A relaunched native process rendered a fresh window; status region read ` +
-    `${JSON.stringify(reopened.slice(0, 160))}`);
+      `${JSON.stringify(reopened.slice(0, 160))}`,
+  );
 
   stop(app);
   event('app:quit');
@@ -403,8 +512,11 @@ try {
   request('read');
   await sleep(1500);
   const restored = statusText();
-  note('restart-restores-canonical-state', Boolean(restarted) && !/ESCAPED WORKSPACE/u.test(restored),
-    `After a full native restart the read returned ${JSON.stringify(restored.slice(0, 160))}`);
+  note(
+    'restart-restores-canonical-state',
+    Boolean(restarted) && !/ESCAPED WORKSPACE/u.test(restored),
+    `After a full native restart the read returned ${JSON.stringify(restored.slice(0, 160))}`,
+  );
 
   stop(app);
 
@@ -428,9 +540,15 @@ try {
     throw new Error(`Driver reported ${checks.length} checks, expected ${checkIds.length}`);
   }
 } catch (error) {
-  process.stderr.write(`linux driver failed: ${error instanceof Error ? error.message : String(error)}\n`);
-  try { stopDisplay(); } catch {}
+  process.stderr.write(
+    `linux driver failed: ${error instanceof Error ? error.message : String(error)}\n`,
+  );
+  try {
+    stopDisplay();
+  } catch {}
   process.exit(1);
 }
-try { stopDisplay(); } catch {}
+try {
+  stopDisplay();
+} catch {}
 process.exit(0);

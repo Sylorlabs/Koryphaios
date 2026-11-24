@@ -58,7 +58,13 @@ describe('running tool cards clear on completion', () => {
     feedStore.accumulateFeedEntry(feedStore.sessionId, toolCallEntry('tc1', sid));
 
     const before = feedStore.feed.map((e) => e.id);
-    const done = feedStore.completeToolCall(feedStore.sessionId, 'tc1', 'Tool result (12ms): ok', RESULT, 200);
+    const done = feedStore.completeToolCall(
+      feedStore.sessionId,
+      'tc1',
+      'Tool result (12ms): ok',
+      RESULT,
+      200,
+    );
 
     expect(done).toBe(true);
     expect(feedStore.feed).toHaveLength(1);
@@ -81,7 +87,9 @@ describe('running tool cards clear on completion', () => {
     feedStore.activateSessionFeed(sid);
     feedStore.accumulateFeedEntry(feedStore.sessionId, toolCallEntry('tc-other', sid));
 
-    expect(feedStore.completeToolCall(feedStore.sessionId, 'tc-missing', 'x', RESULT, 200)).toBe(false);
+    expect(feedStore.completeToolCall(feedStore.sessionId, 'tc-missing', 'x', RESULT, 200)).toBe(
+      false,
+    );
     expect(feedStore.feed).toHaveLength(1);
     expect(feedStore.feed[0].type).toBe('tool_call');
   });
@@ -135,9 +143,18 @@ describe('running tool cards clear on completion', () => {
     state.activeSessionId = sid;
     feedStore.activateSessionFeed(sid);
     feedStore.accumulateFeedEntry(feedStore.sessionId, toolCallEntry('failed-grep', sid, 'grep'));
-    feedStore.completeToolCall(feedStore.sessionId, 'failed-grep', 'Missing pattern', {
-      callId: 'failed-grep', name: 'grep', output: 'Missing pattern', isError: true,
-    }, 200);
+    feedStore.completeToolCall(
+      feedStore.sessionId,
+      'failed-grep',
+      'Missing pattern',
+      {
+        callId: 'failed-grep',
+        name: 'grep',
+        output: 'Missing pattern',
+        isError: true,
+      },
+      200,
+    );
     expect(feedStore.groupedFeed).toHaveLength(1);
     expect(feedStore.groupedFeed[0].type).toBe('tool_result');
     expect(feedStore.groupedFeed[0].metadata?.toolResult).toMatchObject({ isError: true });

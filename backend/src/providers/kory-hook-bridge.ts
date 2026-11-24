@@ -290,13 +290,7 @@ export async function main(): Promise<void> {
   try {
     if (!activeAuthFile) throw new Error('Bridge grant file is unavailable');
     const path = `/api/v1/mcp-bridge/hooks/${endpoint}`;
-    const signedHeaders = signedBridgeHeadersFromFile(
-      activeAuthFile,
-      'hook',
-      'POST',
-      path,
-      body,
-    );
+    const signedHeaders = signedBridgeHeadersFromFile(activeAuthFile, 'hook', 'POST', path, body);
     const resp = await fetch(`${config.backendUrl}${path}`, {
       method: 'POST',
       headers: {

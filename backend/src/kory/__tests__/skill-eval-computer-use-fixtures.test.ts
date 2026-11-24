@@ -19,12 +19,16 @@ function materialize(scenarioId: string): string {
     candidate.matches({ id: scenarioId } as Parameters<typeof candidate.matches>[0]),
   );
   expect(materializer).toBeDefined();
-  materializer!.materialize(root, { id: scenarioId } as Parameters<typeof materializer.materialize>[1]);
+  materializer!.materialize(root, { id: scenarioId } as Parameters<
+    typeof materializer.materialize
+  >[1]);
   return root;
 }
 
 function score(scenarioId: string, root: string) {
-  return COMPUTER_USE_SKILL_EVAL_SCORERS.find((scorer) => scorer.scenarioIds.includes(scenarioId))!.score({
+  return COMPUTER_USE_SKILL_EVAL_SCORERS.find((scorer) =>
+    scorer.scenarioIds.includes(scenarioId),
+  )!.score({
     workingDirectory: root,
   } as Parameters<(typeof COMPUTER_USE_SKILL_EVAL_SCORERS)[number]['score']>[0]);
 }
@@ -63,7 +67,9 @@ afterEach(() => {
 describe('computer-use recorded desktop fixture', () => {
   test('materializes the recording and every capture as shipped evidence', () => {
     const root = materialize(AUTHORIZED);
-    const session = JSON.parse(readFileSync(join(root, 'session/desktop-session.json'), 'utf8')) as {
+    const session = JSON.parse(
+      readFileSync(join(root, 'session/desktop-session.json'), 'utf8'),
+    ) as {
       actionLog: { target: string; permitted: boolean; status: string }[];
     };
     expect(session.actionLog.length).toBeGreaterThanOrEqual(4);
@@ -74,7 +80,9 @@ describe('computer-use recorded desktop fixture', () => {
       'export-denied',
       'retry-authorized',
     ])
-      expect(readFileSync(join(root, `session/captures/${capture}.png`)).byteLength).toBeGreaterThan(1000);
+      expect(
+        readFileSync(join(root, `session/captures/${capture}.png`)).byteLength,
+      ).toBeGreaterThan(1000);
   });
 
   test('hands the captures to the candidate as image attachments', () => {

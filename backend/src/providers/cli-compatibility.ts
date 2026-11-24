@@ -165,7 +165,7 @@ export const CLI_ADAPTER_COMPATIBILITY = [
       source(
         'codebuddy',
         'modelsFromProductJson',
-        'Model catalog parsed from the installed CLI\'s own product*.json.',
+        "Model catalog parsed from the installed CLI's own product*.json.",
       ),
       fixture(
         'codebuddy',
@@ -189,14 +189,14 @@ export const CLI_ADAPTER_COMPATIBILITY = [
     provider: 'workbuddy-desktop',
     binary: 'WorkBuddy AI.app (bundled CLI in --serve mode)',
     transport:
-      'ACP over HTTP SSE against the installed WorkBuddy AI desktop app\'s host runtime ' +
+      "ACP over HTTP SSE against the installed WorkBuddy AI desktop app's host runtime " +
       '(bundled codebuddy CLI started with --serve inside the app bundle)',
     versionBoundary: unknownBoundary,
     evidence: [
       source(
         'workbuddy-desktop-runtime',
         'modelsFromWorkBuddyProductJson',
-        'Model catalog parsed from the app bundle\'s own product.json.',
+        "Model catalog parsed from the app bundle's own product.json.",
       ),
       fixture(
         'workbuddy-desktop',
@@ -383,7 +383,11 @@ export const CLI_ADAPTER_COMPATIBILITY = [
         'Kory auto-tracks the latest Freebuff release the way the official launcher does (npm latest tag + codebuff.com download), building versioned runtime images with a recipe rev; the qualified floor is native 0.2.36 and the live probes in docs/freebuff-cli.md qualify TUI/log shapes per runtime. This diagnostic catalog does not probe an installed CLI. Fixture versions 9.8.7 and 10.0.0 are synthetic and are not support claims.',
     },
     evidence: [
-      source('freebuff-cli', '0.2.36', 'Version-sensitive TUI/log assumptions recorded in source; minimum supported runtime version.'),
+      source(
+        'freebuff-cli',
+        '0.2.36',
+        'Version-sensitive TUI/log assumptions recorded in source; minimum supported runtime version.',
+      ),
       fixture(
         'freebuff-codebuff-contract',
         'discovers picker models and image capabilities from the installed-binary shape',

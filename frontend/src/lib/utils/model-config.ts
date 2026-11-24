@@ -100,10 +100,7 @@ export function isEnabledModelSelection(providers: ProviderInfo[], value?: strin
   if (!resolved) return false;
   // An empty enabled list means the provider exposes its whole catalog — the
   // model picker applies the same rule.
-  return (
-    selectedProvider.models.length === 0 ||
-    selectedProvider.models.includes(resolved.id)
-  );
+  return selectedProvider.models.length === 0 || selectedProvider.models.includes(resolved.id);
 }
 
 export function getModelConfigurationWarning(

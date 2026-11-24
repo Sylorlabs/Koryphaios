@@ -127,8 +127,6 @@ describe('devinQuotaGroupsFrom', () => {
   });
 
   test('returns null when the account is unavailable', () => {
-    expect(
-      devinQuotaGroupsFrom({ source: 'devin-account', status: 'unavailable' }),
-    ).toBeNull();
+    expect(devinQuotaGroupsFrom({ source: 'devin-account', status: 'unavailable' })).toBeNull();
   });
 });

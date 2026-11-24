@@ -18,9 +18,7 @@ export interface UndoChordEvent {
  */
 export function isUndoChord(event: UndoChordEvent, mac: boolean = isMac()): boolean {
   if (event.shiftKey || event.altKey) return false;
-  const modPressed = mac
-    ? event.metaKey && !event.ctrlKey
-    : event.ctrlKey && !event.metaKey;
+  const modPressed = mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
   return modPressed && event.key.toLowerCase() === 'z';
 }
 

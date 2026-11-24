@@ -71,12 +71,7 @@ describe('actual Go host evaluators', () => {
 
     // Repairing the broken source and adding regressions must be allowed.
     writeFixtureFile(root, 'batch/batch.go', GO_CONTEXT_CONTROL);
-    for (const path of [
-      'README.md',
-      'go.mod',
-      '.kory-runtime/go',
-      '.kory-runtime/runtime.json',
-    ]) {
+    for (const path of ['README.md', 'go.mod', '.kory-runtime/go', '.kory-runtime/runtime.json']) {
       const original = readFileSync(join(root, path), 'utf8');
       writeFixtureFile(root, path, `${original}\nchanged by candidate\n`);
       const changed = await score();
@@ -98,7 +93,9 @@ describe('actual Go host evaluators', () => {
     const unsafe = await score();
     expect(unsafe.integrityFailure).toBe(true);
     expect(unsafe.evidence[0]).toContain('README.md');
-    expect(readdirSync(join(root, 'batch')).filter((name) => name.startsWith('kory_hidden_'))).toEqual([]);
+    expect(
+      readdirSync(join(root, 'batch')).filter((name) => name.startsWith('kory_hidden_')),
+    ).toEqual([]);
   });
 
   runtimeTest(
@@ -168,9 +165,11 @@ func TestSuccessAndSlowDependencyCancellation(t *testing.T) {
       expect(readFileSync(join(root, candidateReservedPath), 'utf8')).toBe(
         candidateReservedContent,
       );
-      expect(readdirSync(join(root, 'batch')).filter((name) =>
-        /^kory_hidden_[a-f0-9]+_test\.go$/u.test(name),
-      )).toEqual([]);
+      expect(
+        readdirSync(join(root, 'batch')).filter((name) =>
+          /^kory_hidden_[a-f0-9]+_test\.go$/u.test(name),
+        ),
+      ).toEqual([]);
 
       // The candidate's public checks also pass with the leaky starter; only
       // actual hidden execution can discriminate this broken implementation.

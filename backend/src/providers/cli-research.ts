@@ -61,7 +61,8 @@ export function cliResearchBoundary(provider: ProviderName | string): CliResearc
       return {
         eligible: false,
         nativeTools: [],
-        reason: 'OpenCode ACP plan mode is an interaction posture, not a machine-enforced native tool visibility allowlist',
+        reason:
+          'OpenCode ACP plan mode is an interaction posture, not a machine-enforced native tool visibility allowlist',
       };
     default:
       return {

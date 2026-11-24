@@ -8,7 +8,15 @@ import type { AgentIdentity } from '@koryphaios/shared';
 import { agentStore, noteAgentToolCall } from './agents.svelte';
 
 function identity(id: string, role: AgentIdentity['role'] = 'coder'): AgentIdentity {
-  return { id, name: id, role, provider: 'openai', model: 'gpt-test', domain: 'general', glowColor: '' } as AgentIdentity;
+  return {
+    id,
+    name: id,
+    role,
+    provider: 'openai',
+    model: 'gpt-test',
+    domain: 'general',
+    glowColor: '',
+  } as AgentIdentity;
 }
 
 describe('agent display timing and lineage', () => {

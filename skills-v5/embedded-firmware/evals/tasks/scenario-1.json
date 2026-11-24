@@ -38,10 +38,7 @@
         "independent evaluator record",
         "quality comparison without variant labels"
       ],
-      "blindTo": [
-        "skill-variant",
-        "expected-outcome"
-      ]
+      "blindTo": ["skill-variant", "expected-outcome"]
     }
   ],
   "requiredEvidence": [

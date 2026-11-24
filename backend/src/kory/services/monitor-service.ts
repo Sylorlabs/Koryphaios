@@ -18,11 +18,7 @@ import { dirname } from 'node:path';
 import { serverLog } from '../../logger';
 import type { KoryManager } from '../manager';
 import type { SessionStore } from '../../stores/session-store';
-import {
-  assertValidSchedule,
-  nextRunAfter,
-  type MonitorSchedule,
-} from './monitor-schedule';
+import { assertValidSchedule, nextRunAfter, type MonitorSchedule } from './monitor-schedule';
 
 /** `same_chat` wakes the originating chat. `new_chat` opens a fresh chat per run. */
 export type MonitorTarget = 'same_chat' | 'new_chat';
@@ -301,7 +297,11 @@ function parseMonitor(value: unknown): SessionMonitor | null {
   const schedule = parseSchedule(value.schedule, intervalMs);
   const target: MonitorTarget = value.target === 'new_chat' ? 'new_chat' : 'same_chat';
   const status: SessionMonitor['status'] =
-    value.status === 'cancelled' ? 'cancelled' : value.status === 'completed' ? 'completed' : 'active';
+    value.status === 'cancelled'
+      ? 'cancelled'
+      : value.status === 'completed'
+        ? 'completed'
+        : 'active';
   if (
     !id.startsWith('mon-') ||
     !sessionId ||
@@ -386,8 +386,10 @@ export async function createMonitor(input: CreateMonitorInput): Promise<SessionM
   if (prompt.length > MAX_PROMPT_LENGTH) {
     throw new Error(`A monitor prompt cannot exceed ${MAX_PROMPT_LENGTH} characters`);
   }
-  const schedule: MonitorSchedule =
-    input.schedule ?? { kind: 'interval', intervalMs: Math.round(input.intervalMs ?? 0) };
+  const schedule: MonitorSchedule = input.schedule ?? {
+    kind: 'interval',
+    intervalMs: Math.round(input.intervalMs ?? 0),
+  };
   const now = Date.now();
   assertValidSchedule(schedule, now);
   const target = input.target ?? 'same_chat';

@@ -149,9 +149,7 @@ describe('hook bridge decision encoding', () => {
     const lease = createKoryBridgeGrantLease('session-live', 'worker');
     try {
       const grant = lease.grant(['hook:pre-tool']);
-      expect(resolveHookAuthFile('/stale/revoked/bridge-grant.json', grant.path)).toBe(
-        grant.path,
-      );
+      expect(resolveHookAuthFile('/stale/revoked/bridge-grant.json', grant.path)).toBe(grant.path);
       expect(resolveHookAuthFile('/cli/grant.json', '/missing/env-grant.json')).toBe(
         '/cli/grant.json',
       );

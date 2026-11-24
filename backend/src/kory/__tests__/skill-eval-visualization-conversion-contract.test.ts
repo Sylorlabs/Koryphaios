@@ -147,9 +147,10 @@ describe('regional conversion public contract', () => {
       if (shape === 'array') row.interval95 = [lower, upper];
       if (shape === 'nested') row.interval95 = { lower, upper };
     }
-    artifact.chart.interval = shape === 'flat'
-      ? { lowerField: 'lower', upperField: 'upper' }
-      : { field: 'interval95' } as never;
+    artifact.chart.interval =
+      shape === 'flat'
+        ? { lowerField: 'lower', upperField: 'upper' }
+        : ({ field: 'interval95' } as never);
     write();
     expect((await score()).passed).toBe(true);
   });

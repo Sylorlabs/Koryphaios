@@ -30,13 +30,17 @@ export const MAX_NATIVE_REVIEW_REQUEST_BYTES = 128_000;
 export const MAX_NATIVE_REVIEW_RESPONSE_BYTES = 1_048_576;
 const MAX_STDERR_BYTES = 64_000;
 const DRAIN_MS = 500;
-export const NATIVE_REVIEW_SYSTEM_PROMPT = 'You are an independent artifact reviewer. Use only the anonymous sealed prompt supplied on stdin. Do not use tools, files, inherited context, or outside knowledge to invent verification. Return exactly one JSON object with artifactA and artifactB (passed, quality, verification, integrityFailure, evidence), preference (A, B, or tie), and rationale. No fences or extra prose.';
+export const NATIVE_REVIEW_SYSTEM_PROMPT =
+  'You are an independent artifact reviewer. Use only the anonymous sealed prompt supplied on stdin. Do not use tools, files, inherited context, or outside knowledge to invent verification. Return exactly one JSON object with artifactA and artifactB (passed, quality, verification, integrityFailure, evidence), preference (A, B, or tie), and rationale. No fences or extra prose.';
 const hash = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 function fail(): never {
   throw new Error('Native stateless reviewer failed (details redacted).');
 }
 
-export function parseNativeReviewEvents(bytes: Buffer, model: string): { sessionId: string; output: string } {
+export function parseNativeReviewEvents(
+  bytes: Buffer,
+  model: string,
+): { sessionId: string; output: string } {
   const parsed = parseNativeTextEvents(bytes, model);
   validateAdjudication(parsed.output);
   return parsed;
@@ -81,24 +85,42 @@ async function readPrompt(deadline: number): Promise<string> {
         return;
       }
       try {
-        const prompt = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks));
+        const prompt = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+          Buffer.concat(chunks),
+        );
         if (!prompt.trim()) fail();
         resolvePrompt(prompt);
-      } catch { reject(new Error('Invalid native reviewer stdin (details redacted).')); }
+      } catch {
+        reject(new Error('Invalid native reviewer stdin (details redacted).'));
+      }
     };
-    const timer = setTimeout(() => finish(new Error('Native reviewer stdin exceeded its deadline.')), Math.max(1, deadline - performance.now()));
+    const timer = setTimeout(
+      () => finish(new Error('Native reviewer stdin exceeded its deadline.')),
+      Math.max(1, deadline - performance.now()),
+    );
     process.stdin.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_NATIVE_REVIEW_REQUEST_BYTES) finish(new Error('Native reviewer request exceeds its byte limit; no dispatch.'));
+      if (size > MAX_NATIVE_REVIEW_REQUEST_BYTES)
+        finish(new Error('Native reviewer request exceeds its byte limit; no dispatch.'));
       else chunks.push(chunk);
     });
     process.stdin.on('end', () => finish());
-    process.stdin.on('error', () => finish(new Error('Native reviewer stdin failed (details redacted).')));
+    process.stdin.on('error', () =>
+      finish(new Error('Native reviewer stdin failed (details redacted).')),
+    );
   });
 }
 
-function run(binary: string, args: string[], home: string, env: NodeJS.ProcessEnv,
-  timeoutMs: number, limit: number, input?: string, sandbox?: NativeMacReviewerSandbox): Promise<Buffer> {
+function run(
+  binary: string,
+  args: string[],
+  home: string,
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+  limit: number,
+  input?: string,
+  sandbox?: NativeMacReviewerSandbox,
+): Promise<Buffer> {
   if (timeoutMs <= 0) fail();
   const command = sandbox?.command(binary, args) ?? { binary, args };
   return new Promise((resolveRun, reject) => {
@@ -125,7 +147,8 @@ function run(binary: string, args: string[], home: string, env: NodeJS.ProcessEn
       child.stdout.destroy();
       child.stderr.destroy();
       child.unref();
-      if (problem || code !== 0) reject(new Error(problem ?? 'Native reviewer process failed (details redacted).'));
+      if (problem || code !== 0)
+        reject(new Error(problem ?? 'Native reviewer process failed (details redacted).'));
       else resolveRun(Buffer.concat(chunks));
     };
     const stop = (message: string) => {
@@ -135,7 +158,13 @@ function run(binary: string, args: string[], home: string, env: NodeJS.ProcessEn
       terminateProviderProcessGroup(child.pid);
       child.kill('SIGKILL');
     };
-    const timer = setTimeout(() => stop('Native reviewer exceeded its deadline; local cleanup does not acknowledge upstream cancellation.'), timeoutMs);
+    const timer = setTimeout(
+      () =>
+        stop(
+          'Native reviewer exceeded its deadline; local cleanup does not acknowledge upstream cancellation.',
+        ),
+      timeoutMs,
+    );
     child.stdout.on('data', (chunk: Buffer) => {
       size += chunk.length;
       if (size > limit) stop('Native reviewer response exceeds its byte limit (details redacted).');
@@ -144,7 +173,8 @@ function run(binary: string, args: string[], home: string, env: NodeJS.ProcessEn
     child.stderr.on('data', (chunk: Buffer) => {
       // Credentials/prompt/provider diagnostics are never retained or published.
       diagnosticsSize += chunk.length;
-      if (diagnosticsSize > MAX_STDERR_BYTES) stop('Native reviewer diagnostics exceed their byte limit (details redacted).');
+      if (diagnosticsSize > MAX_STDERR_BYTES)
+        stop('Native reviewer diagnostics exceed their byte limit (details redacted).');
     });
     child.stdin.on('error', () => stop('Native reviewer input failed (details redacted).'));
     child.on('error', () => stop('Native reviewer spawn failed (details redacted).'));
@@ -172,7 +202,9 @@ export async function runNativeStatelessReviewer(): Promise<void> {
   const requestBytes = Buffer.byteLength(request);
   if (requestBytes > MAX_NATIVE_REVIEW_REQUEST_BYTES) fail();
   const configured = process.env.KORY_NATIVE_REVIEW_BINARY?.trim() || 'claude';
-  const candidate = looksLikePath(configured) ? resolve(configured) : findExecutableOnPath(configured);
+  const candidate = looksLikePath(configured)
+    ? resolve(configured)
+    : findExecutableOnPath(configured);
   if (!candidate || !statSync(candidate).isFile()) fail();
   accessSync(candidate, constants.X_OK);
   const binary = canonicalizePath(candidate);
@@ -181,7 +213,14 @@ export async function runNativeStatelessReviewer(): Promise<void> {
     if (isContainedBy(canonicalizePath(root), parent)) fail();
   }
   const protectedPaths = [process.cwd(), resolve(import.meta.dir, '..')];
-  for (const key of ['HOME', 'USERPROFILE', 'KORYPHAIOS_DATA_DIR', 'KORYPHAIOS_SKILLS_HOME', 'CLAUDE_CONFIG_DIR', 'KORY_NATIVE_REVIEW_PENDING_ROOT']) {
+  for (const key of [
+    'HOME',
+    'USERPROFILE',
+    'KORYPHAIOS_DATA_DIR',
+    'KORYPHAIOS_SKILLS_HOME',
+    'CLAUDE_CONFIG_DIR',
+    'KORY_NATIVE_REVIEW_PENDING_ROOT',
+  ]) {
     const path = stageMode ? process.env[key]?.trim() : undefined;
     if (path) {
       if (!existsSync(path)) fail();
@@ -194,77 +233,140 @@ export async function runNativeStatelessReviewer(): Promise<void> {
   let sandbox: NativeMacReviewerSandbox | undefined;
   try {
     const archiveDirectory = archiveConfigured
-      ? nativeArchiveDirectory(archiveConfigured, home, canonicalizePath(resolve(import.meta.dir, '..')))
+      ? nativeArchiveDirectory(
+          archiveConfigured,
+          home,
+          canonicalizePath(resolve(import.meta.dir, '..')),
+        )
       : undefined;
     if (archiveDirectory) protectedPaths.push(archiveDirectory);
     if (stageMode) sandbox = createNativeMacReviewerSandbox(home, protectedPaths);
     const env = nativeReviewerEnvironment(home);
-    const version = new TextDecoder('utf-8', { fatal: true }).decode(await run(binary,
-      ['--version'], home, env, Math.min(5_000, deadline - performance.now()), 8_192, undefined, sandbox)).trim();
+    const version = new TextDecoder('utf-8', { fatal: true })
+      .decode(
+        await run(
+          binary,
+          ['--version'],
+          home,
+          env,
+          Math.min(5_000, deadline - performance.now()),
+          8_192,
+          undefined,
+          sandbox,
+        ),
+      )
+      .trim();
     if (version !== `${NATIVE_REVIEW_VERSION} (Claude Code)`) fail();
-    const response = await run(binary, [
-      '--bare', '--restricted', '--strict-mcp-config', '--disable-slash-commands',
-      '--no-session-persistence', '--tools', '', '--system-prompt', NATIVE_REVIEW_SYSTEM_PROMPT,
-      '--model', model, '--output-format', 'stream-json', '--verbose',
-      '--max-turns', '1', '--print',
-    ], home, env, deadline - performance.now(), MAX_NATIVE_REVIEW_RESPONSE_BYTES, prompt, sandbox);
+    const response = await run(
+      binary,
+      [
+        '--bare',
+        '--restricted',
+        '--strict-mcp-config',
+        '--disable-slash-commands',
+        '--no-session-persistence',
+        '--tools',
+        '',
+        '--system-prompt',
+        NATIVE_REVIEW_SYSTEM_PROMPT,
+        '--model',
+        model,
+        '--output-format',
+        'stream-json',
+        '--verbose',
+        '--max-turns',
+        '1',
+        '--print',
+      ],
+      home,
+      env,
+      deadline - performance.now(),
+      MAX_NATIVE_REVIEW_RESPONSE_BYTES,
+      prompt,
+      sandbox,
+    );
     const { sessionId, output } = parseNativeReviewEvents(response, model);
-    if (archiveDirectory && nativeArchiveDirectory(archiveConfigured!, home, canonicalizePath(resolve(import.meta.dir, '..'))) !== archiveDirectory) fail();
+    if (
+      archiveDirectory &&
+      nativeArchiveDirectory(
+        archiveConfigured!,
+        home,
+        canonicalizePath(resolve(import.meta.dir, '..')),
+      ) !== archiveDirectory
+    )
+      fail();
     // Read the actual policy used by sandbox-exec, not a reconstructed profile.
     const profileBytes = sandbox?.readProfileBytes();
     const rawEventArchive = archiveDirectory
-      ? archiveNativeStageBytes(archiveDirectory, 'native-cli-events.jsonl', response, MAX_NATIVE_REVIEW_RESPONSE_BYTES)
+      ? archiveNativeStageBytes(
+          archiveDirectory,
+          'native-cli-events.jsonl',
+          response,
+          MAX_NATIVE_REVIEW_RESPONSE_BYTES,
+        )
       : undefined;
-    const profileArchive = archiveDirectory && profileBytes
-      ? archiveNativeStageBytes(archiveDirectory, 'native-kernel-profile.sb', profileBytes, 64_000)
-      : undefined;
+    const profileArchive =
+      archiveDirectory && profileBytes
+        ? archiveNativeStageBytes(
+            archiveDirectory,
+            'native-kernel-profile.sb',
+            profileBytes,
+            64_000,
+          )
+        : undefined;
     const reviewerId = `native-cli:${sessionId}`;
-    process.stdout.write(`${JSON.stringify({
-      schemaVersion: 1,
-      reviewerId,
-      completed: true,
-      output,
-      events: [
-        { type: 'review.started', reviewerId },
-        { type: 'review.completed', reviewerId, outputSha256: hash(output) },
-      ],
-      hostReceipt: {
+    process.stdout.write(
+      `${JSON.stringify({
         schemaVersion: 1,
-        stageOnly: true,
-        identitySource: 'host-observed-native-cli-session-id',
-        runtimeVersion: NATIVE_REVIEW_VERSION,
-        requestedModel: model,
-        observedModel: model,
-        boundary: 'native-no-tools-bare-restricted-explicit-stdin',
-        tools: [], mcpServers: [], skills: [],
-        promptSha256: hash(prompt),
-        systemPromptSha256: hash(NATIVE_REVIEW_SYSTEM_PROMPT),
-        requestSerialization: 'host-declared-system-prompt-model-not-upstream-wire',
-        requestBytes,
-        requestSha256: hash(request),
-        responseSha256: hash(response),
-        responseBytes: response.length,
-        rawEventArchive,
-        outputSha256: hash(output),
-        osIsolationVerified: false,
-        kernelStage: sandbox ? {
-          mode: sandbox.mode,
-          enforcement: 'sandbox-exec',
-          readPolicy: 'broad-runtime-reads-with-explicit-canonical-private-root-denies',
-          privateRoot: sandbox.privateRoot,
-          readDenyRoots: sandbox.readDenyRoots,
-          protectedRoots: sandbox.protectedRoots,
-          profileSha256: sandbox.profileSha256,
-          profileArchive,
-          writableRoots: [sandbox.privateRoot],
-          writableDevice: '/dev/null',
-          universalReadAllowlist: false,
-        } : { mode: 'none', enforcement: 'none' },
-        upstreamIdentityVerified: false,
-        upstreamCancellationAcknowledged: false,
-        signed: false,
-      },
-    })}\n`);
+        reviewerId,
+        completed: true,
+        output,
+        events: [
+          { type: 'review.started', reviewerId },
+          { type: 'review.completed', reviewerId, outputSha256: hash(output) },
+        ],
+        hostReceipt: {
+          schemaVersion: 1,
+          stageOnly: true,
+          identitySource: 'host-observed-native-cli-session-id',
+          runtimeVersion: NATIVE_REVIEW_VERSION,
+          requestedModel: model,
+          observedModel: model,
+          boundary: 'native-no-tools-bare-restricted-explicit-stdin',
+          tools: [],
+          mcpServers: [],
+          skills: [],
+          promptSha256: hash(prompt),
+          systemPromptSha256: hash(NATIVE_REVIEW_SYSTEM_PROMPT),
+          requestSerialization: 'host-declared-system-prompt-model-not-upstream-wire',
+          requestBytes,
+          requestSha256: hash(request),
+          responseSha256: hash(response),
+          responseBytes: response.length,
+          rawEventArchive,
+          outputSha256: hash(output),
+          osIsolationVerified: false,
+          kernelStage: sandbox
+            ? {
+                mode: sandbox.mode,
+                enforcement: 'sandbox-exec',
+                readPolicy: 'broad-runtime-reads-with-explicit-canonical-private-root-denies',
+                privateRoot: sandbox.privateRoot,
+                readDenyRoots: sandbox.readDenyRoots,
+                protectedRoots: sandbox.protectedRoots,
+                profileSha256: sandbox.profileSha256,
+                profileArchive,
+                writableRoots: [sandbox.privateRoot],
+                writableDevice: '/dev/null',
+                universalReadAllowlist: false,
+              }
+            : { mode: 'none', enforcement: 'none' },
+          upstreamIdentityVerified: false,
+          upstreamCancellationAcknowledged: false,
+          signed: false,
+        },
+      })}\n`,
+    );
   } finally {
     sandbox?.cleanup();
     rmSync(home, { recursive: true, force: true });
@@ -273,7 +375,9 @@ export async function runNativeStatelessReviewer(): Promise<void> {
 
 if (import.meta.main) {
   runNativeStatelessReviewer().catch(() => {
-    process.stderr.write('kory-native-stateless-reviewer: failed; diagnostics redacted. No completed review emitted.\n');
+    process.stderr.write(
+      'kory-native-stateless-reviewer: failed; diagnostics redacted. No completed review emitted.\n',
+    );
     process.exitCode = 1;
   });
 }

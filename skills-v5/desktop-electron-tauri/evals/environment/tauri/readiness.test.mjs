@@ -1,15 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import {
-  chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync,
-} from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
-import {
-  inspectEnvironment, inspectReceipt, REQUIRED_NATIVE_EVENTS,
-} from './readiness.mjs';
+import { inspectEnvironment, inspectReceipt, REQUIRED_NATIVE_EVENTS } from './readiness.mjs';
 
 let sandbox;
 before(() => {
@@ -59,9 +55,11 @@ test('installed native app or Rust compiler alone cannot unlock Tauri proof', ()
 test('native attempt readiness still cannot claim packaged device verification', () => {
   mkTool('tauri');
   const driver = mkTool('driver');
-  const report = inspectEnvironment(mkEnvironment({
-    KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: driver,
-  }));
+  const report = inspectEnvironment(
+    mkEnvironment({
+      KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: driver,
+    }),
+  );
   assert.equal(report.cli.v2, true);
   assert.equal(report.driver.available, true);
   assert.equal(report.nativeAttemptReady, true);
@@ -73,17 +71,18 @@ test('v1 CLI and invalid configured override fail closed', () => {
   const base = mkEnvironment({ KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: driver });
   const v1 = inspectEnvironment({
     ...base,
-    run: (path, args) => path?.endsWith('/tauri')
-      ? { ok: true, detail: 'tauri-cli 1.6.0' }
-      : healthyProbe(path, args),
+    run: (path, args) =>
+      path?.endsWith('/tauri') ? { ok: true, detail: 'tauri-cli 1.6.0' } : healthyProbe(path, args),
   });
   assert.equal(v1.nativeAttemptReady, false);
   assert.equal(v1.cli.v2, false);
 
-  const overridden = inspectEnvironment(mkEnvironment({
-    KORY_SKILL_EVAL_TAURI_CLI: '/missing/tauri',
-    KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: driver,
-  }));
+  const overridden = inspectEnvironment(
+    mkEnvironment({
+      KORY_SKILL_EVAL_TAURI_CLI: '/missing/tauri',
+      KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: driver,
+    }),
+  );
   assert.equal(overridden.cli.v2, false);
   assert.match(overridden.blockers.join('\n'), /Configured Tauri CLI unavailable/);
 });
@@ -92,26 +91,32 @@ test('driver must be an external regular executable, not a symlink', () => {
   const driver = mkTool('driver-real');
   const alias = join(sandbox, 'driver-link');
   symlinkSync(driver, alias);
-  const symbolic = inspectEnvironment(mkEnvironment({
-    KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: alias,
-  }));
+  const symbolic = inspectEnvironment(
+    mkEnvironment({
+      KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: alias,
+    }),
+  );
   assert.equal(symbolic.driver.available, false);
   assert.match(symbolic.driver.detail, /symbolic-link/);
 
   const nonexecutable = join(sandbox, 'driver-inert');
   writeFileSync(nonexecutable, 'inert');
   chmodSync(nonexecutable, 0o644);
-  const blocked = inspectEnvironment(mkEnvironment({
-    KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: nonexecutable,
-  }));
+  const blocked = inspectEnvironment(
+    mkEnvironment({
+      KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: nonexecutable,
+    }),
+  );
   assert.equal(blocked.driver.available, false);
   assert.match(blocked.driver.detail, /not executable/);
 });
 
 test('bundled script cannot be installed as its own trusted native driver', () => {
-  const report = inspectEnvironment(mkEnvironment({
-    KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: new URL('./readiness.mjs', import.meta.url).pathname,
-  }));
+  const report = inspectEnvironment(
+    mkEnvironment({
+      KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER: new URL('./readiness.mjs', import.meta.url).pathname,
+    }),
+  );
   assert.equal(report.driver.available, false);
   assert.match(report.driver.detail, /inside the bundled skills/);
 });
@@ -132,13 +137,17 @@ function receiptFixture() {
     runtime: 'tauri',
     launchMode: 'packaged',
     challenge,
-    startedAt: now, finishedAt: now,
+    startedAt: now,
+    finishedAt: now,
     nativeEvents: REQUIRED_NATIVE_EVENTS.map((kind, atMs) => {
       const entry = { kind, atMs };
       if (kind === 'packaged-launch' || kind === 'app-quit') entry.pid = 4100;
-      if (kind === 'packaged-relaunch' || kind === 'state-restored'
-        || kind === 'native-capture') entry.pid = 4101;
-      if (kind === 'dialog-cancel') { entry.outcome = 'cancelled'; entry.selection = null; }
+      if (kind === 'packaged-relaunch' || kind === 'state-restored' || kind === 'native-capture')
+        entry.pid = 4101;
+      if (kind === 'dialog-cancel') {
+        entry.outcome = 'cancelled';
+        entry.selection = null;
+      }
       if (kind === 'dialog-select' || kind === 'state-restored') {
         entry.workspaceRoot = join(sandbox, 'selected-root');
       }
@@ -181,7 +190,10 @@ test('receipt rejects absent denial or impossible event ordering', () => {
 
   const swapped = receiptFixture();
   swapped.nativeEvents[1].atMs = 999;
-  assert.equal(inspectReceipt(swapped, { expectedChallenge: challenge }).classification, 'rejected');
+  assert.equal(
+    inspectReceipt(swapped, { expectedChallenge: challenge }).classification,
+    'rejected',
+  );
 });
 
 test('receipt rejects tampered binary or screenshot artifact', () => {
@@ -208,7 +220,6 @@ test('receipt rejects synthetic image substituted through a symlink', () => {
   assert.match(verdict.issues.join('\n'), /symbolic-link/);
 });
 
-
 test('larger packaged executable is fingerprinted without assuming tiny binaries', () => {
   const receipt = receiptFixture();
   const largeBinary = Buffer.alloc(11 * 1024 * 1024, 0x4d);
@@ -223,7 +234,8 @@ test('larger packaged executable is fingerprinted without assuming tiny binaries
 test('strict CLI preflight reports a blocked status, not a device pass', () => {
   const harness = new URL('./readiness.mjs', import.meta.url);
   const run = spawnSync(process.execPath, [harness.pathname, '--strict'], {
-    env: { PATH: sandbox }, encoding: 'utf8',
+    env: { PATH: sandbox },
+    encoding: 'utf8',
   });
   assert.equal(run.status, 2);
   const result = JSON.parse(run.stdout);
@@ -231,7 +243,6 @@ test('strict CLI preflight reports a blocked status, not a device pass', () => {
   assert.equal(result.nativeDeviceVerified, false);
   assert.ok(result.blockers.some((entry) => entry.includes('native driver')));
 });
-
 
 test('receipt rejects cancelled dialogue coerced to a home path', () => {
   const receipt = receiptFixture();
@@ -254,15 +265,16 @@ test('receipt rejects relaunch with same process and lost restored root', () => 
   assert.match(result.issues.join('\n'), /restored root/);
 });
 
-
 test('receipt CLI exits nonzero even when every declared check is structurally consistent', () => {
   const receipt = receiptFixture();
   const file = join(sandbox, 'receipt.json');
   writeFileSync(file, JSON.stringify(receipt));
   const harness = new URL('./readiness.mjs', import.meta.url);
-  const result = spawnSync(process.execPath, [
-    harness.pathname, '--receipt', file, '--challenge', challenge,
-  ], { encoding: 'utf8' });
+  const result = spawnSync(
+    process.execPath,
+    [harness.pathname, '--receipt', file, '--challenge', challenge],
+    { encoding: 'utf8' },
+  );
   assert.equal(result.status, 2);
   const verdict = JSON.parse(result.stdout);
   assert.equal(verdict.classification, 'structural-only');

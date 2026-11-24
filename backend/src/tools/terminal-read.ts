@@ -29,8 +29,7 @@ export function resetTerminalReads(): void {
 }
 
 // CSI, OSC, and two-byte ESC sequences.
-const ANSI_PATTERN =
-  /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
+const ANSI_PATTERN = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
 
 /** Plain text from raw PTY bytes: control sequences removed, CRLF folded to LF,
  *  and bare carriage returns (progress-bar redraws) dropped. */

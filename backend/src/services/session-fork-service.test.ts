@@ -215,16 +215,35 @@ async function reloadedTranscript(sessionId: string) {
   }));
 }
 
-const IMAGE_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+const IMAGE_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
 
 describe('forkSessionAtMessage fork points', () => {
   it('forks at a failed turn whose reply was never persisted', async () => {
     const sourceId = await newChat();
     const store = new MessageStore();
-    await store.add(sourceId, { id: `u1-${sourceId}`, sessionId: sourceId, role: 'user', content: 'hello', createdAt: 2_000 });
-    await store.add(sourceId, { id: `a1-${sourceId}`, sessionId: sourceId, role: 'assistant', content: 'hi', createdAt: 2_001 });
+    await store.add(sourceId, {
+      id: `u1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'hello',
+      createdAt: 2_000,
+    });
+    await store.add(sourceId, {
+      id: `a1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'assistant',
+      content: 'hi',
+      createdAt: 2_001,
+    });
     const failed = turnIds();
-    await store.add(sourceId, { id: failed.userMessageId, sessionId: sourceId, role: 'user', content: 'fail me', createdAt: 2_002 });
+    await store.add(sourceId, {
+      id: failed.userMessageId,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'fail me',
+      createdAt: 2_002,
+    });
     await recordTurn(sourceId, failed, 'failed');
 
     const { session, copiedMessageCount, forkMessageId } = forkSessionAtMessage({
@@ -242,9 +261,27 @@ describe('forkSessionAtMessage fork points', () => {
     const sourceId = await newChat();
     const store = new MessageStore();
     const cancelled = turnIds();
-    await store.add(sourceId, { id: cancelled.userMessageId, sessionId: sourceId, role: 'user', content: 'one', createdAt: 2_000 });
-    await store.add(sourceId, { id: cancelled.responseMessageId, sessionId: sourceId, role: 'assistant', content: 'partial', createdAt: 2_001 });
-    await store.add(sourceId, { id: `sys-${sourceId}`, sessionId: sourceId, role: 'system', content: 'Stopped by user.', createdAt: 2_002 });
+    await store.add(sourceId, {
+      id: cancelled.userMessageId,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'one',
+      createdAt: 2_000,
+    });
+    await store.add(sourceId, {
+      id: cancelled.responseMessageId,
+      sessionId: sourceId,
+      role: 'assistant',
+      content: 'partial',
+      createdAt: 2_001,
+    });
+    await store.add(sourceId, {
+      id: `sys-${sourceId}`,
+      sessionId: sourceId,
+      role: 'system',
+      content: 'Stopped by user.',
+      createdAt: 2_002,
+    });
     await recordTurn(sourceId, cancelled, 'cancelled');
 
     const latest = forkSessionAtMessage({ sourceSessionId: sourceId });
@@ -260,10 +297,28 @@ describe('forkSessionAtMessage fork points', () => {
   it('steps back past a running turn when no message is named, and refuses to fork from it', async () => {
     const sourceId = await newChat();
     const store = new MessageStore();
-    await store.add(sourceId, { id: `u1-${sourceId}`, sessionId: sourceId, role: 'user', content: 'done', createdAt: 2_000 });
-    await store.add(sourceId, { id: `a1-${sourceId}`, sessionId: sourceId, role: 'assistant', content: 'done reply', createdAt: 2_001 });
+    await store.add(sourceId, {
+      id: `u1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'done',
+      createdAt: 2_000,
+    });
+    await store.add(sourceId, {
+      id: `a1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'assistant',
+      content: 'done reply',
+      createdAt: 2_001,
+    });
     const running = turnIds();
-    await store.add(sourceId, { id: running.userMessageId, sessionId: sourceId, role: 'user', content: 'still running', createdAt: 2_002 });
+    await store.add(sourceId, {
+      id: running.userMessageId,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'still running',
+      createdAt: 2_002,
+    });
     await recordTurn(sourceId, running, 'active');
 
     const latest = forkSessionAtMessage({ sourceSessionId: sourceId });
@@ -287,8 +342,17 @@ describe('forkSessionAtMessage fork points', () => {
   it('uses an explicit title, with the same length and default-name rules as a rename', async () => {
     const sourceId = await newChat('Original');
     const store = new MessageStore();
-    await store.add(sourceId, { id: `u1-${sourceId}`, sessionId: sourceId, role: 'user', content: 'x', createdAt: 2_000 });
-    const titled = forkSessionAtMessage({ sourceSessionId: sourceId, title: '  Try   the   other way ' });
+    await store.add(sourceId, {
+      id: `u1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'x',
+      createdAt: 2_000,
+    });
+    const titled = forkSessionAtMessage({
+      sourceSessionId: sourceId,
+      title: '  Try   the   other way ',
+    });
     expect(titled.session.title).toBe('Try the other way');
     expect(() => forkSessionAtMessage({ sourceSessionId: sourceId, title: 'New Session' })).toThrow(
       ValidationError,
@@ -336,7 +400,13 @@ describe('forkSessionAtMessage content and reload parity', () => {
   it('keeps variant siblings of copied responses so the fork shows the same alternatives', async () => {
     const sourceId = await newChat();
     const store = new MessageStore();
-    await store.add(sourceId, { id: `u1-${sourceId}`, sessionId: sourceId, role: 'user', content: 'pick', createdAt: 2_000 });
+    await store.add(sourceId, {
+      id: `u1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'pick',
+      createdAt: 2_000,
+    });
     await store.add(sourceId, {
       id: `a1-${sourceId}`,
       sessionId: sourceId,
@@ -347,7 +417,10 @@ describe('forkSessionAtMessage content and reload parity', () => {
       createdAt: 2_001,
     });
     // Both responses answer the same request, so their parent is the user message.
-    await db.update(sessions).set({ activeMessageId: `u1-${sourceId}` }).where(eq(sessions.id, sourceId));
+    await db
+      .update(sessions)
+      .set({ activeMessageId: `u1-${sourceId}` })
+      .where(eq(sessions.id, sourceId));
     await store.add(sourceId, {
       id: `a1b-${sourceId}`,
       sessionId: sourceId,
@@ -357,7 +430,10 @@ describe('forkSessionAtMessage content and reload parity', () => {
       variantIndex: 1,
       createdAt: 2_002,
     });
-    await db.update(sessions).set({ activeMessageId: `a1-${sourceId}` }).where(eq(sessions.id, sourceId));
+    await db
+      .update(sessions)
+      .set({ activeMessageId: `a1-${sourceId}` })
+      .where(eq(sessions.id, sourceId));
 
     const { session, copiedMessageCount } = forkSessionAtMessage({
       sourceSessionId: sourceId,
@@ -375,14 +451,39 @@ describe('forkSessionAtMessage content and reload parity', () => {
   it('copies client feed errors at or before the fork point only', async () => {
     const sourceId = await newChat();
     const store = new MessageStore();
-    await store.add(sourceId, { id: `u1-${sourceId}`, sessionId: sourceId, role: 'user', content: 'one', createdAt: 3_000 });
+    await store.add(sourceId, {
+      id: `u1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'one',
+      createdAt: 3_000,
+    });
     await db.insert(sessionFeedEntries).values([
-      { id: `feed-early-${sourceId}`, sessionId: sourceId, kind: 'client_error', text: 'early', timestamp: new Date(2_500), createdAt: new Date(2_500), updatedAt: new Date(2_500) },
-      { id: `feed-late-${sourceId}`, sessionId: sourceId, kind: 'client_error', text: 'late', timestamp: new Date(9_000), createdAt: new Date(9_000), updatedAt: new Date(9_000) },
+      {
+        id: `feed-early-${sourceId}`,
+        sessionId: sourceId,
+        kind: 'client_error',
+        text: 'early',
+        timestamp: new Date(2_500),
+        createdAt: new Date(2_500),
+        updatedAt: new Date(2_500),
+      },
+      {
+        id: `feed-late-${sourceId}`,
+        sessionId: sourceId,
+        kind: 'client_error',
+        text: 'late',
+        timestamp: new Date(9_000),
+        createdAt: new Date(9_000),
+        updatedAt: new Date(9_000),
+      },
     ]);
 
     const { session } = forkSessionAtMessage({ sourceSessionId: sourceId });
-    const copied = await db.select().from(sessionFeedEntries).where(eq(sessionFeedEntries.sessionId, session.id));
+    const copied = await db
+      .select()
+      .from(sessionFeedEntries)
+      .where(eq(sessionFeedEntries.sessionId, session.id));
     expect(copied.map((entry) => entry.text)).toEqual(['early']);
   });
 });
@@ -391,10 +492,25 @@ describe('forkSessionAtMessage lineage, native state and isolation', () => {
   it('records lineage on the row and exposes it on the shared session', async () => {
     const sourceId = await newChat();
     const store = new MessageStore();
-    await store.add(sourceId, { id: `u1-${sourceId}`, sessionId: sourceId, role: 'user', content: 'a', createdAt: 2_000 });
-    await store.add(sourceId, { id: `a1-${sourceId}`, sessionId: sourceId, role: 'assistant', content: 'b', createdAt: 2_001 });
+    await store.add(sourceId, {
+      id: `u1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'a',
+      createdAt: 2_000,
+    });
+    await store.add(sourceId, {
+      id: `a1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'assistant',
+      content: 'b',
+      createdAt: 2_001,
+    });
 
-    const { session } = forkSessionAtMessage({ sourceSessionId: sourceId, messageId: `a1-${sourceId}` });
+    const { session } = forkSessionAtMessage({
+      sourceSessionId: sourceId,
+      messageId: `a1-${sourceId}`,
+    });
 
     expect(session.forkedFromSessionId).toBe(sourceId);
     expect(session.forkedFromMessageId).toBe(`a1-${sourceId}`);
@@ -429,8 +545,16 @@ describe('forkSessionAtMessage lineage, native state and isolation', () => {
       }),
     });
     const store = new MessageStore();
-    await store.add(sourceId, { id: `u1-${sourceId}`, sessionId: sourceId, role: 'user', content: 'go', createdAt: 2_000 });
-    const sourceMetadataBefore = (await db.select().from(sessions).where(eq(sessions.id, sourceId)))[0]!.metadata;
+    await store.add(sourceId, {
+      id: `u1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'go',
+      createdAt: 2_000,
+    });
+    const sourceMetadataBefore = (
+      await db.select().from(sessions).where(eq(sessions.id, sourceId))
+    )[0]!.metadata;
 
     const { session } = forkSessionAtMessage({ sourceSessionId: sourceId });
 
@@ -451,14 +575,32 @@ describe('forkSessionAtMessage lineage, native state and isolation', () => {
   it('isolates the two chats: writes to the fork never appear in the source, and the reverse', async () => {
     const sourceId = await newChat();
     const store = new MessageStore();
-    await store.add(sourceId, { id: `u1-${sourceId}`, sessionId: sourceId, role: 'user', content: 'base', createdAt: 2_000 });
+    await store.add(sourceId, {
+      id: `u1-${sourceId}`,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'base',
+      createdAt: 2_000,
+    });
     const { session } = forkSessionAtMessage({ sourceSessionId: sourceId });
     const sourceBefore = (await store.getAll(sourceId)).map((m) => m.id);
 
-    await store.add(session.id, { id: `fork-only-${sourceId}`, sessionId: session.id, role: 'user', content: 'fork only', createdAt: 3_000 });
+    await store.add(session.id, {
+      id: `fork-only-${sourceId}`,
+      sessionId: session.id,
+      role: 'user',
+      content: 'fork only',
+      createdAt: 3_000,
+    });
     expect((await store.getAll(sourceId)).map((m) => m.id)).toEqual(sourceBefore);
 
-    await store.add(sourceId, { id: `src-only-${sourceId}`, sessionId: sourceId, role: 'user', content: 'source only', createdAt: 3_001 });
+    await store.add(sourceId, {
+      id: `src-only-${sourceId}`,
+      sessionId: sourceId,
+      role: 'user',
+      content: 'source only',
+      createdAt: 3_001,
+    });
     const forked = (await store.getAll(session.id)).map((m) => m.content);
     expect(forked).not.toContain('source only');
     expect(forked).toContain('fork only');

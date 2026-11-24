@@ -44,8 +44,7 @@ export function describeFallbackStep(
 }
 
 export type FallbackStepCheck =
-  | { ok: true; statuses: FallbackStepStatus[] }
-  | { ok: false; stepIndex: number; error: string };
+  { ok: true; statuses: FallbackStepStatus[] } | { ok: false; stepIndex: number; error: string };
 
 export function checkFallbackSteps(
   steps: readonly FallbackStep[],
@@ -62,7 +61,11 @@ export function checkFallbackSteps(
   return { ok: true, statuses };
 }
 
-function fallbackStepError(stepIndex: number, step: FallbackStep, status: FallbackStepStatus): string {
+function fallbackStepError(
+  stepIndex: number,
+  step: FallbackStep,
+  status: FallbackStepStatus,
+): string {
   const position = `Step ${stepIndex + 1}`;
   if (status === 'missing_provider') return `${position} needs a provider.`;
   if (status === 'not_chat_provider') {

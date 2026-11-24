@@ -279,8 +279,11 @@ describe('concept-first evaluation controls', () => {
       const blockers = materializer.readinessBlockers ?? [];
       expect(row.ready, row.scenarioId).toBe(blockers.length === 0);
       expect(row.reasons, row.scenarioId).toEqual(blockers);
-      if (row.skill === 'angular-engineering' || row.skill === 'audio-production' ||
-          row.skill === 'android-compose') {
+      if (
+        row.skill === 'angular-engineering' ||
+        row.skill === 'audio-production' ||
+        row.skill === 'android-compose'
+      ) {
         // Their synthetic controls remain useful, but full tasks now select
         // runtime-backed evaluators whose local prerequisites may be absent.
         expect(materializer.realRuntime, row.scenarioId).toBe(true);
@@ -291,10 +294,17 @@ describe('concept-first evaluation controls', () => {
       }
     }
     expect(composeRows.every((row) => !row.ready)).toBe(true);
-    expect(composeRows.every((row) => row.materializerId?.startsWith('android-compose/native-'))).toBe(true);
-    expect(composeRows.every((row) => row.deterministicScorerId?.startsWith('android-compose/native-'))).toBe(true);
-    expect(composeRows.every((row) => row.reasons.some((reason) =>
-      /Android|TalkBack|JDK|Gradle|adb|device|AVD/iu.test(reason)))).toBe(true);
+    expect(
+      composeRows.every((row) => row.materializerId?.startsWith('android-compose/native-')),
+    ).toBe(true);
+    expect(
+      composeRows.every((row) => row.deterministicScorerId?.startsWith('android-compose/native-')),
+    ).toBe(true);
+    expect(
+      composeRows.every((row) =>
+        row.reasons.some((reason) => /Android|TalkBack|JDK|Gradle|adb|device|AVD/iu.test(reason)),
+      ),
+    ).toBe(true);
     const definition = definitions.find((d) => d.id === 'android-compose-full-task-1-individual')!;
     let executed = false;
     await expect(

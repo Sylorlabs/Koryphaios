@@ -92,10 +92,7 @@ export function resolveFusionSlug(
 }
 
 /** Whether the vendor lists this exact pairing (lead effort included). */
-export function isFusionPairingAvailable(
-  catalog: FusionCatalog,
-  sel: FusionSelection,
-): boolean {
+export function isFusionPairingAvailable(catalog: FusionCatalog, sel: FusionSelection): boolean {
   return resolveFusionSlug(catalog, sel) !== undefined;
 }
 
@@ -151,9 +148,8 @@ function fusionCellAvailable(
   catalog: FusionCatalog,
   sel: Omit<FusionSelection, 'leadEffort'>,
 ): boolean {
-  const cell = catalog.pairings[
-    fusionPairingKey(sel.lead, sel.leadFast, sel.sidekick, sel.sidekickEffort)
-  ];
+  const cell =
+    catalog.pairings[fusionPairingKey(sel.lead, sel.leadFast, sel.sidekick, sel.sidekickEffort)];
   return cell !== undefined && Object.keys(cell).length > 0;
 }
 
@@ -183,10 +179,7 @@ export function adjustFusionSelection(
   sel: FusionSelection,
   changed: 'lead' | 'leadFast' | 'sidekick' | 'sidekickEffort' | 'leadEffort',
 ): FusionAdjustment {
-  if (
-    isFusionPairingAvailable(catalog, sel) ||
-    fusionCellAvailable(catalog, sel)
-  ) {
+  if (isFusionPairingAvailable(catalog, sel) || fusionCellAvailable(catalog, sel)) {
     return { selection: { ...sel } };
   }
 
@@ -223,9 +216,7 @@ export function adjustFusionSelection(
   const sidekickOption = catalog.sidekicks.find((sk) => sk.id === sel.sidekick);
   for (const option of catalog.sidekicks) {
     if (option.id === sel.sidekick) continue;
-    const efforts: (string | null)[] = option.efforts.length
-      ? option.efforts
-      : [null];
+    const efforts: (string | null)[] = option.efforts.length ? option.efforts : [null];
     for (const effort of efforts) {
       const candidate = { ...sel, sidekick: option.id, sidekickEffort: effort };
       if (fusionCellAvailable(catalog, candidate)) {

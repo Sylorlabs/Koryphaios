@@ -194,7 +194,9 @@ export class RunResumptionStore {
 
   getPendingResume(sessionId: string): PendingResumeRecord | null {
     const row = this.sqlite
-      .query<PendingResumeRow, [string]>('SELECT * FROM session_pending_resumes WHERE session_id = ?')
+      .query<PendingResumeRow, [string]>(
+        'SELECT * FROM session_pending_resumes WHERE session_id = ?',
+      )
       .get(sessionId);
     return row ? pendingResumeFromRow(row) : null;
   }
@@ -214,7 +216,9 @@ export class RunResumptionStore {
       ? this.sqlite
           .query('DELETE FROM session_pending_resumes WHERE session_id = ? AND id = ?')
           .run(sessionId, id)
-      : this.sqlite.query('DELETE FROM session_pending_resumes WHERE session_id = ?').run(sessionId);
+      : this.sqlite
+          .query('DELETE FROM session_pending_resumes WHERE session_id = ?')
+          .run(sessionId);
     return result.changes === 1;
   }
 }

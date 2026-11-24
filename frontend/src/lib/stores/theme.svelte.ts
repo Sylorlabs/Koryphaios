@@ -25,14 +25,7 @@ export type { ThemePalette, ThemeScheme } from '$lib/theme-palette';
 export type ThemePreset = ConcreteThemePreset;
 export type ThemeMode = 'dark' | 'light' | 'system';
 export type AccentColor =
-  | 'gold'
-  | 'indigo'
-  | 'cyan'
-  | 'emerald'
-  | 'amber'
-  | 'rose'
-  | 'violet'
-  | 'custom';
+  'gold' | 'indigo' | 'cyan' | 'emerald' | 'amber' | 'rose' | 'violet' | 'custom';
 
 export interface CustomAccent {
   main: string;
@@ -170,9 +163,7 @@ function normalizeSlot(
 }
 
 function normalizeFont(value: unknown, fallback: FontFamily): FontFamily {
-  return typeof value === 'string' && value in FONT_FAMILIES
-    ? (value as FontFamily)
-    : fallback;
+  return typeof value === 'string' && value in FONT_FAMILIES ? (value as FontFamily) : fallback;
 }
 
 function normalizeConfig(value: unknown, fallback: ThemeConfig = THEME_DEFAULTS): ThemeConfig {
@@ -207,11 +198,7 @@ function normalizeConfig(value: unknown, fallback: ThemeConfig = THEME_DEFAULTS)
         version: 2,
         mode: 'system',
         font,
-        dark: normalizeSlot(
-          { ...slotSource, preset: 'kintsugi' },
-          'dark',
-          fallback.dark,
-        ),
+        dark: normalizeSlot({ ...slotSource, preset: 'kintsugi' }, 'dark', fallback.dark),
         light: normalizeSlot({ ...slotSource, preset: 'light' }, 'light', fallback.light),
       };
     }
@@ -487,11 +474,7 @@ function createThemeStore() {
     setModeAccent(scheme: ThemeScheme, which: 'primary' | 'secondary', value: AccentColor) {
       mutateSlot(scheme, which, value);
     },
-    setModeCustomAccent(
-      scheme: ThemeScheme,
-      which: 'primary' | 'secondary',
-      value: CustomAccent,
-    ) {
+    setModeCustomAccent(scheme: ThemeScheme, which: 'primary' | 'secondary', value: CustomAccent) {
       mutateSlot(scheme, which, 'custom', value);
     },
     setFont(value: FontFamily) {

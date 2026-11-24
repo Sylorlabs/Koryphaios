@@ -62,23 +62,31 @@ afterEach(() => {
 function versionOnlyLauncher(): string {
   const dir = workspace('kory-negative-electron-launcher-');
   const path = join(dir, 'version-only');
-  writeFileSync(path, [
-    '#!/usr/bin/env bun',
-    'if (process.argv.includes("--version")) {',
-    '  console.log("v42.9.0");',
-    '  process.exit(0);',
-    '}',
-    'console.error("Version-only stub: no Electron application was started");',
-    'process.exit(91);',
-    '',
-  ].join('\n'), { mode: 0o700 });
+  writeFileSync(
+    path,
+    [
+      '#!/usr/bin/env bun',
+      'if (process.argv.includes("--version")) {',
+      '  console.log("v42.9.0");',
+      '  process.exit(0);',
+      '}',
+      'console.error("Version-only stub: no Electron application was started");',
+      'process.exit(91);',
+      '',
+    ].join('\n'),
+    { mode: 0o700 },
+  );
   chmodSync(path, 0o700);
   return path;
 }
 
 function scenario(id: string) {
   const name = id === electron ? 'scenario-1.json' : 'scenario-2.json';
-  const source = join(import.meta.dir, '../../../../skills-v5/desktop-electron-tauri/evals/tasks', name);
+  const source = join(
+    import.meta.dir,
+    '../../../../skills-v5/desktop-electron-tauri/evals/tasks',
+    name,
+  );
   return JSON.parse(readFileSync(source, 'utf8')) as {
     id: string;
     prompt: string;
@@ -104,16 +112,20 @@ function fakeTauriPrerequisites(): { cli: string; driver: string } {
   const dir = workspace('kory-negative-tauri-toolchain-');
   const cli = join(dir, 'tauri');
   const driver = join(dir, 'native-driver');
-  writeFileSync(cli, [
-    '#!/usr/bin/env bun',
-    'if (process.argv.includes("--version")) {',
-    '  console.log("tauri-cli 2.0.0");',
-    '  process.exit(0);',
-    '}',
-    'console.error("Stub Tauri CLI cannot produce a native application bundle");',
-    'process.exit(89);',
-    '',
-  ].join('\n'), { mode: 0o700 });
+  writeFileSync(
+    cli,
+    [
+      '#!/usr/bin/env bun',
+      'if (process.argv.includes("--version")) {',
+      '  console.log("tauri-cli 2.0.0");',
+      '  process.exit(0);',
+      '}',
+      'console.error("Stub Tauri CLI cannot produce a native application bundle");',
+      'process.exit(89);',
+      '',
+    ].join('\n'),
+    { mode: 0o700 },
+  );
   writeFileSync(driver, '#!/usr/bin/env bun\nprocess.exit(88);\n', { mode: 0o700 });
   chmodSync(cli, 0o700);
   chmodSync(driver, 0o700);
@@ -154,23 +166,48 @@ module.exports = { openSettingsWindow };
 describe('packaged native artifact identity', () => {
   test('a canonical path inside the fixture is accepted while a bundle outside it is not', () => {
     const root = workspace('kory-tauri-identity-');
-    const bundle = join(root, 'src-tauri', 'target', 'release', 'bundle', 'macos', 'app', 'Contents', 'MacOS', 'fixture');
-    writeFixtureFile(root, 'src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture', 'binary');
+    const bundle = join(
+      root,
+      'src-tauri',
+      'target',
+      'release',
+      'bundle',
+      'macos',
+      'app',
+      'Contents',
+      'MacOS',
+      'fixture',
+    );
+    writeFixtureFile(
+      root,
+      'src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture',
+      'binary',
+    );
     const digest = createHash('sha256').update(readFileSync(bundle)).digest('hex');
 
     // The driver reports the canonical `/private/...` form that `resolve` never produces.
     const canonical = lstatSync(root).isDirectory() ? join('/private', root) : root;
     expect(packagedArtifactIdentity(root, bundle, digest)).toEqual({ ok: true });
-    expect(packagedArtifactIdentity(root, canonical + '/src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture', digest))
-      .toEqual({ ok: true });
+    expect(
+      packagedArtifactIdentity(
+        root,
+        canonical + '/src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture',
+        digest,
+      ),
+    ).toEqual({ ok: true });
 
     writeFixtureFile(root, 'sibling/fixture', 'binary');
     // A real bundle beside the root, traversed through `..`, is not inside the fixture.
     expect(packagedArtifactIdentity(root, join(root, '..', 'fixture'), digest).ok).toBe(false);
     expect(packagedArtifactIdentity(root, join(root, 'sibling', 'fixture'), digest).ok).toBe(true);
     expect(packagedArtifactIdentity(root, bundle, 'a'.repeat(64)).ok).toBe(false);
-    expect(packagedArtifactIdentity(root, 'src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture', digest).ok)
-      .toBe(false);
+    expect(
+      packagedArtifactIdentity(
+        root,
+        'src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture',
+        digest,
+      ).ok,
+    ).toBe(false);
   });
 });
 
@@ -215,8 +252,12 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
     const root = workspace();
     process.env.KORY_SKILL_EVAL_ELECTRON_BINARY = join(root, 'nonexistent-electron');
     const blockers = desktopRuntimeReadiness(electron);
-    expect(blockers.some((item) => /Electron desktop runtime is unavailable/u.test(item))).toBe(true);
-    expect(() => materializeDesktopFixture(root, electron)).toThrow('Native desktop runtime unavailable');
+    expect(blockers.some((item) => /Electron desktop runtime is unavailable/u.test(item))).toBe(
+      true,
+    );
+    expect(() => materializeDesktopFixture(root, electron)).toThrow(
+      'Native desktop runtime unavailable',
+    );
     expect(runDesktopRuntime(root, electron).passed).toBe(false);
     const scored = await score(root, electron);
     expect(scored.passed).toBe(false);
@@ -230,8 +271,12 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
     process.env.KORY_SKILL_EVAL_TAURI_NATIVE_DRIVER = join(root, 'nonexistent-driver');
     const blockers = desktopRuntimeReadiness(tauri);
     expect(blockers.some((item) => item.includes('Tauri v2 CLI unavailable'))).toBe(true);
-    expect(blockers.some((item) => item.includes('Native Tauri window/dialog automation'))).toBe(true);
-    expect(() => materializeDesktopFixture(root, tauri)).toThrow('Native desktop runtime unavailable');
+    expect(blockers.some((item) => item.includes('Native Tauri window/dialog automation'))).toBe(
+      true,
+    );
+    expect(() => materializeDesktopFixture(root, tauri)).toThrow(
+      'Native desktop runtime unavailable',
+    );
     const scored = await score(root, tauri);
     expect(scored.passed).toBe(false);
     expect(scored.quality).toBe(0);
@@ -246,8 +291,11 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
       const root = workspace();
       expect(desktopRuntimeReadiness(electron)).toContain(
         'A callable pinned Electron desktop runtime is unavailable: ' +
-        'set KORY_SKILL_EVAL_ELECTRON_BINARY to the absolute path of a native executable');
-      expect(() => materializeDesktopFixture(root, electron)).toThrow('Native desktop runtime unavailable');
+          'set KORY_SKILL_EVAL_ELECTRON_BINARY to the absolute path of a native executable',
+      );
+      expect(() => materializeDesktopFixture(root, electron)).toThrow(
+        'Native desktop runtime unavailable',
+      );
       const executed = runDesktopRuntime(root, electron);
       expect(executed.passed).toBe(false);
       expect(executed.nativeVersion).toBeNull();
@@ -266,10 +314,16 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
       materializeDesktopFixture(root, electron);
       const contractFile = '.kory-eval/desktop-fixture.json';
       const contract = JSON.parse(readFileSync(join(root, contractFile), 'utf8'));
-      writeFixtureFile(root, contractFile, JSON.stringify({ ...contract, nearNeighbor: 'other-skill' }));
+      writeFixtureFile(
+        root,
+        contractFile,
+        JSON.stringify({ ...contract, nearNeighbor: 'other-skill' }),
+      );
       const result = runDesktopRuntime(root, electron);
       expect(result.passed).toBe(false);
-      expect(result.blockers).toContain('Native fixture identity or immutable contract has been altered');
+      expect(result.blockers).toContain(
+        'Native fixture identity or immutable contract has been altered',
+      );
       expect((await score(root, electron)).integrityFailure).toBe(true);
     },
   );
@@ -323,8 +377,12 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
       materializeDesktopFixture(root, tauri);
       const rust = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8');
       const config = JSON.parse(readFileSync(join(root, 'src-tauri/tauri.conf.json'), 'utf8'));
-      const capabilities = JSON.parse(readFileSync(join(root, 'src-tauri/capabilities/default.json'), 'utf8'));
-      const contract = JSON.parse(readFileSync(join(root, '.kory-eval/desktop-fixture.json'), 'utf8'));
+      const capabilities = JSON.parse(
+        readFileSync(join(root, 'src-tauri/capabilities/default.json'), 'utf8'),
+      );
+      const contract = JSON.parse(
+        readFileSync(join(root, '.kory-eval/desktop-fixture.json'), 'utf8'),
+      );
       expect(contract.nearNeighbor).toBe('ios-swiftui');
       expect(contract.cannotSubstitute).toContain('headless-browser');
       expect(config.app.withGlobalTauri).toBe(true);
@@ -338,7 +396,8 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
       // native driver can observe the state the person sees and ask the app to open its own dialog;
       // they read and write only inside the fixture root, and the two application commands stay the
       // only way to reach a workspace path.
-      const handlers = /tauri::generate_handler!\[([\s\S]*?)\]/u.exec(rust)?.[1]
+      const handlers = /tauri::generate_handler!\[([\s\S]*?)\]/u
+        .exec(rust)?.[1]
         ?.split(',')
         .map((entry) => entry.trim())
         .filter(Boolean);
@@ -350,24 +409,36 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
         'read_workspace',
       ]);
       expect(rust).not.toContain('generate_handler![*');
-      const verificationCommands = rust.slice(rust.indexOf('fn kory_status'), rust.indexOf('struct PickerDirectory'));
+      const verificationCommands = rust.slice(
+        rust.indexOf('fn kory_status'),
+        rust.indexOf('struct PickerDirectory'),
+      );
       expect(verificationCommands).toContain('std::env::var("KORY_FIXTURE_ROOT")');
       expect(verificationCommands).not.toContain('Command::new');
       expect(readFileSync(join(root, 'ui/index.html'), 'utf8')).toContain('src="renderer.js"');
-      expect(readFileSync(join(root, 'ui/renderer.js'), 'utf8')).toContain("invoke('choose_workspace')");
+      expect(readFileSync(join(root, 'ui/renderer.js'), 'utf8')).toContain(
+        "invoke('choose_workspace')",
+      );
       const fixtureLink = join(root, 'safe-workspace', 'selected-link');
       expect(lstatSync(fixtureLink).isSymbolicLink()).toBe(true);
       expect(readlinkSync(fixtureLink)).toBe('inside');
-      expect(readFileSync(join(fixtureLink, 'workspace.txt'), 'utf8')).toContain('contained workspace');
-      expect(readFileSync(join(root, 'outside-workspace/workspace.txt'), 'utf8')).toContain('MUST NEVER READ');
+      expect(readFileSync(join(fixtureLink, 'workspace.txt'), 'utf8')).toContain(
+        'contained workspace',
+      );
+      expect(readFileSync(join(root, 'outside-workspace/workspace.txt'), 'utf8')).toContain(
+        'MUST NEVER READ',
+      );
       const execution = runDesktopRuntime(root, tauri);
       expect(execution.passed).toBe(false);
       expect(execution.nativeVersion).toBeNull();
       // On the interactive host the stub toolchain fails at the package build; on an isolated target
       // the same stub fails at the driver, because the guest owns the build. Either way a stub cannot
       // produce a native run, which is what this case is about.
-      expect(execution.blockers.some((item) => /Real Tauri package build failed|Native Tauri UI driver failed/u.test(item)))
-        .toBe(true);
+      expect(
+        execution.blockers.some((item) =>
+          /Real Tauri package build failed|Native Tauri UI driver failed/u.test(item),
+        ),
+      ).toBe(true);
       expect((await score(root, tauri)).verification).toBe(0);
     },
   );
@@ -394,11 +465,15 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
     async () => {
       const root = workspace();
       materializeDesktopFixture(root, electron);
-      const contract = JSON.parse(readFileSync(join(root, '.kory-eval/desktop-fixture.json'), 'utf8'));
+      const contract = JSON.parse(
+        readFileSync(join(root, '.kory-eval/desktop-fixture.json'), 'utf8'),
+      );
       expect(contract.nearNeighbor).toBe('android-compose');
       expect(contract.broader).toBe('native-interface');
       expect(contract.cannotSubstitute).toContain('synthetic-screenshot');
-      expect(readFileSync(join(root, 'app/main.cjs'), 'utf8')).toContain("ipcMain.on('settings:save'");
+      expect(readFileSync(join(root, 'app/main.cjs'), 'utf8')).toContain(
+        "ipcMain.on('settings:save'",
+      );
       expect(readFileSync(join(root, 'app/preload.cjs'), 'utf8')).toContain('contextBridge');
       expect(readFileSync(join(root, 'app/settings.d.ts'), 'utf8')).toContain('onSaved(callback:');
       const red = runDesktopRuntime(root, electron);
@@ -416,18 +491,25 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
       expect(scored.quality).toBe(1);
       expect(scored.verification).toBe(1);
       if (process.env.KORY_SKILL_EVAL_PRINT_NATIVE_SMOKE === '1') {
-        console.info('ELECTRON_NATIVE_SMOKE ' + JSON.stringify({
-          nativeVersion: green.nativeVersion,
-          passed: green.passed,
-          checks: green.checks,
-          evidence: green.evidence,
-        }));
+        console.info(
+          'ELECTRON_NATIVE_SMOKE ' +
+            JSON.stringify({
+              nativeVersion: green.nativeVersion,
+              passed: green.passed,
+              checks: green.checks,
+              evidence: green.evidence,
+            }),
+        );
       }
       const preload = readFileSync(join(root, 'app/preload.cjs'), 'utf8');
-      writeFixtureFile(root, 'app/preload.cjs', preload.replace(
-        '  save: (settings) =>',
-        '  invoke: (channel) => ipcRenderer.send(channel),\n  save: (settings) =>',
-      ));
+      writeFixtureFile(
+        root,
+        'app/preload.cjs',
+        preload.replace(
+          '  save: (settings) =>',
+          '  invoke: (channel) => ipcRenderer.send(channel),\n  save: (settings) =>',
+        ),
+      );
       const exposed = runDesktopRuntime(root, electron);
       expect(exposed.passed).toBe(false);
       expect(exposed.checks.find((item) => item.id === 'unexposed-ipc-denied')?.passed).toBe(false);
@@ -444,8 +526,12 @@ describe('desktop-electron-tauri native V5 evaluation fixture', () => {
       expect(lstatSync(fixtureLink).isSymbolicLink()).toBe(true);
       expect(readlinkSync(fixtureLink)).toBe('inside');
       expect(readFileSync(join(fixtureLink, 'workspace.txt'), 'utf8')).toContain('contained');
-      expect(readFileSync(join(root, 'outside-workspace/workspace.txt'), 'utf8')).toContain('MUST NEVER READ');
-      const contract = JSON.parse(readFileSync(join(root, '.kory-eval/desktop-fixture.json'), 'utf8'));
+      expect(readFileSync(join(root, 'outside-workspace/workspace.txt'), 'utf8')).toContain(
+        'MUST NEVER READ',
+      );
+      const contract = JSON.parse(
+        readFileSync(join(root, '.kory-eval/desktop-fixture.json'), 'utf8'),
+      );
       expect(contract.nearNeighbor).toBe('ios-swiftui');
       const red = runDesktopRuntime(root, tauri);
       expect(red.nativeVersion, red.blockers.join('; ')).not.toBeNull();

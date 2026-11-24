@@ -63,33 +63,38 @@ const executableScorers = [
 ];
 
 export const EXTERNAL_ENVIRONMENT_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMaterializer[] =
-  fallbackDefinitions.map((definition) => executableMaterializers.find((candidate) =>
-    candidate.matches({ id: definition.scenarioId } as Parameters<typeof candidate.matches>[0]),
-  ) ?? ({
-    id: `${definition.skill}/external-environment-gate/${definition.scenarioId}@1`,
-    readinessBlockers: [definition.blocker],
-    matches: (scenario) => scenario.id === definition.scenarioId,
-    materialize: (root) => {
-      writeFixtureFile(
-        root,
-        'BLOCKED.md',
-        `# Full-task environment gate\n\nScenario: ${definition.scenarioId}\n\n${definition.blocker}\n`,
-      );
-    },
-  }));
+  fallbackDefinitions.map(
+    (definition) =>
+      executableMaterializers.find((candidate) =>
+        candidate.matches({ id: definition.scenarioId } as Parameters<typeof candidate.matches>[0]),
+      ) ?? {
+        id: `${definition.skill}/external-environment-gate/${definition.scenarioId}@1`,
+        readinessBlockers: [definition.blocker],
+        matches: (scenario) => scenario.id === definition.scenarioId,
+        materialize: (root) => {
+          writeFixtureFile(
+            root,
+            'BLOCKED.md',
+            `# Full-task environment gate\n\nScenario: ${definition.scenarioId}\n\n${definition.blocker}\n`,
+          );
+        },
+      },
+  );
 
 export const EXTERNAL_ENVIRONMENT_SKILL_EVAL_SCORERS: readonly SkillEvalDeterministicScorer[] =
-  fallbackDefinitions.map((definition) => executableScorers.find((candidate) =>
-    candidate.scenarioIds.includes(definition.scenarioId),
-  ) ?? ({
-    id: `${definition.skill}/external-environment-gate-scorer/${definition.scenarioId}@1`,
-    scenarioIds: [definition.scenarioId],
-    score: () => ({
-      passed: false,
-      quality: 0,
-      verification: 0,
-      integrityFailure: false,
-      evidence: [definition.blocker],
-    }),
-  }));
-
+  fallbackDefinitions.map(
+    (definition) =>
+      executableScorers.find((candidate) =>
+        candidate.scenarioIds.includes(definition.scenarioId),
+      ) ?? {
+        id: `${definition.skill}/external-environment-gate-scorer/${definition.scenarioId}@1`,
+        scenarioIds: [definition.scenarioId],
+        score: () => ({
+          passed: false,
+          quality: 0,
+          verification: 0,
+          integrityFailure: false,
+          evidence: [definition.blocker],
+        }),
+      },
+  );

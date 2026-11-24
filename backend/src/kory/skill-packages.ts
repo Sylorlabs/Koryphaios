@@ -37,10 +37,7 @@ export type V5InvocationMode = (typeof V5_INVOCATION_MODES)[number];
  *  package catalog, its audits, and its routing gates count exactly the
  *  authored packages and never these two. They still validate with the same
  *  sidecar schema and stay active in listSkills(). */
-export const RUNTIME_CONTROL_SKILL_NAMES = [
-  'critic-auto-selection',
-  'critic-review',
-] as const;
+export const RUNTIME_CONTROL_SKILL_NAMES = ['critic-auto-selection', 'critic-review'] as const;
 
 export function isRuntimeControlSkillName(name: string): boolean {
   return (RUNTIME_CONTROL_SKILL_NAMES as readonly string[]).includes(name);

@@ -194,9 +194,13 @@ export function spawnSandboxed(
   const readOnlyRoots = normalizeRoots(opts.readOnlyRoots ?? []);
   // Overlapping grants have contradictory authority: bind order on Linux and
   // per-root allows on macOS would otherwise disagree about which wins.
-  if (readOnlyRoots.some((readOnly) => roots.some(
-    (writable) => isContainedBy(writable, readOnly) || isContainedBy(readOnly, writable),
-  ))) {
+  if (
+    readOnlyRoots.some((readOnly) =>
+      roots.some(
+        (writable) => isContainedBy(writable, readOnly) || isContainedBy(readOnly, writable),
+      ),
+    )
+  ) {
     throw new Error('Read-only root overlaps a writable sandbox root');
   }
   const cwd = canonicalizePath(opts.cwd);
@@ -378,7 +382,11 @@ function spawnBwrap(
       ? executable
       : undefined;
   const parents = new Set<string>();
-  for (const target of [...roots, ...readOnlyRoots, ...(extraExecutable ? [extraExecutable] : [])]) {
+  for (const target of [
+    ...roots,
+    ...readOnlyRoots,
+    ...(extraExecutable ? [extraExecutable] : []),
+  ]) {
     let parent = '';
     for (const part of target.split('/').filter(Boolean).slice(0, -1)) {
       parent += `/${part}`;
@@ -565,7 +573,8 @@ function spawnMacSandbox(
       // This exception is never applied to credential stores such as ~/.ssh.
       const grant = opts.requiredWorkspaceRoot;
       const dataDir = process.env.KORYPHAIOS_DATA_DIR?.trim();
-      const containsGrant = grant !== undefined && grant !== canonical && isContainedBy(canonical, grant);
+      const containsGrant =
+        grant !== undefined && grant !== canonical && isContainedBy(canonical, grant);
       const filter =
         grant && dataDir === secretPath && containsGrant
           ? `(require-all (subpath ${JSON.stringify(canonical)}) (require-not (subpath ${JSON.stringify(grant)})))`
