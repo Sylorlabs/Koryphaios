@@ -2697,7 +2697,7 @@ fn setup_system_tray(app: &tauri::AppHandle) -> AppResult<()> {
                 }
             }
             "quit" => {
-                desktop_lifecycle::request(app, desktop_lifecycle::Reason::Close);
+                desktop_lifecycle::quit_requested(app, desktop_lifecycle::QuitEntry::Tray);
             }
             _ => {}
         })
@@ -3055,7 +3055,7 @@ pub fn run() {
                         }
                     }
                     "quit" => {
-                        desktop_lifecycle::request(app, desktop_lifecycle::Reason::Close);
+                        desktop_lifecycle::quit_requested(app, desktop_lifecycle::QuitEntry::Menu);
                     }
                     "reload" => {
                         if let Some(window) = app.get_webview_window("main") {
@@ -3192,7 +3192,10 @@ pub fn run() {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 if !desktop_lifecycle::exit_approved() {
                     api.prevent_close();
-                    desktop_lifecycle::request(window.app_handle(), desktop_lifecycle::Reason::Close);
+                    desktop_lifecycle::quit_requested(
+                        window.app_handle(),
+                        desktop_lifecycle::QuitEntry::WindowClose,
+                    );
                 }
             }
             if let WindowEvent::Destroyed = event {
@@ -3204,6 +3207,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             desktop_lifecycle::get_desktop_exit_request,
             desktop_lifecycle::resolve_desktop_exit,
+            desktop_lifecycle::acknowledge_desktop_exit,
             get_backend_url,
             get_backend_startup_status,
             get_websocket_url,
@@ -3240,7 +3244,7 @@ pub fn run() {
                 // reboot. Their already-confirmed installation must complete.
                 if code != Some(tauri::RESTART_EXIT_CODE) && !desktop_lifecycle::exit_approved() {
                     api.prevent_exit();
-                    desktop_lifecycle::request(app, desktop_lifecycle::Reason::Close);
+                    desktop_lifecycle::quit_requested(app, desktop_lifecycle::QuitEntry::AppleEvent);
                 }
             }
         });

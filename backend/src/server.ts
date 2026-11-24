@@ -68,6 +68,7 @@ import { feedRoutes } from './routes/v1/feed';
 import { agentMessageRoutes } from './routes/v1/agent-messages';
 import { appearanceRoutes } from './routes/v1/appearance';
 import { desktopUiRoutes } from './routes/v1/desktop-ui';
+import { runRoutes } from './routes/v1/runs';
 import { updateRoutes } from './routes/v1/updates';
 import { cliChatImportRoutes } from './routes/v1/cli-chat-import';
 import { errorHandlingMiddleware, errorHandler } from './middleware/error-handling';
@@ -136,6 +137,7 @@ const baseApp = new Elysia()
   .use(agentMessageRoutes)
   .use(appearanceRoutes)
   .use(desktopUiRoutes)
+  .use(runRoutes)
   .use(updateRoutes)
   .use(cliChatImportRoutes);
 

@@ -4,9 +4,6 @@
   import { listen } from '@tauri-apps/api/event';
   import Monitor from 'lucide-svelte/icons/monitor';
   import Power from 'lucide-svelte/icons/power';
-  import { runStateStore } from '$lib/stores/run-state.svelte';
-  import { isActivePhase } from '$lib/stores/run-state-core';
-  import { isDeviceSessionKey } from '$lib/stores/device-routing.svelte';
 
   type Request = { id: number; reason: 'close' | 'restart' | 'shutdown' | 'signout' };
   type Choice = 'background' | 'proceed' | 'cancel';
@@ -26,32 +23,14 @@
       request?.reason === 'signout' ? 'Sign out anyway' : 'Restart anyway',
   );
 
-  /** Only this desktop's own turns depend on this process. A linked chat runs
-   * in the target's backend and deliberately keeps going when this app quits. */
-  function hasRunningLocalAgents(): boolean {
-    return [...runStateStore.states.entries()].some(
-      ([sessionId, state]) =>
-        !isDeviceSessionKey(sessionId) &&
-        (isActivePhase(state.phase) || state.activeAgents.size > 0),
-    );
-  }
-
+  /** The desktop shell decides whether a close needs asking (it counts local
+   * agents with the backend and falls back to a native dialog if this window
+   * never acknowledges). Here we only present what it sends. */
   async function show(next: Request): Promise<void> {
+    // Tell the shell this window owns the request, so it does not show a
+    // native fallback on top of this dialog.
+    void invoke('acknowledge_desktop_exit', { id: next.id }).catch(() => undefined);
     if (request && next.id < request.id) return;
-    if (next.reason === 'close' && !hasRunningLocalAgents()) {
-      try {
-        // No active manager or worker needs preserving, so close immediately
-        // instead of asking whether to keep a background service alive.
-        await invoke('resolve_desktop_exit', { id: next.id, choice: 'proceed' });
-        return;
-      } catch (cause) {
-        if (request && next.id < request.id) return;
-        if (!request) previousFocus = document.activeElement as HTMLElement | null;
-        request = next;
-        error = cause instanceof Error ? cause.message : String(cause);
-        return;
-      }
-    }
     if (!request) previousFocus = document.activeElement as HTMLElement | null;
     request = next;
     error = '';

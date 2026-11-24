@@ -53,16 +53,8 @@ describe('desktop exit choices', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
   });
 
-  it('closes without showing a prompt when all sessions are idle or waiting', async () => {
+  it('presents a close request the shell sent and acknowledges it', async () => {
     native.runStates.clear();
-    native.runStates.set('waiting-session', {
-      phase: 'waiting_user',
-      activeAgents: new Set(),
-    });
-    native.runStates.set('finished-session', {
-      phase: 'done',
-      activeAgents: new Set(),
-    });
     native.invoke.mockImplementation(async (command: string) =>
       command === 'get_desktop_exit_request' ? null : undefined,
     );
@@ -73,16 +65,13 @@ describe('desktop exit choices', () => {
       payload: { id: 7, reason: 'close' },
     });
 
-    await waitFor(() =>
-      expect(native.invoke).toHaveBeenCalledWith('resolve_desktop_exit', {
-        id: 7,
-        choice: 'proceed',
-      }),
-    );
-    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(await screen.findByRole('alertdialog')).toBeTruthy();
+    expect(native.invoke).toHaveBeenCalledWith('acknowledge_desktop_exit', { id: 7 });
+    // The webview never decides on its own; quitting waits for a user choice.
+    expect(native.invoke).not.toHaveBeenCalledWith('resolve_desktop_exit', expect.anything());
   });
 
-  it('ignores linked-computer work and closes without a local warning', async () => {
+  it('does not second-guess the shell from webview run state', async () => {
     native.runStates.clear();
     native.runStates.set('linked-linux-chat', {
       phase: 'streaming',
@@ -98,13 +87,8 @@ describe('desktop exit choices', () => {
       payload: { id: 8, reason: 'close' },
     });
 
-    await waitFor(() =>
-      expect(native.invoke).toHaveBeenCalledWith('resolve_desktop_exit', {
-        id: 8,
-        choice: 'proceed',
-      }),
-    );
-    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(await screen.findByRole('alertdialog')).toBeTruthy();
+    expect(native.invoke).toHaveBeenCalledWith('acknowledge_desktop_exit', { id: 8 });
   });
 
   it('keeps the prompt when a worker is active even if the manager phase is terminal', async () => {
