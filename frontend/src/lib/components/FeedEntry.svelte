@@ -1569,8 +1569,8 @@ import {
           </div>
         {:else if entry.type === 'error'}
           <section
-            class="mt-1 overflow-hidden border-l"
-            style="border-color: var(--color-error);"
+            class="mt-1 overflow-hidden rounded-r-md border-l-2"
+            style="border-color: var(--color-error); background: color-mix(in srgb, var(--color-error) 6%, transparent);"
           >
             <div
               class="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-[var(--color-error)]"

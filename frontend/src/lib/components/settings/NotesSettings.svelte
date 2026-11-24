@@ -444,12 +444,6 @@
     line-height: 1.6;
     color: var(--color-text-muted);
   }
-  .notes-section-heading-actions {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-  }
   .notes-setting-row {
     display: flex;
     align-items: center;
@@ -573,11 +567,6 @@
   .notes-disclosure[open] summary > :global(svg:last-child) {
     transform: rotate(180deg);
   }
-  .notes-disclosure-meta {
-    margin-left: auto;
-    font-size: 11px;
-    color: var(--color-text-muted);
-  }
   .notes-disclosure-body {
     padding: 16px 0 4px;
   }
@@ -632,10 +621,6 @@
     .notes-profile-control {
       width: 100%;
     }
-    .notes-section-heading-actions {
-      flex-wrap: wrap;
-      gap: 6px;
-    }
     .notes-permission-row {
       align-items: flex-start;
       flex-direction: column;
@@ -643,9 +628,6 @@
     }
     .notes-permission-controls {
       align-self: flex-end;
-    }
-    .notes-disclosure-meta {
-      display: none;
     }
   }
 </style>
