@@ -1,3 +1,4 @@
+import { directoryLinkType } from '../../runtime/platform';
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -856,7 +857,7 @@ import { join } from 'node:path';
 import { archiveDestination, converterInvocation, sanitizeDiagnostic, validateArchive, validateFetchChain } from '../src/importer';
 
 function directoryLinkType(): 'junction' | 'dir' {
-  return process.platform === 'win32' ? 'junction' : 'dir';
+  return directoryLinkType();
 }
 
 test('hidden: every redirect and resolved address is revalidated', () => {

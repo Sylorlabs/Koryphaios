@@ -1,3 +1,4 @@
+import { hostOS, isMac } from '../../runtime/platform';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { cpus, release } from 'node:os';
@@ -228,7 +229,7 @@ for (let index = 0; index < plan.repetitions; index += 1) {
 }
 
 const powerSnapshot = () => {
-  if (process.platform !== 'darwin') return 'power-settings-observation-not-supported-on-' + process.platform;
+  if (!isMac()) return 'power-settings-observation-not-supported-on-' + hostOS();
   const result = spawnSync('/usr/bin/pmset', ['-g', 'custom'], { encoding: 'utf8', timeout: 2_000 });
   return result.status === 0 ? result.stdout : 'pmset-unavailable';
 };
@@ -251,7 +252,7 @@ const result = {
   environment: {
     runtime: 'Bun',
     runtimeVersion: Bun.version,
-    platform: process.platform,
+    platform: hostOS(),
     architecture: process.arch,
     cpuModel: cpus()[0]?.model ?? 'unknown',
     osRelease: release(),
@@ -417,7 +418,7 @@ async function scorePerformanceBenchmark(root: string): Promise<SkillEvalDetermi
   const identity =
     result.environment?.runtime === 'Bun' &&
     result.environment.runtimeVersion === Bun.version &&
-    result.environment.platform === process.platform &&
+    result.environment.platform === hostOS() &&
     result.environment.architecture === process.arch &&
     result.environment.cpuModel === (cpus()[0]?.model ?? 'unknown') &&
     result.environment.osRelease === release() &&
@@ -456,7 +457,7 @@ async function scorePerformanceBenchmark(root: string): Promise<SkillEvalDetermi
     evidence: [
       outputPath,
       ...checks.map(([name, ok]) => `${name}: ${ok ? 'pass' : 'fail'}`),
-      `Bun ${Bun.version}; ${process.platform}/${process.arch}; CPU ${cpus()[0]?.model ?? 'unknown'}`,
+      `Bun ${Bun.version}; ${hostOS()}/${process.arch}; CPU ${cpus()[0]?.model ?? 'unknown'}`,
       'The hidden runner performs actual optimized build, cold-process execution, warmup, five timed repetitions, memory sampling, and oracle checks. It does not establish skill uplift or blind semantic quality by itself.',
     ],
   };

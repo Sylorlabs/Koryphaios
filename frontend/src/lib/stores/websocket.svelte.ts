@@ -227,13 +227,13 @@ async function waitForCancellation(sessionId: string, agentId?: string): Promise
   }
 }
 
-function cancelSession(sessionId: string, purpose: 'stop' | 'steer' = 'stop'): Promise<void> {
+function cancelSession(sessionId: string): Promise<void> {
   if (!sessionId) return Promise.resolve();
   return cancelWithKey(
     sessionCancellationKey(sessionId),
     `/api/sessions/${encodeURIComponent(sessionId)}/cancel`,
     'this session',
-    purpose === 'steer' ? { purpose } : undefined,
+    undefined,
     () => markSessionAgentsStopped(sessionId),
     () => runStateStore.clearUserStopped(sessionId),
   );

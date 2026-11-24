@@ -1,3 +1,4 @@
+import { hostOS } from '../../runtime/platform';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -459,7 +460,7 @@ export async function scoreBunMigration(root: string): Promise<SkillEvalDetermin
         json({
           evidenceKind: 'actual-local-runtime',
           versions: BUN_MIGRATION_VERSIONS,
-          platform: process.platform,
+          platform: hostOS(),
           passed: passed && integrity,
           integrity,
           phases,

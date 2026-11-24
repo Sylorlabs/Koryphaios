@@ -1,3 +1,4 @@
+import { hostOS } from '../runtime/platform';
 // Resource Limits for Command Execution
 // Prevents runaway commands from exhausting server resources
 
@@ -75,7 +76,7 @@ export function buildCommandWithLimits(
   runtime: ResourceLimitRuntime = {},
 ): string {
   const finalLimits = { ...DEFAULT_RESOURCE_LIMITS, ...limits };
-  const platform = runtime.platform ?? process.platform;
+  const platform = runtime.platform ?? hostOS();
 
   // ─── Linux: prlimit ──────────────────────────────────────────────────────
   if (platform === 'linux') {
