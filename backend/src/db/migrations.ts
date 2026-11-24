@@ -2225,6 +2225,16 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS session_run_resumes;
     `,
   },
+  {
+    version: '0061',
+    description: 'Pending usage-limit resumes remember the stopped run whose output they continue',
+    up: `
+      ALTER TABLE session_pending_resumes ADD COLUMN source_run_id TEXT;
+    `,
+    down: `
+      ALTER TABLE session_pending_resumes DROP COLUMN source_run_id;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

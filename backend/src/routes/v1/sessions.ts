@@ -314,6 +314,30 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       }),
     },
   )
+  // Automatic resume after a provider usage limit. The pending record is durable;
+  // "Resume now" runs the same continuation a timer would, "Cancel" clears it.
+  .get('/:id/pending-resume', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { kory } = getContext();
+    const record = kory.getPendingUsageLimitResume(id);
+    return { ok: true, pendingResume: record };
+  })
+  .post('/:id/resume-now', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { kory } = getContext();
+    const outcome = await kory.resumePendingUsageLimit(id);
+    if (outcome === 'not_found') throw new NotFoundError('Pending resume', id);
+    if (outcome === 'already_running') throw new ConflictError('The automatic resume is already running.');
+    return { ok: true, status: outcome };
+  })
+  .delete('/:id/pending-resume', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { kory } = getContext();
+    if (!kory.cancelPendingUsageLimit(id)) {
+      throw new NotFoundError('Pending resume', id);
+    }
+    return { ok: true };
+  })
   .delete('/:id', async ({ request, params: { id } }) => {
     if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
     const result = await eraseSessionsCoordinated({ kind: 'selected', sessionId: id });

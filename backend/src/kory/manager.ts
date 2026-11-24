@@ -184,6 +184,12 @@ import {
   renderRestartContinuationPrompt,
   renderUsageLimitContinuationPrompt,
 } from '../runs/continuation-prompt';
+import type { PendingResumeRecord } from '../runs/run-resumption-store';
+import {
+  isUsageLimitMessage,
+  UsageLimitResumeService,
+  type UsageLimitAdmitInput,
+} from './services/usage-limit-resume';
 import { ManagerRunLifecycle, type ManagerRunHandle } from './services/ManagerRunLifecycle';
 import { TurnRuntime } from './services/TurnRuntime';
 import type { OutputLoopDetection } from './output-loop-detector';
@@ -721,6 +727,7 @@ export class KoryManager implements WorkerPipelineHost {
   private agentThreads = new Map<string, AgentThreadState>();
   /** Services */
   private events: EventEmitterService;
+  private usageLimitResumes: UsageLimitResumeService | undefined;
   private managerRouting: ManagerRoutingService;
   private workers: WorkerLifecycleService;
   private state: SessionStateService;
@@ -814,6 +821,20 @@ export class KoryManager implements WorkerPipelineHost {
 
     // Initialize services
     this.events = new EventEmitterService({ managerAgentId: KORY_IDENTITY.id });
+    if (this.runs) {
+      this.usageLimitResumes = new UsageLimitResumeService({
+        store: this.runs.resumptions,
+        setTimer: (sessionId, timer) => {
+          this.runtimes.get(sessionId).usageLimitResumeTimer = timer;
+        },
+        getTimer: (sessionId) => this.runtimes.peek(sessionId)?.usageLimitResumeTimer,
+        isSessionActive: async (sessionId) =>
+          !this.sessions || !!(await this.getActiveSession(sessionId)),
+        admit: (input) => this.admitUsageLimitContinuation(input),
+        emit: (sessionId, payload) =>
+          this.emitWSMessage(sessionId, 'session.pending_resume', payload),
+      });
+    }
     this.managerRouting = new ManagerRoutingService({
       config: this.config,
       providers: this.providers,
@@ -3716,17 +3737,36 @@ export class KoryManager implements WorkerPipelineHost {
     });
   }
 
+  /** The chat's pending automatic usage-limit resume, if any. */
+  getPendingUsageLimitResume(sessionId: string): PendingResumeRecord | null {
+    return this.usageLimitResumes?.get(sessionId) ?? null;
+  }
+
+  /** The user's "Resume now". */
+  resumePendingUsageLimit(sessionId: string) {
+    if (!this.usageLimitResumes) return Promise.resolve('not_found' as const);
+    return this.usageLimitResumes.resumeNow(sessionId);
+  }
+
+  /** The user's "Cancel" on a pending usage-limit resume. */
+  cancelPendingUsageLimit(sessionId: string): boolean {
+    return this.usageLimitResumes?.cancel(sessionId) ?? false;
+  }
+
+  /** Re-arm durable usage-limit resumes after a restart. */
+  recoverUsageLimitResumes(): number {
+    return this.usageLimitResumes?.recover() ?? 0;
+  }
+
   /** Admit a host-authored continuation after a provider usage limit reset. */
-  async admitUsageLimitContinuation(input: {
-    sessionId: string;
-    pendingResumeId: string;
-    attempt: number;
-    responseMessageId?: string;
-    preferredModel?: string;
-  }): Promise<SessionTurnSubmission> {
+  async admitUsageLimitContinuation(input: UsageLimitAdmitInput): Promise<SessionTurnSubmission> {
+    const owner =
+      input.sourceRunId && this.runs
+        ? this.runs.getSessionTurnCommandForRun(input.sourceRunId)
+        : null;
     const partial =
-      input.responseMessageId && this.messages
-        ? await this.messages.getById(input.sessionId, input.responseMessageId)
+      owner && this.messages
+        ? await this.messages.getById(input.sessionId, owner.responseMessageId)
         : undefined;
     return this.startSessionTurn({
       sessionId: input.sessionId,
@@ -7266,7 +7306,20 @@ export class KoryManager implements WorkerPipelineHost {
           model: routing.model,
         });
       }
-      if (turnFailure && !stoppedByUser) throw turnFailure;
+      if (turnFailure && !stoppedByUser) {
+        // The turn is over with no fallback that succeeded. A usage limit is
+        // temporary, so the chat pauses and retries on its own instead of
+        // failing for good.
+        if (isUsageLimitMessage(turnFailure.message)) {
+          this.usageLimitResumes?.schedule(sessionId, {
+            message: turnFailure.message,
+            provider: String(routing.provider),
+            model: routing.model,
+            sourceRunId: handle.runId,
+          });
+        }
+        throw turnFailure;
+      }
       if (interactionMode === 'plan' && !stoppedByUser) {
         try {
           const noteId = await syncPlanNote(

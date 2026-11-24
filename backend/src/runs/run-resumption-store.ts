@@ -41,6 +41,8 @@ export interface PendingResumeRecord {
   attempt: number;
   state: PendingResumeState;
   message: string;
+  /** The stopped run whose partial output the continuation carries. */
+  sourceRunId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -65,6 +67,7 @@ interface PendingResumeRow {
   attempt: number;
   state: PendingResumeState;
   message: string;
+  source_run_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -92,6 +95,7 @@ function pendingResumeFromRow(row: PendingResumeRow): PendingResumeRecord {
     attempt: row.attempt,
     state: row.state,
     message: row.message,
+    sourceRunId: row.source_run_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -158,8 +162,8 @@ export class RunResumptionStore {
     this.sqlite
       .query(
         `INSERT INTO session_pending_resumes
-           (session_id, id, reason, provider, model, resume_at, attempt, state, message, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           (session_id, id, reason, provider, model, resume_at, attempt, state, message, source_run_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(session_id) DO UPDATE SET
            id = excluded.id,
            reason = excluded.reason,
@@ -169,6 +173,7 @@ export class RunResumptionStore {
            attempt = excluded.attempt,
            state = excluded.state,
            message = excluded.message,
+           source_run_id = excluded.source_run_id,
            updated_at = excluded.updated_at`,
       )
       .run(
@@ -181,6 +186,7 @@ export class RunResumptionStore {
         record.attempt,
         record.state,
         record.message,
+        record.sourceRunId,
         record.createdAt,
         record.updatedAt,
       );

@@ -98,6 +98,8 @@ export class SessionRuntime {
 
   /** Pending usage-retry timers. */
   usageRetryTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** The one armed automatic resume after a provider usage limit (see UsageLimitResumeService). */
+  usageLimitResumeTimer?: ReturnType<typeof setTimeout>;
 
   /** Last visible prompt manifest hash; prevents repeated disclosure on tool-loop turns. */
   promptManifestHash?: string;
@@ -213,6 +215,8 @@ export class SessionRuntime {
     this.heartbeatPhase = undefined;
     for (const timer of this.usageRetryTimers) clearTimeout(timer);
     this.usageRetryTimers.clear();
+    if (this.usageLimitResumeTimer !== undefined) clearTimeout(this.usageLimitResumeTimer);
+    this.usageLimitResumeTimer = undefined;
     this.steeringDrains.clear();
     this.questionQueue = Promise.resolve();
     this.pendingSteerInputs.clear();

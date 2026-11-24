@@ -270,6 +270,30 @@ export interface RunSettledPayload {
   settledAt: number;
 }
 
+/**
+ * A chat paused on a provider usage limit and will retry on its own. `null`
+ * means no pending resume remains for the session (resumed, cancelled, or
+ * exhausted). The UI renders "Paused until <resumeAt> · Resume now · Cancel".
+ */
+export interface PendingResumePayload {
+  pendingResume: {
+    id: string;
+    reason: 'usage_limit';
+    provider: string | null;
+    model: string | null;
+    /** Epoch ms of the next automatic attempt. */
+    resumeAt: number;
+    /** Automatic attempts already made (0 before the first retry). */
+    attempt: number;
+    maxAttempts: number;
+    state: 'scheduled' | 'resuming';
+    /** Why the chat paused, bounded and safe to show. */
+    message: string;
+  } | null;
+  /** Set when pendingResume is null. */
+  clearedReason?: 'resumed' | 'cancelled' | 'exhausted';
+}
+
 export interface SessionCreatedPayload {
   sessionId: string;
   title: string;

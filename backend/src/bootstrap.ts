@@ -279,6 +279,11 @@ export async function bootstrap(): Promise<AppContext> {
   if (restartResumes.admitted + restartResumes.skipped + restartResumes.deferred > 0) {
     serverLog.info(restartResumes, 'Reconciled restart continuations of interrupted runs');
   }
+  // Re-arm automatic resumes for chats that were paused on a usage limit.
+  const usageLimitResumesArmed = kory.recoverUsageLimitResumes();
+  if (usageLimitResumesArmed > 0) {
+    serverLog.info({ count: usageLimitResumesArmed }, 'Re-armed automatic usage-limit resumes');
+  }
   // Arm persisted monitors only after recovery has settled, so a due monitor
   // cannot race startup recovery with a new session turn.
   await configureMonitors({

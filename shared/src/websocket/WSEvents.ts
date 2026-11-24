@@ -48,6 +48,8 @@ export type WSEventType =
   | 'turn.provider_completed'
   // The run is terminal and every follow-up step has finished.
   | 'run.settled'
+  // A usage-limited chat has (or no longer has) an automatic resume scheduled.
+  | 'session.pending_resume'
   | 'compaction.started'
   | 'compaction.progress'
   | 'compaction.completed'
@@ -149,6 +151,7 @@ export type WSMessagePayload =
   | KoryAskUserResolvedPayload
   | TurnProviderCompletedPayload
   | RunSettledPayload
+  | PendingResumePayload
   | StreamUsagePayload
 
   // Message payloads
@@ -207,6 +210,7 @@ import type {
   RateLimitPayload,
   TurnProviderCompletedPayload,
   RunSettledPayload,
+  PendingResumePayload,
 } from './WSPayloads';
 
 export type { ChangeSummary, StreamUsage } from './WSPayloads';
@@ -260,6 +264,7 @@ export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEv
   'run.state',
   'turn.provider_completed',
   'run.settled',
+  'session.pending_resume',
   // Compaction
   'compaction.started',
   'compaction.progress',
