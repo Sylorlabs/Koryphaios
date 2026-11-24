@@ -177,7 +177,21 @@ import {
   formatMessagesForCritic as formatMessagesForCriticUtil,
 } from './critic-util';
 import type { WorkerPipelineHost, WorkerPipelineOutcome } from './services/WorkerPipelineService';
-import type { SessionRunCoordinator } from '../runs/session-run-coordinator';
+import {
+  RESTART_RESUME_SOURCE_PREFIX,
+  type SessionRunCoordinator,
+} from '../runs/session-run-coordinator';
+import {
+  continuationMarkerText,
+  renderRestartContinuationPrompt,
+  renderUsageLimitContinuationPrompt,
+} from '../runs/continuation-prompt';
+import type { PendingResumeRecord } from '../runs/run-resumption-store';
+import {
+  isUsageLimitMessage,
+  UsageLimitResumeService,
+  type UsageLimitAdmitInput,
+} from './services/usage-limit-resume';
 import { ManagerRunLifecycle, type ManagerRunHandle } from './services/ManagerRunLifecycle';
 import { TurnRuntime } from './services/TurnRuntime';
 import type { OutputLoopDetection } from './output-loop-detector';
@@ -659,11 +673,22 @@ export interface SessionTurnResult {
   readonly reason: string | null;
 }
 
+/**
+ * Host-authored continuation. The instruction is sent to the provider as the
+ * turn's input, and the transcript records a system marker instead of a
+ * user-role row, so the continuation is never presented as something the user
+ * typed.
+ */
+export type HostContinuation =
+  | { kind: 'restart_resume'; interruptedRunId: string }
+  | { kind: 'usage_limit_resume'; pendingResumeId: string; attempt: number };
+
 export interface SessionTurnCommandInput extends AdmittedTaskInput {
   sessionId: string;
   source: 'goal' | 'collaboration' | 'internal' | 'user';
   /** Stable source-owned identity. Reusing it never replays an interrupted turn. */
   sourceCommandId: string;
+  hostContinuation?: HostContinuation;
 }
 
 /**
@@ -821,6 +846,7 @@ export class KoryManager implements WorkerPipelineHost {
   private agentThreads = new Map<string, AgentThreadState>();
   /** Services */
   private events: EventEmitterService;
+  private usageLimitResumes: UsageLimitResumeService | undefined;
   private managerRouting: ManagerRoutingService;
   private workers: WorkerLifecycleService;
   private state: SessionStateService;
@@ -914,6 +940,20 @@ export class KoryManager implements WorkerPipelineHost {
 
     // Initialize services
     this.events = new EventEmitterService({ managerAgentId: KORY_IDENTITY.id });
+    if (this.runs) {
+      this.usageLimitResumes = new UsageLimitResumeService({
+        store: this.runs.resumptions,
+        setTimer: (sessionId, timer) => {
+          this.runtimes.get(sessionId).usageLimitResumeTimer = timer;
+        },
+        getTimer: (sessionId) => this.runtimes.peek(sessionId)?.usageLimitResumeTimer,
+        isSessionActive: async (sessionId) =>
+          !this.sessions || !!(await this.getActiveSession(sessionId)),
+        admit: (input) => this.admitUsageLimitContinuation(input),
+        emit: (sessionId, payload) =>
+          this.emitWSMessage(sessionId, 'session.pending_resume', payload),
+      });
+    }
     this.managerRouting = new ManagerRoutingService({
       config: this.config,
       providers: this.providers,
@@ -3422,9 +3462,18 @@ export class KoryManager implements WorkerPipelineHost {
       fusion: input.fusion,
       imageInputMode: input.imageInputMode ?? 'reject',
       regenerationBranch: input.regenerationBranch ?? null,
+      // Absent for ordinary turns, so their canonical hash (and idempotent
+      // replay) is unchanged. A continuation binds its own identity.
+      ...(input.hostContinuation ? { hostContinuation: input.hostContinuation } : {}),
     });
+    // A host continuation's transcript row is a system marker; every other turn
+    // persists the user's own row.
+    const commandRole: StoredMessage['role'] = input.hostContinuation ? 'system' : 'user';
+    const commandContent = input.hostContinuation
+      ? continuationMarkerText(input.hostContinuation.kind === 'restart_resume' ? 'restart' : 'usage_limit')
+      : input.userMessage;
     const matchesCommandUser = (message: StoredMessage | undefined): boolean => {
-      if (!message || message.role !== 'user' || message.content !== input.userMessage)
+      if (!message || message.role !== commandRole || message.content !== commandContent)
         return false;
       const stored = message.attachments ?? [];
       const expected = commandAttachments ?? [];
@@ -3745,8 +3794,8 @@ export class KoryManager implements WorkerPipelineHost {
       const inserted = await this.messages.addIdempotent(input.sessionId, {
         id: command.userMessageId,
         sessionId: input.sessionId,
-        role: 'user',
-        content: input.userMessage,
+        role: commandRole,
+        content: commandContent,
         attachments: commandAttachments,
         createdAt: Date.now(),
       });
@@ -3770,9 +3819,12 @@ export class KoryManager implements WorkerPipelineHost {
       await this.rejectSessionTurn(admission, SESSION_TURN_INPUT_NOT_PERSISTED_REASON);
       throw error;
     }
+    // A continuation's instruction is not in the transcript (its marker row is),
+    // so the provider turn appends it as an input-only message, the same way an
+    // internal turn that persisted nothing does.
     const completion = this.dispatchAdmittedTask(admission, {
       ...input,
-      inputAlreadyPersisted: true,
+      inputAlreadyPersisted: input.hostContinuation ? false : true,
       responseMessageId: command.responseMessageId,
     });
     return {
@@ -3782,6 +3834,76 @@ export class KoryManager implements WorkerPipelineHost {
       userMessageId: command.userMessageId,
       completion,
     };
+  }
+
+  /**
+   * Admit the host-authored continuation of a run that a backend restart
+   * interrupted. The command id is derived from the interrupted run, so a
+   * repeated admission replays the same receipt instead of starting a second
+   * turn. The partial output is the interrupted turn's own persisted parts.
+   */
+  async admitRestartContinuation(
+    sessionId: string,
+    sourceRunId: string,
+  ): Promise<SessionTurnSubmission> {
+    const owner = this.runs?.getSessionTurnCommandForRun(sourceRunId) ?? null;
+    const partial =
+      owner && this.messages
+        ? await this.messages.getById(sessionId, owner.responseMessageId)
+        : undefined;
+    return this.startSessionTurn({
+      sessionId,
+      source: 'internal',
+      sourceCommandId: `${RESTART_RESUME_SOURCE_PREFIX}${sourceRunId}`,
+      userMessage: renderRestartContinuationPrompt(partial?.parts),
+      preferredModel: partial?.model,
+      hostContinuation: { kind: 'restart_resume', interruptedRunId: sourceRunId },
+    });
+  }
+
+  /** The chat's pending automatic usage-limit resume, if any. */
+  getPendingUsageLimitResume(sessionId: string): PendingResumeRecord | null {
+    return this.usageLimitResumes?.get(sessionId) ?? null;
+  }
+
+  /** The user's "Resume now". */
+  resumePendingUsageLimit(sessionId: string) {
+    if (!this.usageLimitResumes) return Promise.resolve('not_found' as const);
+    return this.usageLimitResumes.resumeNow(sessionId);
+  }
+
+  /** The user's "Cancel" on a pending usage-limit resume. */
+  cancelPendingUsageLimit(sessionId: string): boolean {
+    return this.usageLimitResumes?.cancel(sessionId) ?? false;
+  }
+
+  /** Re-arm durable usage-limit resumes after a restart. */
+  recoverUsageLimitResumes(): number {
+    return this.usageLimitResumes?.recover() ?? 0;
+  }
+
+  /** Admit a host-authored continuation after a provider usage limit reset. */
+  async admitUsageLimitContinuation(input: UsageLimitAdmitInput): Promise<SessionTurnSubmission> {
+    const owner =
+      input.sourceRunId && this.runs
+        ? this.runs.getSessionTurnCommandForRun(input.sourceRunId)
+        : null;
+    const partial =
+      owner && this.messages
+        ? await this.messages.getById(input.sessionId, owner.responseMessageId)
+        : undefined;
+    return this.startSessionTurn({
+      sessionId: input.sessionId,
+      source: 'internal',
+      sourceCommandId: `usage-resume-${input.pendingResumeId}-${input.attempt}`,
+      userMessage: renderUsageLimitContinuationPrompt(partial?.parts),
+      preferredModel: input.preferredModel ?? partial?.model,
+      hostContinuation: {
+        kind: 'usage_limit_resume',
+        pendingResumeId: input.pendingResumeId,
+        attempt: input.attempt,
+      },
+    });
   }
 
   async submitSessionTurn(input: SessionTurnCommandInput): Promise<SessionTurnResult> {
@@ -7722,7 +7844,20 @@ export class KoryManager implements WorkerPipelineHost {
           model: routing.model,
         });
       }
-      if (turnFailure && !stoppedByUser) throw turnFailure;
+      if (turnFailure && !stoppedByUser) {
+        // The turn is over with no fallback that succeeded. A usage limit is
+        // temporary, so the chat pauses and retries on its own instead of
+        // failing for good.
+        if (isUsageLimitMessage(turnFailure.message)) {
+          this.usageLimitResumes?.schedule(sessionId, {
+            message: turnFailure.message,
+            provider: String(routing.provider),
+            model: routing.model,
+            sourceRunId: handle.runId,
+          });
+        }
+        throw turnFailure;
+      }
       if (interactionMode === 'plan' && !stoppedByUser) {
         try {
           const noteId = await syncPlanNote(

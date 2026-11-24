@@ -2236,6 +2236,58 @@ export const MIGRATIONS: Migration[] = [
       DROP TABLE IF EXISTS session_review_comments;
     `,
   },
+  {
+    version: '0062',
+    description:
+      'Durable run resumption: interrupted-run continuation ledger and per-session pending usage-limit resumes',
+    up: `
+      -- One row per interrupted run that was considered for automatic
+      -- continuation. source_run_id is the primary key, so a run is resumed at
+      -- most once across any number of restarts.
+      CREATE TABLE IF NOT EXISTS session_run_resumes (
+        source_run_id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('pending', 'admitted', 'skipped')),
+        command_key TEXT,
+        reason TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_run_resumes_state
+        ON session_run_resumes(state);
+
+      -- At most one pending usage-limit resume per session. The row is the
+      -- durable record a restart re-arms; clearing it is the user's "Cancel".
+      CREATE TABLE IF NOT EXISTS session_pending_resumes (
+        session_id TEXT PRIMARY KEY,
+        id TEXT NOT NULL UNIQUE,
+        reason TEXT NOT NULL CHECK (reason IN ('usage_limit')),
+        provider TEXT,
+        model TEXT,
+        resume_at INTEGER NOT NULL,
+        attempt INTEGER NOT NULL CHECK (attempt >= 0),
+        state TEXT NOT NULL CHECK (state IN ('scheduled', 'resuming')),
+        message TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+    down: `
+      DROP TABLE IF EXISTS session_pending_resumes;
+      DROP INDEX IF EXISTS idx_session_run_resumes_state;
+      DROP TABLE IF EXISTS session_run_resumes;
+    `,
+  },
+  {
+    version: '0063',
+    description: 'Pending usage-limit resumes remember the stopped run whose output they continue',
+    up: `
+      ALTER TABLE session_pending_resumes ADD COLUMN source_run_id TEXT;
+    `,
+    down: `
+      ALTER TABLE session_pending_resumes DROP COLUMN source_run_id;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

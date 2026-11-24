@@ -10,6 +10,7 @@ import {
 } from '@koryphaios/shared';
 import { serverLog } from '../logger';
 import {
+  BACKEND_RESTART_INTERRUPTED_REASON,
   SessionRunStore,
   type BeginSessionTurnCommandInput,
   type BeginSessionTurnCommandResult,
@@ -21,6 +22,18 @@ import {
   type SessionRunRestartHandoff,
   type SessionTurnCommandRecord,
 } from './session-run-store';
+import {
+  RunResumptionStore,
+  type RunResumeRecord,
+} from './run-resumption-store';
+
+/** Source-command prefix for host-authored continuations of interrupted runs. */
+export const RESTART_RESUME_SOURCE_PREFIX = 'resume:';
+
+export interface InterruptedRunRecoveryOptions {
+  /** When true, each newly interrupted run is recorded as pending continuation. */
+  resumeInterruptedRuns?: boolean;
+}
 
 export type SessionRunPublisher = (sessionId: string, message: WSMessage) => void | Promise<void>;
 
@@ -39,6 +52,7 @@ export class SessionRunCoordinator {
   constructor(
     readonly store: SessionRunStore,
     private readonly publish: SessionRunPublisher,
+    readonly resumptions: RunResumptionStore = new RunResumptionStore(),
   ) {}
 
   get(sessionId: string): SessionRunSnapshot | null {
@@ -52,6 +66,10 @@ export class SessionRunCoordinator {
 
   getSessionTurnCommand(commandKey: string): SessionTurnCommandRecord | null {
     return this.store.getSessionTurnCommand(commandKey);
+  }
+
+  getSessionTurnCommandForRun(runId: string): SessionTurnCommandRecord | null {
+    return this.store.getSessionTurnCommandByRunId(runId);
   }
 
   async beginSessionTurnCommand(
@@ -309,8 +327,13 @@ export class SessionRunCoordinator {
     return this.fail(sessionId, current.runId, current.revision, reason);
   }
 
-  /** Mark provider/compaction work that could not survive backend restart. */
-  async recoverInterruptedRuns(): Promise<number> {
+  /**
+   * Mark runs that a backend restart cut off as interrupted (terminal reason
+   * `backend_restarted_during_active_run`). The terminal record is the durable
+   * interruption; with `resumeInterruptedRuns` each run also gets a pending
+   * continuation row, admitted later by `admitPendingRunResumes`.
+   */
+  async recoverInterruptedRuns(options: InterruptedRunRecoveryOptions = {}): Promise<number> {
     let recovered = 0;
     for (const snapshot of this.store.listActive()) {
       if (!snapshot.runId) continue;
@@ -322,8 +345,15 @@ export class SessionRunCoordinator {
           kind: 'fail',
           expectedRunId: snapshot.runId,
           expectedRevision: snapshot.revision,
-          reason: 'backend_restarted_during_active_run',
+          reason: BACKEND_RESTART_INTERRUPTED_REASON,
         });
+        // Record continuation intent before the lifecycle publications below
+        // yield, so a crash after the terminal commit cannot lose it. A
+        // continuation that a restart cut off is never resumed again: that is
+        // the crash-loop guard.
+        if (options.resumeInterruptedRuns === true) {
+          this.recordRestartResumeIntent(snapshot);
+        }
         await this.publishStored(result.payload, result.publishRequired);
         // `run.state` owns lifecycle truth, but spawned worker cards have
         // their own durable event history. Close every exact agent identity
@@ -340,6 +370,30 @@ export class SessionRunCoordinator {
       }
     }
     return recovered;
+  }
+
+  /** Pending restart continuations, oldest first. */
+  listPendingRunResumes(limit = 100): RunResumeRecord[] {
+    return this.resumptions.listPendingRunResumes(limit);
+  }
+
+  markRunResumeAdmitted(sourceRunId: string, commandKey: string): void {
+    this.resumptions.markRunResumeAdmitted(sourceRunId, commandKey);
+  }
+
+  markRunResumeSkipped(sourceRunId: string, reason: string): void {
+    this.resumptions.markRunResumeSkipped(sourceRunId, reason);
+  }
+
+  private recordRestartResumeIntent(snapshot: { sessionId: string; runId: string | null }): void {
+    if (!snapshot.runId) return;
+    const owner = this.store.getSessionTurnCommandByRunId(snapshot.runId);
+    if (owner?.sourceCommandId.startsWith(RESTART_RESUME_SOURCE_PREFIX)) return;
+    this.resumptions.recordPendingRunResume(
+      snapshot.runId,
+      snapshot.sessionId,
+      BACKEND_RESTART_INTERRUPTED_REASON,
+    );
   }
 
   /** Waiting without its exact durable continuation is corruption, not liveness. */

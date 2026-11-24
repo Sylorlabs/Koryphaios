@@ -286,6 +286,7 @@ export type {
   StreamCompletePayload,
   TurnProviderCompletedPayload,
   RunSettledPayload,
+  PendingResumePayload,
   RunSettledOutcome,
 } from './websocket/WSPayloads';
 

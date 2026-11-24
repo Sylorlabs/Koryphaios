@@ -66,6 +66,8 @@ export interface AgentSettings {
   messagingPermissionsByTier?: import('@koryphaios/shared').MessagingPermissionsByTier;
   autoRunTools: boolean;
   allowExternalPaths: boolean;
+  /** Continue a turn a backend restart interrupted (once). Default on. */
+  resumeInterruptedRuns?: boolean;
   managerModelAccess: Record<string, string[]>;
   restrictDelegationToPools: boolean;
   managerNotes: Record<string, string>;
@@ -402,6 +404,7 @@ export const DEFAULT_AGENT_SETTINGS: AgentSettings = {
   messagingPermissionsByTier: {},
   autoRunTools: false,
   allowExternalPaths: false,
+  resumeInterruptedRuns: true,
   managerModelAccess: {},
   restrictDelegationToPools: false,
   managerNotes: {},

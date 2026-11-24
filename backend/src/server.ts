@@ -20,6 +20,7 @@ import { VERSION, ID, RATE_LIMIT, SECURITY } from './constants';
 import { RateLimiter } from './security/rate-limit';
 import { addCorsOrigins } from './security';
 import { PROJECT_ROOT } from './runtime/paths';
+import { resumeInterruptedRunsEnabled } from './runs/resume-setting';
 import { clearStartupStatus, markStartupReady, reportStartupPhase } from './runtime/startup-status';
 import { createWebSocketHandlers } from './server/websocket-handler';
 import { stopCatalogRefresh } from './providers/catalog-refresh';
@@ -40,6 +41,7 @@ import { systemRoutes } from './routes/v1/system';
 
 // Routes
 import { sessionRoutes } from './routes/v1/sessions';
+import { scheduleRoutes } from './routes/v1/schedules';
 import { messageRoutes } from './routes/v1/messages';
 import { providerRoutes } from './routes/v1/providers';
 import { agentRoutes } from './routes/v1/agents';
@@ -81,6 +83,7 @@ const baseApp = new Elysia()
   .use(systemRoutes)
   .onError(errorHandler)
   .use(sessionRoutes)
+  .use(scheduleRoutes)
   .use(feedRoutes)
   .use(messageRoutes)
   .use(providerRoutes)
@@ -529,7 +532,9 @@ async function main() {
       // Freeze local lifecycle writers first. Durable user/process waits survive
       // restart; only provider/compaction work that cannot survive is failed.
       await kory.shutdown();
-      await runs.recoverInterruptedRuns();
+      await runs.recoverInterruptedRuns({
+        resumeInterruptedRuns: resumeInterruptedRunsEnabled(PROJECT_ROOT),
+      });
       await runs.drainOutbox();
       runs.stopOutboxPump();
       await stopRemoteInstanceHost();
