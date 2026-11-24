@@ -17975,6 +17975,80 @@
         "x-koryphaios-auth": "local-bearer"
       }
     },
+    "/api/sessions/{id}/pending-resume": {
+      "delete": {
+        "operationId": "deleteApiSessionsByIdPendingResume",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "DELETE /api/sessions/{id}/pending-resume",
+        "tags": ["Sessions"],
+        "x-koryphaios-auth": "local-bearer"
+      },
+      "get": {
+        "operationId": "getApiSessionsByIdPendingResume",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "GET /api/sessions/{id}/pending-resume",
+        "tags": ["Sessions"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
     "/api/sessions/{id}/processes": {
       "get": {
         "operationId": "getApiSessionsByIdProcesses",
@@ -18047,6 +18121,44 @@
           }
         ],
         "summary": "POST /api/sessions/{id}/restore",
+        "tags": ["Sessions"],
+        "x-koryphaios-auth": "local-bearer"
+      }
+    },
+    "/api/sessions/{id}/resume-now": {
+      "post": {
+        "operationId": "postApiSessionsByIdResumeNow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "POST /api/sessions/{id}/resume-now",
         "tags": ["Sessions"],
         "x-koryphaios-auth": "local-bearer"
       }

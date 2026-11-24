@@ -3218,6 +3218,20 @@ export interface KoryApiOperations {
     response: unknown;
     auth: 'local-bearer';
   };
+  'DELETE /api/sessions/{id}/pending-resume': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'GET /api/sessions/{id}/pending-resume': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
   'GET /api/sessions/{id}/processes': {
     input: {
       params: { id: string };
@@ -3226,6 +3240,13 @@ export interface KoryApiOperations {
     auth: 'local-bearer';
   };
   'POST /api/sessions/{id}/restore': {
+    input: {
+      params: { id: string };
+    };
+    response: unknown;
+    auth: 'local-bearer';
+  };
+  'POST /api/sessions/{id}/resume-now': {
     input: {
       params: { id: string };
     };
@@ -4378,8 +4399,17 @@ export const KORY_API_ROUTES: Record<KoryApiOperationKey, { method: string; path
   },
   'POST /api/sessions/{id}/fork': { method: 'POST', path: '/api/sessions/{id}/fork' },
   'POST /api/sessions/{id}/merge-fork': { method: 'POST', path: '/api/sessions/{id}/merge-fork' },
+  'DELETE /api/sessions/{id}/pending-resume': {
+    method: 'DELETE',
+    path: '/api/sessions/{id}/pending-resume',
+  },
+  'GET /api/sessions/{id}/pending-resume': {
+    method: 'GET',
+    path: '/api/sessions/{id}/pending-resume',
+  },
   'GET /api/sessions/{id}/processes': { method: 'GET', path: '/api/sessions/{id}/processes' },
   'POST /api/sessions/{id}/restore': { method: 'POST', path: '/api/sessions/{id}/restore' },
+  'POST /api/sessions/{id}/resume-now': { method: 'POST', path: '/api/sessions/{id}/resume-now' },
   'POST /api/sessions/{id}/rewind': { method: 'POST', path: '/api/sessions/{id}/rewind' },
   'POST /api/sessions/{id}/rewind/preview': {
     method: 'POST',
