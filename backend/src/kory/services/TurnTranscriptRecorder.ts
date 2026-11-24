@@ -79,7 +79,22 @@ export class TurnTranscriptRecorder {
    */
   observe(input: TranscriptObservation): unknown {
     const turn = this.turns.get(input.sessionId);
-    if (!turn || !input.type.startsWith('stream.')) return input.payload;
+    if (!turn) return input.payload;
+    if (input.type === 'session.fallback.hop') {
+      // A session-level notice. It is folded only into the turn it names, so a
+      // hop published after that turn ended can never land in a later message.
+      if (!isRecord(input.payload) || input.payload.messageId !== turn.messageId) {
+        return input.payload;
+      }
+      const notice = turnEventFromWSMessage({
+        type: input.type,
+        payload: input.payload,
+        timestamp: input.timestamp,
+      });
+      if (notice) turn.parts = reduceTurnParts(turn.parts, notice);
+      return input.payload;
+    }
+    if (!input.type.startsWith('stream.')) return input.payload;
     if (!isRecord(input.payload) || input.payload.agentId !== input.managerAgentId) {
       return input.payload;
     }

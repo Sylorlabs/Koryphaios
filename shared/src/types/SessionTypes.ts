@@ -40,6 +40,9 @@ export interface SessionAgentOverrides {
    *  (manage_skill_feeding). Durable so a block survives idle-runtime disposal
    *  and app restarts; dies with the chat row when it is deleted or erased. */
   blockedSkillFeeds?: string[];
+  /** Per-chat fallback chain. Overrides the role and default chains for this chat
+   *  when set. Absent means the chat uses the project chains. */
+  fallbackChain?: import('../fallback-chain').FallbackChain;
 }
 
 export interface Session {

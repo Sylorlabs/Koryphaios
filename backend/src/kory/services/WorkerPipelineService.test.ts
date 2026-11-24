@@ -823,7 +823,7 @@ describe('worker fallback chain', () => {
       undefined,
       undefined,
       false,
-      [{ model: 'fallback-model', reasoningLevel: 'high' }],
+      [{ provider: 'openai', model: 'fallback-model', reasoningLevel: 'high' }],
     );
 
     expect(result.success).toBe(true);

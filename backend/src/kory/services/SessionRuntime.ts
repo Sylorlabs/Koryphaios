@@ -8,6 +8,7 @@
 import type { AgentFallbackStep, AgentStatus, ProviderName } from '@koryphaios/shared';
 import type { Provider } from '../../providers/types';
 import type { TaskContract } from '../prompts';
+import type { FallbackStickyState, FallbackTurnState } from '../fallback-chain';
 
 export type SkillCollisionChoices = Record<string, 'personal' | 'project'>;
 
@@ -42,6 +43,11 @@ export class SessionRuntime {
 
   /** AbortController for the current manager run (so cancelSessionWorkers can abort the manager too). */
   abort?: AbortController;
+
+  /** Fallback-chain hop state for the manager turn in flight. Set at turn start. */
+  fallbackTurn?: FallbackTurnState;
+  /** Where a `never` or `after_reset` chain left the manager, carried across turns. */
+  fallbackSticky?: FallbackStickyState;
 
   /** Synchronous intent claim covering provider resolution, intent interviews
    *  and every other pre-controller await. */

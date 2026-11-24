@@ -43,6 +43,8 @@ export type WSEventType =
   // Unsequenced control row: history through payload.throughSequence was
   // pruned and can never be replayed; clients advance past it.
   | 'session.history_pruned'
+  // A manager turn moved to the next step of the user's fallback chain.
+  | 'session.fallback.hop'
   | 'run.state'
   // Provider work ended for a manager turn; follow-up work (critic, checkpoint, persistence) may still run.
   | 'turn.provider_completed'
@@ -257,6 +259,7 @@ export const SESSION_SCOPED_EVENT_TYPES: ReadonlySet<WSEventType> = new Set<WSEv
   'session.timeline_rewritten',
   'session.replay_skipped',
   'session.history_pruned',
+  'session.fallback.hop',
   'run.state',
   'turn.provider_completed',
   'run.settled',

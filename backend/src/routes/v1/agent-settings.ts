@@ -78,6 +78,17 @@ import {
   stopWorkflow,
 } from '../../kory/workflows';
 import { serverLog } from '../../logger';
+import {
+  AgentFallbackChainRequestSchema,
+} from '../../validation/schemas';
+import {
+  normalizeFallbackChain,
+  type FallbackChainRole,
+  type FallbackChainSettings,
+} from '@koryphaios/shared';
+import { checkFallbackSteps } from '../../kory/fallback-chain-check';
+import { normalizeFallbackStepsInput } from '../../kory/fallback-chain-input';
+import { describeFallbackChain, runtimeFallbackLookup } from '../../kory/fallback-chain-lookup';
 import { hasIndependentGoalEvidence } from '../../stores/goal-store';
 import {
   NotFoundError,
@@ -1186,7 +1197,7 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         const data = await kory.updateAgentControls(body.sessionId, agentId, {
           model: body.model,
           reasoningLevel: body.reasoningLevel,
-          fallbacks: body.fallbacks,
+          fallbacks: body.fallbacks ? normalizeFallbackStepsInput(body.fallbacks) : undefined,
         });
         return { ok: true, data };
       } catch (err: unknown) {
@@ -1202,8 +1213,10 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
         fallbacks: t.Optional(
           t.Array(
             t.Object({
+              provider: t.Optional(t.String()),
               model: t.String(),
               reasoningLevel: t.Optional(t.String()),
+              label: t.Optional(t.String()),
             }),
             { maxItems: 20 },
           ),
@@ -1248,6 +1261,57 @@ export const agentSettingsRoutes = new Elysia({ prefix: '/api/agent' })
       ok: true,
       data: { cancelled },
       message: cancelled ? 'Agent cancellation requested' : 'Agent is not running',
+    };
+  })
+  // Fallback chains: `default` plus per-role chains. Saving a chain checks each
+  // step against the live registry; a disconnected provider is saved with a
+  // `provider_disconnected` status and skipped at runtime.
+  .get('/fallback-chain', async ({ request, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const settings = loadAgentSettings(getRequestProjectRoot(request));
+    const lookup = runtimeFallbackLookup();
+    const chains: Partial<Record<FallbackChainRole, ReturnType<typeof describeFallbackChain>>> = {};
+    for (const [role, chain] of Object.entries(settings.fallbackChains)) {
+      if (chain) chains[role as FallbackChainRole] = describeFallbackChain(chain, lookup);
+    }
+    return {
+      ok: true,
+      data: { chains },
+      message: 'Fallback chains loaded.',
+    };
+  })
+  .put('/fallback-chain', async ({ request, body, set }) => {
+    if (!requireLocalRouteAuth(request, set)) return { ok: false, error: 'Unauthorized' };
+    const parsed = AgentFallbackChainRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      set.status = 400;
+      return { ok: false, error: parsed.error.issues[0]?.message ?? 'Invalid fallback chain.' };
+    }
+    const root = getRequestProjectRoot(request);
+    const current = loadAgentSettings(root);
+    const chains: FallbackChainSettings = { ...current.fallbackChains };
+    const { role, chain: input } = parsed.data;
+    const lookup = runtimeFallbackLookup();
+    if (input === null) {
+      delete chains[role];
+    } else {
+      const chain = normalizeFallbackChain(input);
+      const check = checkFallbackSteps(chain.steps, lookup);
+      if (!check.ok) {
+        set.status = 422;
+        return { ok: false, error: check.error, stepIndex: check.stepIndex };
+      }
+      chains[role] = chain;
+    }
+    saveAgentSettings(root, { ...current, fallbackChains: chains });
+    const view: Partial<Record<FallbackChainRole, ReturnType<typeof describeFallbackChain>>> = {};
+    for (const [key, value] of Object.entries(chains)) {
+      if (value) view[key as FallbackChainRole] = describeFallbackChain(value, lookup);
+    }
+    return {
+      ok: true,
+      data: { chains: view },
+      message: input === null ? 'Fallback chain cleared.' : 'Fallback chain saved.',
     };
   })
   .get('/settings', async ({ request, set }) => {

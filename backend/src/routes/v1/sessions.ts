@@ -17,6 +17,10 @@ import {
   ValidationError,
 } from '../../errors/types';
 import { SESSION } from '../../constants';
+import { normalizeFallbackChain } from '@koryphaios/shared';
+import { SessionFallbackChainRequestSchema } from '../../validation/schemas';
+import { checkFallbackSteps } from '../../kory/fallback-chain-check';
+import { describeFallbackChain, runtimeFallbackLookup } from '../../kory/fallback-chain-lookup';
 import { sessionSettingsRoot } from '../../kory/session-workspace';
 import { listToolServerIdentities } from '../../mcp/server-service';
 import { koryMcpServerIdentity } from '../../providers/cli-bridges';
@@ -150,6 +154,57 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     if (!session) throw new NotFoundError('Session', id);
     return { ok: true, data: session };
   })
+  // Per-chat fallback chain. It overrides the role and default chains for this
+  // chat only; DELETE returns the chat to the project chains.
+  .get('/:id/fallback-chain', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const session = await getContext().sessions.get(id);
+    if (!session) throw new NotFoundError('Session', id);
+    const chain = session.agentOverrides?.fallbackChain ?? null;
+    return {
+      ok: true,
+      data: {
+        chain: chain ? describeFallbackChain(chain, runtimeFallbackLookup()) : null,
+      },
+    };
+  })
+  .put(
+    '/:id/fallback-chain',
+    async ({ request, params: { id }, body }) => {
+      if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+      const parsed = SessionFallbackChainRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.issues[0]?.message ?? 'Invalid fallback chain.');
+      }
+      const { sessions } = getContext();
+      const current = await sessions.get(id);
+      if (!current) throw new NotFoundError('Session', id);
+      const chain = normalizeFallbackChain(parsed.data.chain);
+      const check = checkFallbackSteps(chain.steps, runtimeFallbackLookup());
+      if (!check.ok) throw new ValidationError(check.error);
+      const updated = await sessions.update(id, {
+        agentOverrides: { ...current.agentOverrides, fallbackChain: chain },
+      });
+      if (!updated) throw new NotFoundError('Session', id);
+      if (updated.agentOverrides !== undefined) setSessionAgentOverrides(id, updated.agentOverrides);
+      return {
+        ok: true,
+        data: { chain: describeFallbackChain(chain, runtimeFallbackLookup()) },
+      };
+    },
+    { body: t.Any() },
+  )
+  .delete('/:id/fallback-chain', async ({ request, params: { id } }) => {
+    if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
+    const { sessions } = getContext();
+    const current = await sessions.get(id);
+    if (!current) throw new NotFoundError('Session', id);
+    const { fallbackChain: _cleared, ...rest } = current.agentOverrides ?? {};
+    const updated = await sessions.update(id, { agentOverrides: rest });
+    if (!updated) throw new NotFoundError('Session', id);
+    setSessionAgentOverrides(id, updated.agentOverrides ?? {});
+    return { ok: true, data: { chain: null } };
+  })
   .patch(
     '/:id',
     async ({ request, params: { id }, body }) => {
@@ -184,6 +239,10 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
         : {};
       if (current.agentOverrides?.blockedSkillFeeds) {
         preservedOverrides.blockedSkillFeeds = current.agentOverrides.blockedSkillFeeds;
+      }
+      // The per-chat fallback chain is owned by /fallback-chain, not the composer.
+      if (current.agentOverrides?.fallbackChain) {
+        preservedOverrides.fallbackChain = current.agentOverrides.fallbackChain;
       }
       const agentOverrides =
         body.agentOverrides === undefined

@@ -90,9 +90,10 @@ describe('delegate_to_worker skill assignment', () => {
       },
     });
     expect(result.isError).toBe(false);
+    // Legacy `provider:model` input is accepted and normalized to the unified step shape.
     expect(receivedFallbacks).toEqual([
-      { model: 'openai:gpt-fallback', reasoningLevel: 'high' },
-      { model: 'anthropic:claude-fallback', reasoningLevel: 'low' },
+      { provider: 'openai', model: 'gpt-fallback', reasoningLevel: 'high' },
+      { provider: 'anthropic', model: 'claude-fallback', reasoningLevel: 'low' },
     ]);
   });
 });
