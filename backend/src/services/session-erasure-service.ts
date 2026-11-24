@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Session } from '@koryphaios/shared';
+import { computerScreenshots } from '../computer-use/screenshots';
 import { getContext } from '../context';
 import { getCreditDb } from '../credit-accountant/db';
 import { getDb } from '../db';
@@ -359,6 +360,9 @@ async function eraseSessionsCoordinatedWithLease(
       }
     }
     fileLease.finalize();
+    // Computer-use captures are chat-owned pixels; they go with the chat.
+    // Best effort: the erasure already committed, and retention bounds any leftover.
+    for (const sessionId of fileLease.sessionIds) computerScreenshots.deleteSession(sessionId);
 
     for (const session of sessions) {
       deps.wsManager.broadcastEphemeral({
