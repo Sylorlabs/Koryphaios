@@ -16,12 +16,11 @@ import { bootstrap } from './bootstrap';
 import { killOwnerDisplayProcesses } from './security/owner-display-guard';
 import { setContext } from './context';
 import { serverLog } from './logger';
-import { VERSION, ID, RATE_LIMIT, COMPAT, SECURITY } from './constants';
+import { VERSION, ID, RATE_LIMIT, SECURITY } from './constants';
 import { RateLimiter } from './security/rate-limit';
 import { addCorsOrigins } from './security';
 import { PROJECT_ROOT } from './runtime/paths';
 import { clearStartupStatus, markStartupReady, reportStartupPhase } from './runtime/startup-status';
-import { resolveBundleHash, isBundleHashEnforced } from './config/compat';
 import { createWebSocketHandlers } from './server/websocket-handler';
 import { stopCatalogRefresh } from './providers/catalog-refresh';
 import { disposeMonitors } from './kory/services/monitor-service';
@@ -37,6 +36,7 @@ import { setDeviceWorkbenchHandler } from './devices/workbench';
 import { isContainedBy } from './runtime/platform';
 import { recordRequestPeer } from './auth/request-peer';
 import { deviceRoutes } from './routes/v1/devices';
+import { systemRoutes } from './routes/v1/system';
 
 // Routes
 import { sessionRoutes } from './routes/v1/sessions';
@@ -74,39 +74,9 @@ import { updateRoutes } from './routes/v1/updates';
 import { cliChatImportRoutes } from './routes/v1/cli-chat-import';
 import { errorHandlingMiddleware, errorHandler } from './middleware/error-handling';
 
-const SERVER_STARTED_AT = Date.now();
-const BACKEND_SERVICE_ID = 'koryphaios';
-
 // Define base Elysia App for export
 const baseApp = new Elysia()
-  .get('/api/health', () => ({
-    ok: true,
-    data: {
-      id: BACKEND_SERVICE_ID,
-      version: VERSION,
-      uptime: process.uptime(),
-      // Lets the desktop supervisor reject a stale process already bound to
-      // the configured port instead of mistaking it for the embedded service.
-      pid: process.pid,
-      // Frontend/backend compatibility contract. The frontend reads this and
-      // halts normal operation when its own version/bundle-hash falls outside
-      // the range the backend reports. Prevents a stale frontend from running
-      // silently against a fresh backend (or vice versa).
-      compat: {
-        minFrontend: COMPAT.minFrontend,
-        currentFrontend: COMPAT.currentFrontend,
-        bundleHash: resolveBundleHash(),
-        bundleHashEnforced: isBundleHashEnforced(),
-        serverStartedAt: SERVER_STARTED_AT,
-      },
-    },
-  }))
-  .get('/api/project', async () => {
-    const { basename } = await import('node:path');
-    const projectName = basename(PROJECT_ROOT);
-    return { ok: true, data: { projectName } };
-  })
-  .post('/api/debug/log-error', () => ({ ok: true }))
+  .use(systemRoutes)
   .onError(errorHandler)
   .use(sessionRoutes)
   .use(feedRoutes)

@@ -68,6 +68,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "format:changed": "bun run scripts/check-changed-format.ts",
+    "api:generate": "bun run scripts/generate-api-contract.ts",
+    "api:check": "bun run scripts/generate-api-contract.ts --check",
     "build:ci": "bun run write-compat-hash && bun run --filter backend build && bun run build:frontend:static",
     "dev:workspace": "bun run --filter \"*\" dev",
     "eval:skills-v5:blind": "bun run scripts/run-skill-v5-blind-review-campaign.ts",
