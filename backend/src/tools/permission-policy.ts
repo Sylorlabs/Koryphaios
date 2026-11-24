@@ -225,6 +225,7 @@ const INTERACTION_TOOLS = new Set([
  */
 const PLAN_MODE_ORCHESTRATION_TOOLS = new Set([
   'delegate_to_worker',
+  'wait_for_agents',
   'manage_agents',
   'manage_review_agents',
   'send_agent_message',

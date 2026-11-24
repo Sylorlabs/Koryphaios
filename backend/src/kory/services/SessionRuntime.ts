@@ -8,6 +8,7 @@
 import type { AgentFallbackStep, AgentStatus, ProviderName } from '@koryphaios/shared';
 import type { Provider } from '../../providers/types';
 import type { TaskContract } from '../prompts';
+import { AsyncChildLedger, CompareGroupLedger } from '../async-children';
 
 export type SkillCollisionChoices = Record<string, 'personal' | 'project'>;
 
@@ -105,6 +106,17 @@ export class SessionRuntime {
    *  The durable row is the restart-surviving receipt; this map only carries
    *  full input fidelity (attachments, model parameters) the row cannot. */
   pendingSteerInputs = new Map<string, import('../manager').SessionTurnCommandInput>();
+
+  /** Worker agents started with wait:false in this chat, and their delivery
+   *  state. Results reach the manager as host-authored continuations. */
+  asyncChildren = new AsyncChildLedger();
+  /** Attempts recorded under each compare group id in this chat. */
+  compareGroups = new CompareGroupLedger();
+  /** Set by Stop: finished async results are held and not auto-delivered until
+   *  the user sends again or wait_for_agents claims them. */
+  asyncDeliveryHeld = false;
+  /** Compare group the manager asked the end-of-turn critic to rank. */
+  pendingCompareReview?: string;
 
   /** Pending usage-retry timers. */
   usageRetryTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -227,6 +239,10 @@ export class SessionRuntime {
     this.questionQueue = Promise.resolve();
     this.bridgeToolLedger = null;
     this.pendingSteerInputs.clear();
+    this.asyncChildren.dispose();
+    this.compareGroups.dispose();
+    this.asyncDeliveryHeld = false;
+    this.pendingCompareReview = undefined;
     this.abort = undefined;
     this.runClaimed = false;
     this.runClaimedAt = undefined;
