@@ -28,6 +28,7 @@ export * from './provider-execution';
 export * from './provider-permission-enforcement';
 export * from './desktop-ui-settings';
 export * from './notes/NoteIcons';
+export * from './notes/NoteIconEmojiCatalog';
 export * from './project-identity';
 export * from './remote-target';
 export * from './compute-delegation';

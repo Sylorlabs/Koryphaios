@@ -962,8 +962,9 @@ export const notesRoutes = new Elysia({ prefix: '/api/notes' })
     return { ok: true, data: icon };
   }, {
     body: t.Object({ icon: t.Union([t.Null(), t.Object({
-      kind: t.Union([t.Literal('builtin'), t.Literal('image')]),
+      kind: t.Union([t.Literal('builtin'), t.Literal('emoji'), t.Literal('image')]),
       value: t.String({ maxLength: 500000 }),
+      label: t.Optional(t.String({ maxLength: 48 })),
     })]) }),
   })
 

@@ -6,8 +6,11 @@
   import { notesStore } from '$lib/stores/notes.svelte';
   import { projectStore } from '$lib/stores/project.svelte';
   import {
+    isNoteEmoji,
+    MAX_NOTE_EMOJI_LENGTH,
     MAX_NOTE_ICON_LABEL_LENGTH,
     NOTE_ICON_CHOICES,
+    searchNoteEmoji,
     type NoteIcon,
   } from '@koryphaios/shared';
 
@@ -25,8 +28,30 @@
   let left = $state(0);
   let top = $state(0);
   let draftLabel = $state(icon?.label ?? '');
+  let emojiDraft = $state('');
+  let emojiQuery = $state('');
   let alive = true;
   const projectAtOpen = projectStore.currentPath;
+
+  const emojiCandidate = $derived(emojiDraft.trim());
+  const emojiValid = $derived(isNoteEmoji(emojiCandidate));
+  const emojiError = $derived(
+    emojiCandidate.length === 0 ? ''
+      : emojiCandidate.length > MAX_NOTE_EMOJI_LENGTH ? 'That is too long for one emoji.'
+      : emojiValid ? ''
+      : 'Enter exactly one emoji. Text, spaces and symbols that are not emoji are not allowed.',
+  );
+  const emojiResults = $derived(searchNoteEmoji(emojiQuery));
+
+  /** Quick picks, free emoji and the grid all store the same appearance-only shape. */
+  function isChosen(value: string): boolean {
+    return !!icon && icon.kind !== 'image' && icon.value === value;
+  }
+
+  function chooseEmoji(): void {
+    if (!emojiValid || busy) return;
+    void choose({ kind: 'emoji', value: emojiCandidate });
+  }
 
   async function choose(next: NoteIcon | null): Promise<void> {
     if (!alive || busy || projectStore.currentPath !== projectAtOpen) return;
@@ -94,6 +119,8 @@
       onclose();
       return;
     }
+    // Text fields keep their own caret movement; arrows only roam the buttons.
+    if (event.target instanceof HTMLInputElement) return;
     const buttons = [...(menu?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])];
     const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
     if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
@@ -145,6 +172,46 @@
       </button>
     {/each}
   </div>
+  <div class="emoji-field">
+    <div class="emoji-input">
+      <span id="note-emoji-label">Any emoji</span>
+      <span class="emoji-row">
+        <span class="emoji-preview" aria-hidden="true">{emojiValid ? emojiCandidate : '·'}</span>
+        <input
+          bind:value={emojiDraft}
+          aria-labelledby="note-emoji-label"
+          maxlength={MAX_NOTE_EMOJI_LENGTH * 2}
+          placeholder="Paste or type an emoji"
+          autocomplete="off"
+          spellcheck="false"
+          disabled={busy}
+          aria-invalid={emojiError ? 'true' : undefined}
+          aria-describedby={emojiError ? 'note-emoji-error' : undefined}
+          onkeydown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              chooseEmoji();
+            }
+          }}
+        />
+        <button type="button" class="emoji-use" disabled={busy || !emojiValid} onclick={chooseEmoji}>Use</button>
+      </span>
+    </div>
+    {#if emojiError}<p id="note-emoji-error" class="field-error" role="alert">{emojiError}</p>{/if}
+  </div>
+  <div class="emoji-search">
+    <input type="search" bind:value={emojiQuery} placeholder="Search emoji" aria-label="Search emoji"
+      autocomplete="off" disabled={busy} />
+    <div class="emoji-grid" role="group" aria-label="Emoji results">
+      {#each emojiResults as entry (entry.emoji)}
+        <button type="button" role="menuitemradio" aria-checked={isChosen(entry.emoji)}
+          aria-label={entry.name} title={entry.name} disabled={busy}
+          onclick={() => void choose({ kind: 'emoji', value: entry.emoji })}>{entry.emoji}</button>
+      {:else}
+        <p class="hint">No emoji match “{emojiQuery.trim()}”.</p>
+      {/each}
+    </div>
+  </div>
   <label class="label-field">
     <span>Label</span>
     <input
@@ -172,7 +239,7 @@
 </div>
 
 <style>
-  .note-icon-menu { position: fixed; z-index: 140; width: 244px; max-width: calc(100vw - 16px); padding: 10px; border-radius: 14px; background: var(--color-surface-2); color: var(--color-text-primary); box-shadow: 0 12px 40px rgb(0 0 0 / 28%); }
+  .note-icon-menu { position: fixed; z-index: 140; width: 276px; max-width: calc(100vw - 16px); padding: 10px; border-radius: 14px; background: var(--color-surface-2); color: var(--color-text-primary); box-shadow: 0 12px 40px rgb(0 0 0 / 28%); }
   .menu-heading { display: flex; align-items: center; justify-content: space-between; padding: 0 6px 8px; color: var(--color-text-muted); font-size: 11px; font-weight: 600; }
   button { border: 0; background: transparent; color: inherit; border-radius: 7px; cursor: pointer; }
   button:hover:not(:disabled) { background: var(--color-surface-3); }
@@ -182,6 +249,22 @@
   .icon-grid button { position: relative; height: 34px; font-size: 20px; }
   .icon-grid button[aria-checked='true'] { background: var(--color-accent-transparent); }
   .icon-grid :global(.chosen) { position: absolute; bottom: 2px; right: 2px; color: var(--color-accent); }
+  .emoji-field, .emoji-search { margin: 0 6px 8px; }
+  .emoji-input { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--color-text-muted); }
+  .emoji-row { display: flex; align-items: center; gap: 6px; }
+  .emoji-preview { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; font-size: 20px; border-radius: 8px; background: var(--color-surface-1); }
+  .emoji-input input, .emoji-search input { flex: 1; min-width: 0; border: 1px solid var(--color-border); border-radius: 7px; background: var(--color-surface-1); color: var(--color-text-primary); padding: 6px 8px; font: inherit; font-size: 12px; }
+  .emoji-input input[aria-invalid='true'] { border-color: var(--color-error); }
+  .emoji-input input:disabled, .emoji-search input:disabled { opacity: 0.45; }
+  .emoji-use { padding: 6px 8px; font-size: 12px; border: 1px solid var(--color-border); }
+  .emoji-use:disabled { opacity: 0.45; }
+  .emoji-search { display: flex; flex-direction: column; gap: 6px; }
+  .emoji-search input { width: 100%; box-sizing: border-box; }
+  .emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; max-height: 148px; overflow-y: auto; }
+  .emoji-grid button { height: 30px; font-size: 18px; }
+  .emoji-grid button[aria-checked='true'] { background: var(--color-accent-transparent); }
+  .emoji-grid .hint { grid-column: 1 / -1; margin: 4px 0; }
+  .field-error { margin: 4px 0 0; font-size: 11px; line-height: 1.5; color: var(--color-error); }
   .label-field { display: flex; flex-direction: column; gap: 4px; margin: 0 6px 8px; font-size: 11px; color: var(--color-text-muted); }
   .label-field input { border: 1px solid var(--color-border); border-radius: 7px; background: var(--color-surface-1); color: var(--color-text-primary); padding: 6px 8px; font: inherit; font-size: 12px; }
   .label-field input:disabled { opacity: 0.45; }

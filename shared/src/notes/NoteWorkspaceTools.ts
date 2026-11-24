@@ -72,6 +72,13 @@ export const NOTE_WORKSPACE_TOOL_DEFINITIONS = [
     category: 'write',
   },
   {
+    name: 'set_note_icon',
+    label: 'Set note icon',
+    description:
+      'Set or clear a note icon (any single emoji, a quick pick, or an image) without changing the note revision',
+    category: 'write',
+  },
+  {
     name: 'list_note_appearances',
     label: 'Find note appearances',
     description:

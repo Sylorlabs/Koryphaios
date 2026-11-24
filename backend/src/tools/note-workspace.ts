@@ -1,9 +1,12 @@
 import {
   NOTE_WORKSPACE_TOOL_DEFINITIONS,
   NOTE_PROPERTY_TYPES,
+  MAX_NOTE_ICON_DATA_LENGTH,
+  MAX_NOTE_ICON_LABEL_LENGTH,
   validateNoteCanvas,
   setNoteProperty,
   removeNoteProperty,
+  type NoteIcon,
   type NoteProperty,
   type NoteCanvasDocument,
 } from '@koryphaios/shared';
@@ -117,6 +120,24 @@ export const NOTE_WORKSPACE_SCHEMAS: Record<string, Record<string, unknown>> = {
       patches: { type: 'array', minItems: 1, maxItems: 100, items: patch },
     },
     ['noteId', 'expectedRevision', 'patches'],
+  ),
+  set_note_icon: schema(
+    {
+      noteId: id,
+      icon: {
+        type: ['object', 'null'],
+        additionalProperties: false,
+        description:
+          'Icon to set, or null to clear. kind builtin (quick pick), emoji (any single emoji) or image (PNG/JPEG/GIF/WebP data URL).',
+        properties: {
+          kind: { type: 'string', enum: ['builtin', 'emoji', 'image'] },
+          value: { type: 'string', minLength: 1, maxLength: MAX_NOTE_ICON_DATA_LENGTH },
+          label: { type: 'string', minLength: 1, maxLength: MAX_NOTE_ICON_LABEL_LENGTH },
+        },
+        required: ['kind', 'value'],
+      },
+    },
+    ['noteId', 'icon'],
   ),
   list_note_appearances: schema({ noteId: id }, ['noteId']),
   list_note_relationships: schema({
@@ -363,6 +384,12 @@ async function execute(
         revision: updated.revision,
         properties: (await getNotePropertyProjection(noteId, root)).properties,
       };
+    }
+    case 'set_note_icon': {
+      // Appearance only: never advances the document revision or rewrites the source file.
+      const icon = (input.icon ?? null) as NoteIcon | null;
+      await notes.setNoteIcon(noteId, icon, root);
+      return { noteId, icon };
     }
     case 'list_note_appearances':
       return listNoteAppearances(noteId, root);
