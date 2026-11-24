@@ -28,11 +28,35 @@ typecheck_output*.txt
 test-results/
 compat-hash.json
 
-# Environment
+# Environment and credentials
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.sample
+!.env.template
 .env.pre-rotation.bak
+*.pem
+*.key
+*.p8
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
+*.keystore
+*.jks
+*.kdbx
+*.keychain
+*.keychain-db
+credentials.json
+auth.json
+token.json
+secrets.json
+.npmrc
+.netrc
+**/.aws/
+**/.ssh/
+**/.kube/
+**/.gnupg/
 
 # Test coverage output
 frontend/coverage/
@@ -94,13 +118,23 @@ koryphaios.json
 /.kory-tmp/**/target/
 
 # Generated evaluation evidence, run markers and screenshots (not source).
-# Keep outputs/skill-library-finish-plan/skill-gate.ts tracked; the overnight
-# campaign logs and pair/blind-review trees are reproducible artifacts.
+# Everything under outputs/ is campaign output that lives on disk only. The one
+# tracked file is re-included below because backend/src/kory/services/ToolCallIdentity.ts
+# cites it as design provenance.
+/outputs/*
+!/outputs/t3code-teardown.md
 /outputs/skill-v5-pairs/
 /outputs/skill-v5-blind-review/
 /outputs/skill-library-finish-plan/overnight/
 /outputs/*.pid
 /outputs/source-refresh-*.json
+
+# Scratch probes, pid files and kory logs (never source)
+*.pid
+.probe*.ts
+.gate-probe.ts
+.kory-*.log
+
 /freebuff-picker-e2e.png
 /freebuff-card-hours.png
 /flash-fast-badge.png

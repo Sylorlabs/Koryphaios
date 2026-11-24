@@ -1,8 +1,0 @@
-r1 ios-swiftui insufficient-evidence pass 0.889 q 0.889 v 0.889 blind 0 regr 0
-r2 ios-swiftui insufficient-evidence pass 1.000 q 1.000 v 1.000 blind 0 regr 0
-r3 ios-swiftui insufficient-evidence pass 1.000 q 1.000 v 1.000 blind 0 regr 0
-final ios-swiftui blocked pass 1.000 q 1.000 v 1.000 blind 1 regr 0
-r1 ios-swiftui insufficient-evidence pass 1.000 q 1.000 v 1.000 blind 0 regr 0
-r2 ios-swiftui insufficient-evidence pass 1.000 q 1.000 v 1.000 blind 0 regr 0
-r3 ios-swiftui insufficient-evidence pass 1.000 q 1.000 v 1.000 blind 0 regr 0
-final ios-swiftui insufficient-evidence pass 1.000 q 1.000 v 1.000 blind 0 regr 0
