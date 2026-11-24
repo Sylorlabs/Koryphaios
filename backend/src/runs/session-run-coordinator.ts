@@ -45,6 +45,11 @@ export class SessionRunCoordinator {
     return this.store.get(sessionId);
   }
 
+  /** Runs whose authoritative status is `active` right now (read-only). */
+  listActive(): SessionRunSnapshot[] {
+    return this.store.listActive();
+  }
+
   getSessionTurnCommand(commandKey: string): SessionTurnCommandRecord | null {
     return this.store.getSessionTurnCommand(commandKey);
   }

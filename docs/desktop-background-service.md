@@ -8,14 +8,25 @@ the same backend, chats, credentials, and device identity.
 
 ## Closing and restarting
 
-Closing the window, choosing Quit from the menu, or quitting from the tray
-opens **Close Koryphaios?** with three choices:
+Quit from the tray, the app menu, Cmd+Q, or the Dock quits at once when no
+agent is running. The shell asks the backend how many runs are active, waiting
+at most 1.5 seconds; an unreachable backend counts as nothing running. When
+agents are running, a native **Quit Koryphaios?** dialog appears (it works
+while the window is hidden) with **Quit anyway** and **Cancel**. Choosing Quit a
+second time while that dialog is open quits.
+
+Closing the window with agents running opens **Close Koryphaios?** with three
+choices:
 
 - **Run in background** — hides the window; agents and linked devices remain
   available. The tray/session guard stays present for computer restart requests.
 - **Quit anyway** — stops the backend for this user session and exits the app.
   Opening Koryphaios or signing in again starts it again.
 - **Cancel** — keeps the app and agents running.
+
+If the window does not acknowledge that dialog within about 2.5 seconds (for
+example while the webview is suspended), the same three choices appear as a
+native dialog.
 
 A computer restart request offers **Restart anyway** and **Cancel**, with the
 message “This will interrupt running agents. Continue anyway?” There is no
