@@ -15,6 +15,7 @@
 //   POST /api/v1/mcp-bridge/hooks/session-start — SessionStart hook → register
 //   POST /api/v1/mcp-bridge/hooks/session-end   — SessionEnd hook → flush
 
+import { forkChatCoordinated } from '../../services/session-fork-coordinator';
 import { Elysia, t } from 'elysia';
 import { mcpProjectScope } from '../../mcp/project-scope';
 import { ensureProjectMcpServers } from '../../mcp/server-service';
@@ -527,6 +528,18 @@ export const mcpBridgeRoutes = new Elysia({ prefix: '/api/v1/mcp-bridge' })
           ...(normalizedRole === 'manager'
             ? {
                 renameSession: (title: string) => kory.renameSession(sessionId, title),
+                forkChat: async (input: { sessionId?: string; messageId?: string; title?: string }) => {
+                  const outcome = await forkChatCoordinated({
+                    sourceSessionId: input.sessionId ?? sessionId,
+                    messageId: input.messageId,
+                    title: input.title,
+                  });
+                  return {
+                    sessionId: outcome.session.id,
+                    title: outcome.session.title,
+                    copiedMessageCount: outcome.copiedMessageCount,
+                  };
+                },
                 delegateToWorker: (
                   task: string,
                   domain?: string,

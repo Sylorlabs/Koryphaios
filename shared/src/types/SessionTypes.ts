@@ -52,6 +52,14 @@ export interface Session {
   /** Convenience projection derived from archivedAt. */
   status?: 'active' | 'archived';
   parentSessionId?: string;
+  /** Lineage of a forked chat. Absent for an original chat. */
+  forkedFromSessionId?: string;
+  /** The source message the fork was taken from (the source's own id). */
+  forkedFromMessageId?: string;
+  /** Epoch ms when the fork was created. */
+  forkedAt?: number;
+  /** Epoch ms when this fork's result was merged back into its source; absent until then. */
+  forkMergedAt?: number;
   /** Absolute path of the project folder this chat belongs to. Sessions without
    *  one are "global" (created before project scoping, or with no folder open). */
   workingDirectory?: string;

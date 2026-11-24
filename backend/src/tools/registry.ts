@@ -129,6 +129,12 @@ export interface ToolContext {
   ) => Promise<string>;
   /** Manager-only metadata callback scoped to this session by the host. */
   renameSession?: (title: string) => Promise<string>;
+  /** Manager-only: fork a chat (default: this one) at a finished point, returning the new chat. */
+  forkChat?: (input: {
+    sessionId?: string;
+    messageId?: string;
+    title?: string;
+  }) => Promise<{ sessionId: string; title: string; copiedMessageCount: number }>;
   /** Manager Auto-mode decision to hold its final answer for independent review. */
   requestCriticReview?: (reason: string) => void;
   /** Optional preflight hook called before a file-mutating tool runs. If the

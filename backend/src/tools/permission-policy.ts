@@ -204,6 +204,8 @@ const INTERACTION_TOOLS = new Set([
   'ask_user',
   'ask_manager',
   'rename_session',
+  // Creates a new chat from copied history. It never touches the workspace or the source.
+  'fork_chat',
   'request_critic_review',
   // Only reshapes what this chat's agent sees; never touches the workspace.
   'manage_context',
