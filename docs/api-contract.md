@@ -245,6 +245,13 @@ emitting code, not the contract.
 | `goals.updated`                    | `unknown`                           |
 | `checklists.updated`               | `unknown`                           |
 | `native.command`                   | `NativeCommandPayload`              |
+| `session.forked`                   | `{ sessionId, forkSessionId }` (see docs/chat-forks.md) |
+| `session.merged`                   | `{ sessionId, forkSessionId, messageId }` |
+| `session.fallback.hop`             | `{ sessionId, messageId, agentId?, fromModel, toModel, reason, stepIndex }` |
+| `session.review_comments`          | `{ sessionId, comments }`           |
+| `session.pull_request_status`      | `{ sessionId, status }`             |
+| `terminal.output`                  | `{ terminalId, seq, data }` (base64, live only) |
+| `terminal.exit`                    | `{ terminalId, exitCode, signal }`  |
 
 Remote-protocol envelopes (`RemoteOperationEnvelope`, `RemoteReplayRequest`) are separate from
 these events and are defined in the same file.
