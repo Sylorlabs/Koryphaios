@@ -45,6 +45,7 @@
   } from '@koryphaios/shared';
   import BrainIcon from '$lib/components/icons/BrainIcon.svelte';
   import ProviderIcon from '$lib/components/icons/ProviderIcon.svelte';
+  import FreebuffBalance from './FreebuffBalance.svelte';
   import ImageInputFallbackDialog from './ImageInputFallbackDialog.svelte';
   import SettingsSwitch from './SettingsSwitch.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
@@ -1725,33 +1726,6 @@
     if (multiplier === 0) return 'Free';
     const rounded = Math.round(multiplier * 10) / 10;
     return `${formatFreebucks(rounded)}x`;
-  }
-
-  /** Facts the freebuff account catalog reported per model — context window,
-   * reasoning levels and vision. Absent data stays absent; never invented. */
-  function freebuffModelDetailLine(model: {
-    contextWindow?: number;
-    reasoningLevels?: string[];
-    vision?: boolean;
-  }): string {
-    const parts: string[] = [];
-    if (
-      typeof model.contextWindow === 'number' &&
-      Number.isFinite(model.contextWindow) &&
-      model.contextWindow > 0
-    ) {
-      const context =
-        model.contextWindow >= 1_000_000
-          ? `${Math.round(model.contextWindow / 100_000) / 10}M`
-          : model.contextWindow >= 1_000
-            ? `${Math.round(model.contextWindow / 1_000)}K`
-            : String(model.contextWindow);
-      parts.push(`${context} context`);
-    }
-    if (model.reasoningLevels?.length)
-      parts.push(`reasoning: ${model.reasoningLevels.join('/')}`);
-    if (model.vision === true) parts.push('vision');
-    return parts.join(' · ');
   }
 
   let selectedModelLabel = $derived.by(() => {
@@ -4314,6 +4288,14 @@
                           </span>
                         </div>
                       </button>
+                      {#if group.provider === 'freebuff' && freebuffAccountRows[0]?.snapshot}
+                        <div class="px-3 pb-1.5 pl-10">
+                          <FreebuffBalance
+                            account={freebuffAccountRows[0].snapshot}
+                            variant="compact"
+                          />
+                        </div>
+                      {/if}
                       {#if isSearchingModels || expandedProviders.has(group.provider)}
                         <div class="pb-1">
                           {#each group.models as model (model.value)}
@@ -4339,14 +4321,6 @@
                             >
                               <span class="min-w-0 flex-1 truncate">
                                 {model.name}
-                                {#if model.provider === 'freebuff' && freebuffModelDetailLine(model)}
-                                  <span
-                                    class="block truncate text-[11px] font-normal"
-                                    style="color: var(--color-text-muted);"
-                                  >
-                                    {freebuffModelDetailLine(model)}
-                                  </span>
-                                {/if}
                                 {#if model.fusion}
                                   <span
                                     class="block truncate text-[11px] font-normal"
