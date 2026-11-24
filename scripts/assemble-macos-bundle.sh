@@ -175,6 +175,10 @@ rm -f "$DMG_NAME"
 DMG_STAGING=$(mktemp -d)
 ln -s /Applications "$DMG_STAGING/Applications"
 cp -R "$APP_BUNDLE" "$DMG_STAGING/"
+# Guidance for Gatekeeper prompts. Lives beside the .app, never inside it, so
+# the bundle's sealed contents (codesign --verify --strict) are unchanged.
+DMG_README_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/install/dmg-readme.txt"
+cp "$DMG_README_SRC" "$DMG_STAGING/If macOS says the app can't be opened.txt"
 
 # Create the DMG
 hdiutil create \

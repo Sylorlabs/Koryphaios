@@ -496,6 +496,7 @@ jobs:
           trap 'rm -rf "$DMG_STAGING"' EXIT
           ln -s /Applications "$DMG_STAGING/Applications"
           cp -R "$UNIVERSAL_APP" "$DMG_STAGING/"
+          cp scripts/install/dmg-readme.txt "$DMG_STAGING/If macOS says the app can't be opened.txt"
           hdiutil create \
             -volname "Koryphaios" \
             -srcfolder "$DMG_STAGING" \
