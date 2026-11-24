@@ -461,6 +461,8 @@ export function syncProviderConfigsToConfig(
     const autoDetectedNames = new Set<string>();
     const sanitized: Record<string, unknown> = {};
     for (const [name, cfg] of Object.entries(providers)) {
+      // ACP agents persist under koryphaios.json `acpAgents` (see providers/acp/agent-store.ts).
+      if (name.startsWith('acp:')) continue;
       if (!cfg || typeof cfg !== 'object') {
         sanitized[name] = cfg;
         continue;

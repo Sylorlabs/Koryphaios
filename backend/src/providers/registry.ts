@@ -107,6 +107,15 @@ import {
 } from './github-models';
 import { NOTION_API_VERSION, NOTION_BASE_URL, NotionProvider } from './notion';
 import { CustomProvider, normalizeCustomProviderBaseUrl, probeCustomProvider } from './custom';
+import { AcpAgentProvider } from './acp/provider';
+import {
+  acpProviderName,
+  isAcpProviderName,
+  toAcpAgentProviderConfig,
+  toAcpProbeConfig,
+  type AcpAgentDefinition,
+} from './acp/agent-definitions';
+import { acpStoreRoot, loadAcpAgentDefinitions, loadAcpAgentEnv, loadAcpProbeVerdicts, type AcpProbeVerdict } from './acp/agent-store';
 import { getWireAdapter } from './wire-adapters/registry';
 import { getCapabilityAdapter, resolveCapabilityConfig } from './capabilities';
 import {
@@ -691,6 +700,8 @@ class ProviderRegistry {
   private providerRefreshLastAt = new Map<ProviderName, number>();
   /** IDs of user-defined custom providers (e.g. "custom:my-llm"). */
   private customProviderIds = new Set<ProviderName>();
+  /** IDs of user-registered ACP agents (`acp:<id>`); kept apart from endpoint customs. */
+  private acpAgentIds = new Set<ProviderName>();
   /** Capability-based model selection — replaces blind first-match fallback. */
   private capabilityRegistry: CapabilityRegistry | undefined;
 
@@ -726,7 +737,11 @@ class ProviderRegistry {
   }
 
   private getVisibleProviderNames(): ProviderName[] {
-    return [...(Object.keys(PROVIDER_AUTH_MODE) as ProviderName[]), ...this.customProviderIds];
+    return [
+      ...(Object.keys(PROVIDER_AUTH_MODE) as ProviderName[]),
+      ...this.customProviderIds,
+      ...this.acpAgentIds,
+    ];
   }
 
   /** Auth mode for a provider, defaulting to api_key for user-defined custom providers. */
@@ -1655,6 +1670,38 @@ class ProviderRegistry {
     return { success: true };
   }
 
+  /**
+   * Register or replace a user-registered ACP agent (`acp:<id>`). The provider
+   * config carries the non-secret definition and the stored probe verdict; env
+   * values are read from the agent secret store at turn time.
+   */
+  registerAcpAgentProvider(def: AcpAgentDefinition, verdict?: AcpProbeVerdict): void {
+    const name = acpProviderName(def.id) as ProviderName;
+    const providerConfig: ProviderConfig = {
+      name,
+      disabled: false,
+      acpAgent: toAcpAgentProviderConfig(def, verdict ? toAcpProbeConfig(verdict) : undefined),
+    };
+    this.providerConfigs.set(name, providerConfig);
+    this.acpAgentIds.add(name);
+    this.providers.delete(name);
+    this.circuitStates.delete(name);
+    const provider = this.createProvider(name, providerConfig);
+    if (provider) this.providers.set(name, provider);
+    providerLog.info({ provider: name, probed: !!verdict?.ok }, 'ACP agent provider registered');
+  }
+
+  /** Remove a user-registered ACP agent provider. */
+  removeAcpAgentProvider(id: string): void {
+    const name = acpProviderName(id) as ProviderName;
+    this.providers.delete(name);
+    this.providerConfigs.delete(name);
+    this.acpAgentIds.delete(name);
+    this.circuitStates.delete(name);
+    this.verificationRecords.delete(name);
+    providerLog.info({ provider: name }, 'ACP agent provider removed');
+  }
+
   /** Remove a user-defined custom provider. */
   removeCustomProvider(id: ProviderName): void {
     this.providers.delete(id);
@@ -1692,6 +1739,8 @@ class ProviderRegistry {
    */
   isTrustedForRouting(name: ProviderName): boolean {
     if (this.customProviderIds.has(name) || this.providerConfigs.get(name)?.custom) return true;
+    // A user-registered ACP agent is an explicit act, like creating a custom endpoint.
+    if (this.acpAgentIds.has(name)) return true;
     return this.verificationRecords.get(name)?.state === 'verified';
   }
 
@@ -3554,6 +3603,22 @@ class ProviderRegistry {
       }
     }
 
+    // Restore user-registered ACP agents from koryphaios.json (definitions) and
+    // the probe verdict store. Agents are never enabled by detection alone: an
+    // agent without an ok verdict stays listed but unavailable.
+    try {
+      const root = acpStoreRoot();
+      const verdicts = loadAcpProbeVerdicts(root);
+      for (const def of loadAcpAgentDefinitions(root)) {
+        this.registerAcpAgentProvider(def, verdicts[def.id]);
+      }
+    } catch (error) {
+      providerLog.error(
+        { errorType: error instanceof Error ? error.name : typeof error },
+        'Failed to restore ACP agent providers',
+      );
+    }
+
     // Restore user-defined custom providers persisted in the config.
     for (const [id, pc] of Object.entries(this.config?.providers ?? {})) {
       if (!pc?.custom || PROVIDER_AUTH_MODE[id as ProviderName]) continue;
@@ -3694,6 +3759,12 @@ class ProviderRegistry {
   private createProvider(name: ProviderName, config: ProviderConfig): Provider | null {
     // Non-chat APIs never inherit OpenAI-compatible chat by URL coincidence.
     if (UNSUPPORTED_CHAT_PROVIDER_NAMES.has(name)) return null;
+
+    // User-registered ACP agents. The provider holds no endpoint; it spawns the
+    // registered command per turn with the agent's own env secrets.
+    if (isAcpProviderName(String(name))) {
+      return config.acpAgent ? new AcpAgentProvider(config) : null;
+    }
 
     // User-defined custom providers (OpenAI/Anthropic/Gemini-compatible BYO endpoints).
     if (config.custom || this.customProviderIds.has(name)) {

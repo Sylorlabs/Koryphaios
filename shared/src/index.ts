@@ -103,6 +103,7 @@ export type {
   ModelQuota,
   ProviderConfig,
   ProviderStatus,
+  AcpAgentProviderConfig,
 } from './providers/ModelDefs';
 export type {
   ModelParameterKey,
