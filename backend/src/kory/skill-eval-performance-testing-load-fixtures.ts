@@ -1,3 +1,4 @@
+import { hostOS } from '../runtime/platform';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { cpus, release } from 'node:os';
@@ -2709,7 +2710,7 @@ for (const term of QUERIES) {
 const identity = {
   runtime: 'Bun',
   runtimeVersion: Bun.version,
-  platform: process.platform,
+  platform: hostOS(),
   architecture: process.arch,
   cpuModel: cpus()[0]?.model || 'unknown',
   cpuCount: cpus().length,
@@ -3567,7 +3568,7 @@ async function scoreLoadTest(root: string): Promise<SkillEvalDeterministicScore>
     identity !== undefined &&
     identity.runtime === 'Bun' &&
     identity.runtimeVersion === Bun.version &&
-    identity.platform === process.platform &&
+    identity.platform === hostOS() &&
     identity.architecture === process.arch &&
     identity.cpuModel === (cpus()[0]?.model ?? 'unknown') &&
     identity.osRelease === release() &&

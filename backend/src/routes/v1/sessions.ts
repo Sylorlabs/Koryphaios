@@ -333,7 +333,15 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
     async ({ request, params: { id }, body }) => {
       if (!requireLocalRouteAuth(request)) throw new AuthenticationError('Unauthorized');
       const { kory, wsManager } = getContext();
-      const steering = body?.purpose === 'steer';
+      // Steering no longer cancels: a user send during a live run is queued
+      // server-side and admitted at the run's next checkpoint (see
+      // docs/architecture/transcript-integrity.md, "A live run is steered at a
+      // checkpoint"). Every cancel here is therefore a hard stop. Old clients
+      // may still send `purpose: 'steer'`; it is accepted and treated as a plain
+      // cancel, and logged so the stale caller shows up in diagnostics.
+      if (body?.purpose === 'steer') {
+        serverLog.info({ sessionId: id }, 'Legacy cancel purpose "steer" treated as a plain cancel');
+      }
       // Stop the turn first. Goal bookkeeping and queued-job cleanup are
       // follow-up work; they must never delay the user's stop response.
       await kory.cancelSessionWorkers(id);
@@ -343,23 +351,18 @@ export const sessionRoutes = new Elysia({ prefix: '/api/sessions' })
       void import('../../queue/workers/llm-worker')
         .then(({ cancelLLMJobsForSession }) => cancelLLMJobsForSession(id))
         .catch(() => undefined);
-      // A steer is an intentional cancel-and-continuation handoff. Do not put a
-      // visible "Session cancelled" banner between the partial response and the
-      // replacement instruction; the authoritative run.state still records the
-      // old run as cancelled before the new run is admitted.
-      if (!steering) {
-        wsManager.broadcastToSession(id, {
-          type: 'system.info',
-          payload: { message: 'Session cancelled' },
-          timestamp: Date.now(),
-          sessionId: id,
-        });
-      }
-      return { ok: true, message: steering ? 'Session ready for steering' : 'Session cancelled' };
+      wsManager.broadcastToSession(id, {
+        type: 'system.info',
+        payload: { message: 'Session cancelled' },
+        timestamp: Date.now(),
+        sessionId: id,
+      });
+      return { ok: true, message: 'Session cancelled' };
     },
     {
       body: t.Optional(
         t.Object({
+          // Legacy only: pre-queue clients sent 'steer'. Accepted, never acted on.
           purpose: t.Optional(t.Literal('steer')),
         }),
       ),
