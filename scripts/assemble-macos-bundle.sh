@@ -128,10 +128,12 @@ echo "Bundle assembled: $APP_BUNDLE"
 SIGN_IDENTITY="${APPLE_SIGNING_IDENTITY:--}"
 echo "Code signing with identity: ${SIGN_IDENTITY}"
 
-codesign --force --deep --strict --sign "$SIGN_IDENTITY" \
-  --options runtime \
-  --entitlements - \
-  "$APP_BUNDLE" <<'ENTITLEMENTS'
+# codesign cannot read entitlements from stdin ("-" or /dev/stdin fail with
+# "cannot read entitlement data"), so write them to a file it can open.
+ENTITLEMENTS_DIR=$(mktemp -d)
+trap 'rm -rf "$ENTITLEMENTS_DIR"' EXIT
+ENTITLEMENTS_FILE="$ENTITLEMENTS_DIR/entitlements.plist"
+cat > "$ENTITLEMENTS_FILE" <<'ENTITLEMENTS'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -149,6 +151,11 @@ codesign --force --deep --strict --sign "$SIGN_IDENTITY" \
 </dict>
 </plist>
 ENTITLEMENTS
+
+codesign --force --deep --strict --sign "$SIGN_IDENTITY" \
+  --options runtime \
+  --entitlements "$ENTITLEMENTS_FILE" \
+  "$APP_BUNDLE"
 
 codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
 echo "Code signature verified."

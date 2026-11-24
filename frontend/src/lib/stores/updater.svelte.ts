@@ -114,7 +114,10 @@ function createUpdaterStore() {
     }
 
     checking = true;
-    error = null;
+    // A silent background check must not clear or set the error the install
+    // dialog shows: a transient network failure there would otherwise read as
+    // "Update failed" and disable Install until the next successful check.
+    if (!silent) error = null;
 
     try {
       const [tauriCheck, activityResult] = await Promise.allSettled([
@@ -159,10 +162,11 @@ function createUpdaterStore() {
       return info;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-      error = errorMsg;
-
       if (!silent) {
+        error = errorMsg;
         console.error('Failed to check for updates:', err);
+      } else {
+        console.warn('Background update check failed:', errorMsg);
       }
 
       return null;

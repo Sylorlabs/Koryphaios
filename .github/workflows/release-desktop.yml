@@ -430,7 +430,11 @@ jobs:
         run: |
           set -euo pipefail
           BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
-          for package in "$BUNDLE_DIR"/deb/*.deb "$BUNDLE_DIR"/rpm/*.rpm; do
+          # tauri.conf.json sets createUpdaterArtifacts=false, so the bundler does
+          # not sign anything. Every updater package, AppImage included, is signed
+          # here with the same key the manifest verifies against.
+          test "$(find "$BUNDLE_DIR/appimage" -name '*.AppImage' | wc -l)" -eq 1
+          for package in "$BUNDLE_DIR"/deb/*.deb "$BUNDLE_DIR"/rpm/*.rpm "$BUNDLE_DIR"/appimage/*.AppImage; do
             test -s "$package"
             npx @tauri-apps/cli signer sign \
               --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
@@ -438,8 +442,7 @@ jobs:
               "$package"
             test -s "$package.sig"
           done
-          test "$(find "$BUNDLE_DIR/appimage" -name '*.AppImage' | wc -l)" -gt 0
-          test "$(find "$BUNDLE_DIR/appimage" -name '*.AppImage.sig' | wc -l)" -gt 0
+          test "$(find "$BUNDLE_DIR/appimage" -name '*.AppImage.sig' | wc -l)" -eq 1
       - uses: actions/upload-artifact@v7
         with:
           name: linux-installer
@@ -558,8 +561,16 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     needs: [preflight, publish-release-assets]
+    env:
+      # Oldest installed build that must be offered this release. v0.1.0 is the
+      # first public build, and its updater trusts the same key and endpoint.
+      MIN_UPDATE_SOURCE_VERSION: '0.1.0'
     steps:
-      - name: Generate and upload latest.json
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Generate, verify, and upload latest.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.preflight.outputs.tag }}
@@ -579,9 +590,15 @@ jobs:
             case "$base_name" in
               *aarch64*.app.tar.gz) platform="darwin-aarch64" ;;
               *x86_64*.app.tar.gz|*x64*.app.tar.gz) platform="darwin-x86_64" ;;
-              *amd64*.AppImage|*x86_64*.AppImage) platform="linux-x86_64-appimage" ;;
+              *amd64*.AppImage|*x86_64*.AppImage)
+                platform="linux-x86_64-appimage"
+                # The generic key is the updater's fallback when no installer key matches.
+                PLATFORMS=$(echo "$PLATFORMS" | jq \
+                  --arg s "$sig_content" --arg u "$url" \
+                  '.["linux-x86_64"] = {signature: $s, url: $u}')
+                ;;
               *amd64*.deb|*x86_64*.deb) platform="linux-x86_64-deb" ;;
-              *amd64*.rpm|*x86_64*.rpm) platform="linux-x86_64-rpm" ;;
+              *x86_64*.rpm) platform="linux-x86_64-rpm" ;;
               *x64-setup*.exe|*-setup*.exe) platform="windows-x86_64" ;;
               *.dmg) continue ;;
               *.msi)
@@ -595,14 +612,6 @@ jobs:
               '.[$p] = {signature: $s, url: $u}')
           done
 
-          for required in darwin-aarch64 darwin-x86_64 windows-x86_64 \
-            linux-x86_64-appimage linux-x86_64-deb linux-x86_64-rpm; do
-            if [ "$(echo "$PLATFORMS" | jq --arg p "$required" 'has($p)')" != "true" ]; then
-              echo "::error::Missing required updater platform $required"
-              exit 1
-            fi
-          done
-
           RELEASE_INFO=$(gh release view "$TAG" --repo "$REPO" --json body,createdAt,isDraft)
           [ "$(echo "$RELEASE_INFO" | jq -r .isDraft)" = "true" ]
           NOTES=$(echo "$RELEASE_INFO" | jq -r '.body // "Release"')
@@ -614,25 +623,53 @@ jobs:
             --argjson platforms "$PLATFORMS" \
             '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
             > latest.json
-          jq -e \
-            '.version and (.platforms | keys | length == 6) and ([.platforms[].signature | length > 0] | all)' \
-            latest.json >/dev/null
+
+          # Gate on the manifest contract before anything is uploaded: every
+          # required platform, every URL naming an uploaded asset of this tag,
+          # every signature made by the key the shipped apps trust, and an
+          # update offered to the oldest build still in the wild.
+          gh release view "$TAG" --repo "$REPO" --json assets > release-assets.json
+          bun run scripts/verify-updater-manifest.ts latest.json \
+            --expect-version "$VERSION" \
+            --repo "$REPO" \
+            --tag "$TAG" \
+            --assets release-assets.json \
+            --tauri-conf desktop/src-tauri/tauri.conf.json \
+            --newer-than "$MIN_UPDATE_SOURCE_VERSION"
+
           gh release upload "$TAG" latest.json --clobber --repo "$REPO"
 
   draft-ready:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [preflight, publish-updater-manifest]
+    env:
+      MIN_UPDATE_SOURCE_VERSION: '0.1.0'
     steps:
+      - uses: actions/checkout@v6
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
       - name: Verify complete draft for packaged smoke testing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
           RELEASE=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,assets)
           [ "$(echo "$RELEASE" | jq -r .isDraft)" = "true" ]
           echo "$RELEASE" | jq -e '[.assets[].name] | index("latest.json") != null' >/dev/null
+          # Verify the manifest as uploaded, not the copy built in the previous job.
+          echo "$RELEASE" > release-assets.json
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir . --clobber
+          bun run scripts/verify-updater-manifest.ts latest.json \
+            --expect-version "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$TAG" \
+            --assets release-assets.json \
+            --tauri-conf desktop/src-tauri/tauri.conf.json \
+            --newer-than "$MIN_UPDATE_SOURCE_VERSION"
           echo "Draft $TAG is complete. Packaged App Smoke Test will promote it after native checks."
 
   release-summary:
