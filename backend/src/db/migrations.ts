@@ -2210,7 +2210,7 @@ export const MIGRATIONS: Migration[] = [
     `,
   },
   {
-    version: '0060',
+    version: '0061',
     description: 'Persist inline review comments on a chat diff',
     up: `
       CREATE TABLE IF NOT EXISTS session_review_comments (
