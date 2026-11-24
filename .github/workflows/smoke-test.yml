@@ -55,8 +55,10 @@ jobs:
             TAG="$SOURCE_REF"
             PROMOTE=true
           else
-            echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "promote=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "should_run=false"
+              echo "promote=false"
+            } >> "$GITHUB_OUTPUT"
             echo "Source release workflow did not succeed; smoke test will not run"
             exit 0
           fi
@@ -84,8 +86,10 @@ jobs:
           case "$TAG" in
             v*) ;;
             *)
-              echo "should_run=false" >> "$GITHUB_OUTPUT"
-              echo "promote=false" >> "$GITHUB_OUTPUT"
+              {
+                echo "should_run=false"
+                echo "promote=false"
+              } >> "$GITHUB_OUTPUT"
               echo "Resolved source '$TAG' is not a release tag"
               exit 0
               ;;
@@ -97,9 +101,11 @@ jobs:
             exit 1
           fi
 
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "should_run=true" >> "$GITHUB_OUTPUT"
-          echo "promote=$PROMOTE" >> "$GITHUB_OUTPUT"
+          {
+            echo "tag=$TAG"
+            echo "should_run=true"
+            echo "promote=$PROMOTE"
+          } >> "$GITHUB_OUTPUT"
 
   smoke-windows:
     needs: resolve-tag
@@ -317,7 +323,7 @@ jobs:
           echo "APP_PID=$APP_PID" >> "$GITHUB_ENV"
 
           HEALTHY=false
-          for ELAPSED in $(seq 2 2 100); do
+          for _ in $(seq 2 2 100); do
             sleep 2
             kill -0 "$APP_PID" 2>/dev/null || { cat smoke-evidence/appimage.log; exit 1; }
             if [ -f "$ACTIVE_PORT" ]; then
@@ -353,8 +359,92 @@ jobs:
           [ -z "${APP_PID:-}" ] || kill "$APP_PID" 2>/dev/null || true
           pkill -f "koryphaios-backend" 2>/dev/null || true
 
+  smoke-linux-deb:
+    needs: resolve-tag
+    if: needs.resolve-tag.outputs.should_run == 'true'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - name: Install packaged-runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl xvfb libwebkit2gtk-4.1-0 libgtk-3-0 \
+            libayatana-appindicator3-1
+
+      - name: Download Linux DEB from draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern '*.deb' --dir . --clobber
+          DEB=$(find . -maxdepth 1 -name '*.deb' -print -quit)
+          test -s "$DEB"
+          echo "DEB_PATH=$DEB" >> "$GITHUB_ENV"
+
+      - name: Install DEB and resolve the app binary
+        run: |
+          set -euo pipefail
+          sudo dpkg -i "$DEB_PATH"
+          PACKAGE_NAME=$(dpkg-deb -f "$DEB_PATH" Package)
+          APP_EXE=$(dpkg -L "$PACKAGE_NAME" | awk '/\/(Koryphaios|koryphaios)$/ { print; exit }')
+          test -x "$APP_EXE"
+          echo "APP_EXE=$APP_EXE" >> "$GITHUB_ENV"
+
+      - name: Launch DEB install and verify bundled backend
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-evidence
+          DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/com.sylorlabs.koryphaios"
+          ACTIVE_PORT="$DATA_DIR/.koryphaios/.active-port.json"
+          PORT=3001
+          WEBKIT_DISABLE_COMPOSITING_MODE=1 \
+            xvfb-run -a "$APP_EXE" >smoke-evidence/deb.log 2>&1 &
+          APP_PID=$!
+          echo "APP_PID=$APP_PID" >> "$GITHUB_ENV"
+
+          HEALTHY=false
+          for _ in $(seq 2 2 100); do
+            sleep 2
+            kill -0 "$APP_PID" 2>/dev/null || { cat smoke-evidence/deb.log; exit 1; }
+            if [ -f "$ACTIVE_PORT" ]; then
+              PORT=$(python3 -c "import json; print(json.load(open('$ACTIVE_PORT')).get('port', 3001))" 2>/dev/null || echo 3001)
+            fi
+            RESPONSE=$(curl -s --max-time 3 "http://127.0.0.1:$PORT/api/health" || true)
+            if [ -n "$RESPONSE" ] && [ "$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("ok", False))' 2>/dev/null || echo False)" = "True" ]; then
+              echo "Bundled backend healthy on port $PORT"
+              HEALTHY=true
+              break
+            fi
+          done
+          [ "$HEALTHY" = "true" ]
+
+      - name: Capture packaged-app logs
+        if: always()
+        run: |
+          mkdir -p smoke-evidence
+          dpkg-deb -I "$DEB_PATH" > smoke-evidence/deb-control.txt 2>/dev/null || true
+          LOG_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/com.sylorlabs.koryphaios/logs"
+          [ ! -d "$LOG_DIR" ] || cp -R "$LOG_DIR" smoke-evidence/logs
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: smoke-evidence-linux-deb
+          path: smoke-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        run: |
+          [ -z "${APP_PID:-}" ] || kill "$APP_PID" 2>/dev/null || true
+          pkill -f "koryphaios-backend" 2>/dev/null || true
+
   smoke-summary:
-    needs: [resolve-tag, smoke-windows, smoke-macos, smoke-linux]
+    needs: [resolve-tag, smoke-windows, smoke-macos, smoke-linux, smoke-linux-deb]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -365,12 +455,14 @@ jobs:
             exit 0
           fi
           echo "Packaged smoke results for ${{ needs.resolve-tag.outputs.tag }}"
-          echo "Windows: ${{ needs.smoke-windows.result }}"
-          echo "macOS:   ${{ needs.smoke-macos.result }}"
-          echo "Linux:   ${{ needs.smoke-linux.result }}"
+          echo "Windows:   ${{ needs.smoke-windows.result }}"
+          echo "macOS:     ${{ needs.smoke-macos.result }}"
+          echo "Linux:     ${{ needs.smoke-linux.result }}"
+          echo "Linux DEB: ${{ needs.smoke-linux-deb.result }}"
           if [ "${{ needs.smoke-windows.result }}" != "success" ] || \
              [ "${{ needs.smoke-macos.result }}" != "success" ] || \
-             [ "${{ needs.smoke-linux.result }}" != "success" ]; then
+             [ "${{ needs.smoke-linux.result }}" != "success" ] || \
+             [ "${{ needs.smoke-linux-deb.result }}" != "success" ]; then
             echo "::error::At least one packaged desktop smoke test failed; release remains draft"
             exit 1
           fi
@@ -484,7 +576,7 @@ jobs:
           EXPECTED_VERSION=${EXPECTED_VERSION#v}
           ACTIVE_PORT="$HOME/Library/Application Support/com.sylorlabs.koryphaios/.koryphaios/.active-port.json"
           open /Applications/Koryphaios.app
-          for ELAPSED in $(seq 5 5 1500); do
+          for _ in $(seq 5 5 1500); do
             sleep 5
             [ -f "$ACTIVE_PORT" ] || continue
             PORT=$(python3 -c "import json; print(json.load(open('$ACTIVE_PORT')).get('port', 3001))" 2>/dev/null || echo 3001)
@@ -541,7 +633,7 @@ jobs:
           EXPECTED_VERSION=${EXPECTED_VERSION#v}
           ACTIVE_PORT="${XDG_DATA_HOME:-$HOME/.local/share}/com.sylorlabs.koryphaios/.koryphaios/.active-port.json"
           WEBKIT_DISABLE_COMPOSITING_MODE=1 xvfb-run -a ./Koryphaios-upgrade-test.AppImage >upgrade.log 2>&1 &
-          for ELAPSED in $(seq 5 5 1800); do
+          for _ in $(seq 5 5 1800); do
             sleep 5
             [ -f "$ACTIVE_PORT" ] || continue
             PORT=$(python3 -c "import json; print(json.load(open('$ACTIVE_PORT')).get('port', 3001))" 2>/dev/null || echo 3001)
@@ -597,7 +689,7 @@ jobs:
           EXPECTED_VERSION=${EXPECTED_VERSION#v}
           ACTIVE_PORT="${XDG_DATA_HOME:-$HOME/.local/share}/com.sylorlabs.koryphaios/.koryphaios/.active-port.json"
           WEBKIT_DISABLE_COMPOSITING_MODE=1 xvfb-run -a "$APP_EXE" >upgrade.log 2>&1 &
-          for ELAPSED in $(seq 5 5 1500); do
+          for _ in $(seq 5 5 1500); do
             sleep 5
             [ -f "$ACTIVE_PORT" ] || continue
             PORT=$(python3 -c "import json; print(json.load(open('$ACTIVE_PORT')).get('port', 3001))" 2>/dev/null || echo 3001)

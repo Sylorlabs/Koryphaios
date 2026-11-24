@@ -1,8 +1,9 @@
 name: Prepare Release
 
 # A release is intentional: version files are prepared in source control first,
-# then `/update` (or a manual dispatch) tags those exact bytes. This workflow
-# never silently increments a version and never commits generated version bumps.
+# CI must pass for the exact commit, then `/update` (or a manual dispatch) tags
+# those exact bytes. This workflow never silently increments a version and never
+# commits generated version bumps.
 #
 # GITHUB_TOKEN tag pushes do not start a second workflow automatically, so the
 # desktop release workflow is dispatched explicitly on the new tag.
@@ -22,6 +23,7 @@ on:
 jobs:
   check-and-tag:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     permissions:
       contents: write
       actions: write
@@ -39,6 +41,13 @@ jobs:
           COMMIT_MSG: ${{ github.event.head_commit.message || '' }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            case "$GITHUB_REF" in
+              refs/heads/master|refs/heads/main) ;;
+              *)
+                echo "::error::Manual release preparation must run on master or main, got $GITHUB_REF"
+                exit 1
+                ;;
+            esac
             echo "should_release=true" >> "$GITHUB_OUTPUT"
             echo "Manual release preparation requested"
           elif printf '%s' "$COMMIT_MSG" | grep -q '/update'; then
@@ -106,6 +115,36 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "TAG=$TAG" >> "$GITHUB_ENV"
           echo "Prepared release: $TAG"
+
+      - name: Require a successful CI run for this commit
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 50); do
+            RUNS=$(gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+              -f head_sha="$GITHUB_SHA" -f per_page=20)
+            if [ "$(echo "$RUNS" | jq '[.workflow_runs[] | select(.status == "completed" and .conclusion == "success")] | length')" -gt 0 ]; then
+              echo "CI passed for $GITHUB_SHA"
+              exit 0
+            fi
+            ACTIVE=$(echo "$RUNS" | jq -r '[.workflow_runs[] | select(.status != "completed")] | length')
+            FAILED=$(echo "$RUNS" | jq -r '[.workflow_runs[] | select(.status == "completed" and .conclusion != "success")] | length')
+            if [ "$ACTIVE" -eq 0 ] && [ "$FAILED" -gt 0 ]; then
+              echo "::error::CI failed for $GITHUB_SHA; refusing to create $TAG"
+              exit 1
+            fi
+            if [ "$(echo "$RUNS" | jq '.workflow_runs | length')" -eq 0 ] && [ "$attempt" -ge 5 ]; then
+              echo "::error::No CI run exists for $GITHUB_SHA; refusing to create $TAG"
+              exit 1
+            fi
+            echo "Waiting for CI to pass ($attempt/50)"
+            sleep 60
+          done
+          echo "::error::No successful CI run for $GITHUB_SHA; refusing to create $TAG"
+          exit 1
 
       - name: Require a successful shell build for this commit
         if: steps.check.outputs.should_release == 'true'

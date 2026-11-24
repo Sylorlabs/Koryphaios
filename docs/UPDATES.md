@@ -2,6 +2,8 @@
 
 Koryphaios uses Tauri's updater plugin with a static manifest hosted on GitHub Releases:
 
+For the macOS release runbook, see [Releasing an update from a Mac](RELEASING_FROM_MAC.md).
+
 ```
 https://github.com/Sylorlabs/Koryphaios/releases/latest/download/latest.json
 ```
@@ -26,8 +28,8 @@ Downloads have a 30-minute timeout. This accommodates the current AppImage size 
 
 The title-bar pill can appear before a release is installable. The local backend polls the configured release workflows through `GET /api/updates/status` and reports one of two phases:
 
-- **preparing** — `auto-release.yml` was triggered by a `/update` commit or a manual **Prepare Release** dispatch, and the version is read from `tauri.conf.json` at the run's commit.
-- **building** — `release-desktop.yml` is queued or in progress on a `v*` tag.
+- **preparing**: `auto-release.yml` was triggered by a `/update` commit or a manual **Prepare Release** dispatch, and the version is read from `tauri.conf.json` at the run's commit.
+- **building**: `release-desktop.yml` is queued or in progress on a `v*` tag.
 
 Only queued/in-progress runs newer than the running build are reported. A failed probe is a soft miss and never an update. The signed `latest.json` manifest remains the only source of truth for installability; a preparing/building pill opens the Actions run and cannot install anything.
 
@@ -55,7 +57,7 @@ CI generates `latest.json` from signed release assets. Linux entries are package
 | Linux DEB           | `linux-x86_64-deb`      | `*.deb`                |
 | Linux RPM           | `linux-x86_64-rpm`      | `*.rpm`                |
 
-Every updater artifact has a non-empty `.sig` generated with `TAURI_SIGNING_PRIVATE_KEY`. A DEB or RPM target must never point to AppImage bytes.
+`createUpdaterArtifacts` stays disabled in the shared Tauri config so a local build does not require the private key. The Linux release job signs the AppImage explicitly with `TAURI_SIGNING_PRIVATE_KEY`, alongside the DEB and RPM. Every updater artifact has a non-empty `.sig`. A DEB or RPM target must never point to AppImage bytes.
 
 ## Release process
 
@@ -69,14 +71,14 @@ Versions are prepared in source control before release. These files must agree:
 
 A push containing `/update` in its commit message or a manual **Prepare Release** dispatch performs the following sequence:
 
-1. Validate version alignment and confirm the version tag does not exist.
+1. Validate version alignment, require a successful `ci.yml` run for the same commit, and confirm the version tag does not exist.
 2. Resolve a successful all-platform `build-shell.yml` run whose shell-relevant source exactly matches the prepared commit.
 3. Create and push the immutable version tag only after shell preflight succeeds.
 4. Dispatch `release-desktop.yml` on that tag.
 5. Revalidate the tag, signing key, versions, and exact shell-build provenance.
 6. Assemble and sign Windows, macOS, AppImage, DEB, and RPM packages.
 7. Upload assets and `latest.json` to a draft GitHub release.
-8. Fresh-install and launch the candidate packages on Windows, macOS, and Linux.
+8. Fresh-install and launch the candidate packages on Windows, macOS, Linux AppImage, and Linux DEB.
 9. Promote the draft only when those packaged smoke tests pass.
 10. Install public v0.1.0 packages, discover the new public release, download it, verify it, install it, and confirm relaunch into the expected version on Windows, macOS, Linux AppImage, and Linux DEB.
 
@@ -107,20 +109,21 @@ A repository-level `SHELL_BUILD_RUN_ID` variable is not required. Both release w
 
 ## Files involved
 
-| File                                                     | Purpose                                                                  |
-| -------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `.github/workflows/build-shell.yml`                      | Builds native shell binaries on all supported platforms                  |
-| `.github/workflows/auto-release.yml`                     | Validates the prepared release and creates the tag after shell preflight |
-| `.github/workflows/release-desktop.yml`                  | Assembles, signs, uploads, and generates `latest.json`                   |
-| `.github/workflows/smoke-test.yml`                       | Fresh-install smoke tests, promotion, and old-to-new upgrade checks      |
-| `scripts/assemble-windows-installer.sh`                  | Builds the custom updater-compatible NSIS installer                      |
-| `desktop/src-tauri/tauri.conf.json`                      | Updater endpoint, public key, and packaged version                       |
-| `desktop/src-tauri/src/lib.rs`                           | Native check, download, verification, installation, and restart commands |
-| `frontend/src/lib/stores/updater.svelte.ts`              | Launch/manual/periodic checks and UI state                               |
-| `frontend/src/lib/components/UpdateDialog.svelte`        | User-confirmed installation UI                                           |
-| `frontend/src/lib/components/LaunchUpdateOverlay.svelte` | Blocking launch-time install UI                                          |
-| `backend/src/services/update-release-status.ts`          | Cached GitHub Actions release-activity probe                             |
-| `backend/src/routes/v1/updates.ts`                       | `GET /api/updates/status`                                                |
+| File                                                     | Purpose                                                                                       |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `.github/workflows/ci.yml`                               | Type checks, tests, workflow lint, browser smoke, and build gate before a release             |
+| `.github/workflows/build-shell.yml`                      | Builds native shell binaries on all supported platforms                                       |
+| `.github/workflows/auto-release.yml`                     | Validates the prepared release and creates the tag after CI and shell preflight               |
+| `.github/workflows/release-desktop.yml`                  | Assembles, signs, uploads, and generates `latest.json`                                        |
+| `.github/workflows/smoke-test.yml`                       | Fresh-install smoke tests for Windows, macOS, AppImage and DEB, promotion, and upgrade checks |
+| `scripts/assemble-windows-installer.sh`                  | Builds the custom updater-compatible NSIS installer                                           |
+| `desktop/src-tauri/tauri.conf.json`                      | Updater endpoint, public key, and packaged version                                            |
+| `desktop/src-tauri/src/lib.rs`                           | Native check, download, verification, installation, and restart commands                      |
+| `frontend/src/lib/stores/updater.svelte.ts`              | Launch/manual/periodic checks and UI state                                                    |
+| `frontend/src/lib/components/UpdateDialog.svelte`        | User-confirmed installation UI                                                                |
+| `frontend/src/lib/components/LaunchUpdateOverlay.svelte` | Blocking launch-time install UI                                                               |
+| `backend/src/services/update-release-status.ts`          | Cached GitHub Actions release-activity probe                                                  |
+| `backend/src/routes/v1/updates.ts`                       | `GET /api/updates/status`                                                                     |
 
 ## Troubleshooting
 

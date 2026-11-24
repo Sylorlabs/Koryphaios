@@ -115,11 +115,27 @@ jobs:
             exit 1
           fi
 
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "shell_run_id=$SHELL_BUILD_RUN_ID" >> "$GITHUB_OUTPUT"
-          echo "shell_sha=$SHELL_SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$VERSION"
+            echo "tag=$TAG"
+            echo "shell_run_id=$SHELL_BUILD_RUN_ID"
+            echo "shell_sha=$SHELL_SHA"
+          } >> "$GITHUB_OUTPUT"
           echo "Release preflight passed for $TAG using shell run $SHELL_BUILD_RUN_ID at $SHELL_SHA"
+
+      - name: Require a successful CI run for the tagged commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RUNS=$(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f head_sha="$GITHUB_SHA" -f status=success -f per_page=1)
+          if [ "$(echo "$RUNS" | jq '.workflow_runs | length')" -eq 0 ]; then
+            echo "::error::No successful CI run exists for $GITHUB_SHA; refusing to release"
+            exit 1
+          fi
+          echo "CI passed for $GITHUB_SHA"
 
   prepare-release:
     runs-on: ubuntu-latest
@@ -416,7 +432,7 @@ jobs:
         with:
           name: backend-x86_64-unknown-linux-gnu
           path: desktop/src-tauri/embedded-backend
-      - name: Build signed Linux bundles
+      - name: Build Linux bundles
         working-directory: ./desktop
         run: bun run tauri build
         env:
@@ -430,7 +446,14 @@ jobs:
         run: |
           set -euo pipefail
           BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
-          for package in "$BUNDLE_DIR"/deb/*.deb "$BUNDLE_DIR"/rpm/*.rpm; do
+          # createUpdaterArtifacts stays off in the shared config so a local
+          # build does not require the private key. The release job therefore
+          # signs every updater payload explicitly, including the AppImage that
+          # Tauri would otherwise sign during the build.
+          for package in \
+            "$BUNDLE_DIR"/deb/*.deb \
+            "$BUNDLE_DIR"/rpm/*.rpm \
+            "$BUNDLE_DIR"/appimage/*.AppImage; do
             test -s "$package"
             npx @tauri-apps/cli signer sign \
               --private-key "$TAURI_SIGNING_PRIVATE_KEY" \
@@ -438,8 +461,6 @@ jobs:
               "$package"
             test -s "$package.sig"
           done
-          test "$(find "$BUNDLE_DIR/appimage" -name '*.AppImage' | wc -l)" -gt 0
-          test "$(find "$BUNDLE_DIR/appimage" -name '*.AppImage.sig' | wc -l)" -gt 0
       - uses: actions/upload-artifact@v7
         with:
           name: linux-installer
@@ -613,9 +634,17 @@ jobs:
             --argjson platforms "$PLATFORMS" \
             '{version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms}' \
             > latest.json
-          jq -e \
-            '.version and (.platforms | keys | length == 6) and ([.platforms[].signature | length > 0] | all)' \
-            latest.json >/dev/null
+          jq -e --arg version "$VERSION" '
+            .version == $version and
+            (.platforms | keys | length == 6) and
+            ([.platforms[].signature | length > 0] | all) and
+            (.platforms["darwin-aarch64"].url | endswith(".app.tar.gz")) and
+            (.platforms["darwin-x86_64"].url | endswith(".app.tar.gz")) and
+            (.platforms["windows-x86_64"].url | endswith(".exe")) and
+            (.platforms["linux-x86_64-appimage"].url | endswith(".AppImage")) and
+            (.platforms["linux-x86_64-deb"].url | endswith(".deb")) and
+            (.platforms["linux-x86_64-rpm"].url | endswith(".rpm"))
+          ' latest.json >/dev/null
           gh release upload "$TAG" latest.json --clobber --repo "$REPO"
 
   draft-ready:

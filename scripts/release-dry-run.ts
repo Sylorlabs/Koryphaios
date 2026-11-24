@@ -43,10 +43,23 @@ function git(...gitArgs: string[]): string {
 
 function gitOrNull(...gitArgs: string[]): string | null {
   try {
-    return git(...gitArgs);
+    return execFileSync('git', gitArgs, {
+      cwd: PROJECT_ROOT,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
   } catch {
     return null;
   }
+}
+
+function resolveComparisonRef(): string {
+  const upstream = gitOrNull('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}');
+  if (upstream) return upstream;
+  for (const candidate of ['origin/master', 'origin/main']) {
+    if (gitOrNull('rev-parse', '--verify', candidate)) return candidate;
+  }
+  return 'HEAD';
 }
 
 function readJson(rel: string): Record<string, unknown> | null {
@@ -158,10 +171,23 @@ log('');
 // ── 4. Would CI even see this commit? ─────────────────────────────────────────
 log('4. Pushed state', colors.bold);
 const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
-const counts = git('rev-list', '--left-right', '--count', `HEAD...origin/${branch}`);
-const [ahead, behind] = counts.split(/\s+/).map(Number);
-if (ahead > 0) ok(`${ahead} commit(s) ahead of origin/${branch}`);
-else bad(`nothing to push — HEAD is not ahead of origin/${branch}`);
+const comparisonRef = resolveComparisonRef();
+let ahead = 0;
+let pushedKnown = false;
+if (comparisonRef === 'HEAD') {
+  warn('no origin branch is available; cannot check pushed state');
+} else {
+  const counts = git('rev-list', '--left-right', '--count', `HEAD...${comparisonRef}`);
+  const [aheadCount, behindCount] = counts.split(/\s+/).map(Number);
+  ahead = aheadCount;
+  pushedKnown = true;
+  if (ahead > 0) ok(`${ahead} commit(s) ahead of ${comparisonRef}`);
+  else bad(`nothing to push — HEAD is not ahead of ${comparisonRef}`);
+  if (behindCount > 0) warn(`${behindCount} commit(s) behind ${comparisonRef}`);
+  if (comparisonRef !== `origin/${branch}`) {
+    warn(`current branch has no upstream; comparing against ${comparisonRef}`);
+  }
+}
 
 const dirty = git('status', '--porcelain');
 if (dirty) {
@@ -172,8 +198,8 @@ if (dirty) {
 }
 log('');
 
-// ── 5. Shell-build provenance (cannot be checked locally) ──────────────────────
-log('5. Shell-build provenance', colors.bold);
+// ── 5. CI and shell-build provenance (cannot be checked locally) ───────────────
+log('5. CI and shell-build provenance', colors.bold);
 const SHELL_PATHS = [
   'desktop/src-tauri/Cargo.toml',
   'desktop/src-tauri/Cargo.lock',
@@ -183,7 +209,10 @@ const SHELL_PATHS = [
   'desktop/src-tauri/icons',
   '.github/workflows/build-shell.yml',
 ];
-const unpushed = gitOrNull('diff', '--name-only', `origin/${branch}..HEAD`) ?? '';
+const unpushed =
+  comparisonRef === 'HEAD'
+    ? ''
+    : (gitOrNull('diff', '--name-only', `${comparisonRef}..HEAD`) ?? '');
 const touched = SHELL_PATHS.filter((p) => unpushed.split('\n').includes(p));
 if (touched.length > 0) {
   warn(`shell-relevant source changed in these commits: ${touched.join(', ')}`);
@@ -191,6 +220,7 @@ if (touched.length > 0) {
 } else {
   ok('no shell-relevant source changed — an existing build-shell run stays valid');
 }
+warn('CI success is checked by the workflow for the exact commit');
 log('');
 
 // ── 6. Signer availability ─────────────────────────────────────────────────────
@@ -216,17 +246,19 @@ log('');
 const blockers: string[] = [];
 if (!aligned) blockers.push('version alignment failed');
 if (dirty) blockers.push('working tree is dirty');
-if (ahead === 0) blockers.push('nothing to push');
+if (pushedKnown && ahead === 0)
+  blockers.push(`nothing to push — HEAD is not ahead of ${comparisonRef}`);
 
 console.log(`${colors.bold}Verdict${colors.reset}`);
 if (blockers.length === 0) {
   log(`  A /update push of ${tag} would start the release pipeline.`, colors.green);
   log(
-    `  ${colors.dim}It would still wait for a matching build-shell.yml run.${colors.reset}`,
+    `  ${colors.dim}It would still wait for a successful ci.yml run and a matching build-shell.yml run.${colors.reset}`,
     colors.dim,
   );
 } else {
   log(`  Not ready to release:`, colors.red);
   for (const b of blockers) log(`    - ${b}`, colors.red);
+  process.exitCode = 1;
 }
 log('');

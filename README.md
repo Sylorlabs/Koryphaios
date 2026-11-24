@@ -31,9 +31,18 @@ curl.exe -fsSL https://koryphaios.com/install.ps1 | powershell.exe -NoProfile -E
 
 These commands resolve the latest published build for the supported target.
 On macOS, the script downloads a DMG to `~/Downloads`, opens it, and leaves the
-Applications drag-and-drop step to you. The current macOS build is ad-hoc
-signed, so it may require a one-time Finder control-click → Open confirmation
-until it is Developer ID signed and notarized. On Windows x64, the script
+Applications drag-and-drop step to you. The macOS build is ad-hoc signed, not
+notarized. A download made by the install script is not quarantined, so it opens
+normally. A DMG downloaded in a browser is quarantined: macOS refuses the first
+launch, and on macOS 15 and later control-click → Open no longer bypasses that.
+Allow it once in **System Settings → Privacy & Security → Open Anyway**, or clear
+the quarantine flag yourself:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Koryphaios.app
+```
+
+In-app updates are not quarantined and need no further approval. On Windows x64, the script
 downloads and opens the setup executable; the installer adds the Start-menu
 entry. On Linux x64, the script installs the AppImage executable as
 `~/.local/bin/koryphaios` (or `$XDG_BIN_HOME/koryphaios`) and does not currently
