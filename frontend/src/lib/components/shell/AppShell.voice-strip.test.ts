@@ -116,3 +116,39 @@ describe('the voice waveform strip sits above the context bar in flow', () => {
     expect(voiceRecorder.state.elapsedMs).toBe(0);
   });
 });
+
+describe('the conductor listening indicator', () => {
+  beforeEach(() => {
+    voiceRecorder.end();
+  });
+
+  it('labels a conductor capture differently from dictation', () => {
+    const { unmount } = shell();
+    voiceRecorder.setMode('conductor');
+    voiceRecorder.begin('recording', fakeAnalyser(), 1_000);
+    flushSync();
+    const el = strip();
+    expect(el.getAttribute('data-mode')).toBe('conductor');
+    expect(screen.getByTestId('voice-capture-label')).toHaveTextContent('Listening for a command');
+    expect(screen.getByTestId('voice-capture-label').getAttribute('style')).toContain('--color-info');
+    expect(el).toHaveTextContent('Listening for a voice command');
+
+    voiceRecorder.end();
+    voiceRecorder.begin('recording', fakeAnalyser(), 1_000);
+    flushSync();
+    expect(strip().getAttribute('data-mode')).toBe('dictation');
+    expect(screen.getByTestId('voice-capture-label')).toHaveTextContent('Recording');
+    expect(screen.getByTestId('voice-capture-label').getAttribute('style')).toContain('--color-error');
+    unmount();
+  });
+
+  it('keeps the conductor mode through transcription', () => {
+    const { unmount } = shell();
+    voiceRecorder.setMode('conductor');
+    voiceRecorder.begin('recording', fakeAnalyser(), 0);
+    voiceRecorder.begin('transcribing', null, 2_000);
+    flushSync();
+    expect(screen.getByTestId('voice-capture-label')).toHaveTextContent('Understanding command');
+    unmount();
+  });
+});
