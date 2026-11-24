@@ -131,6 +131,12 @@ export const DEFAULT_DESKTOP_SHORTCUTS: DesktopShortcut[] = [
     action: 'Voice mode',
     description: 'Press to record, press again to transcribe',
   },
+  {
+    id: 'voice_conductor',
+    keys: ['Mod', 'Shift', ' '],
+    action: 'Voice conductor',
+    description: 'Hold to speak a command (stop, status, new chat…)',
+  },
   { id: 'close', keys: ['Esc'], action: 'Close dialogs', description: 'Back' },
 ];
 
