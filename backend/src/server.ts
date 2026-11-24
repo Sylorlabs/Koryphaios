@@ -42,6 +42,7 @@ import { deviceRoutes } from './routes/v1/devices';
 import { sessionRoutes } from './routes/v1/sessions';
 import { messageRoutes } from './routes/v1/messages';
 import { providerRoutes } from './routes/v1/providers';
+import { agentRoutes } from './routes/v1/agents';
 import { collaborationRoutes } from './routes/collaboration';
 import { authRoutes } from './routes/v1/auth';
 import { agentSettingsRoutes } from './routes/v1/agent-settings';
@@ -111,6 +112,7 @@ const baseApp = new Elysia()
   .use(feedRoutes)
   .use(messageRoutes)
   .use(providerRoutes)
+  .use(agentRoutes)
   .use(collaborationRoutes)
   .use(deviceRoutes)
   .use(authRoutes)

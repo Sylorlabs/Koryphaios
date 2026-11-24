@@ -173,6 +173,30 @@ export interface FusionSelection {
   sidekickEffort: string | null;
 }
 
+/** Non-secret ACP agent definition carried on an `acp:<id>` provider config. Env
+ *  secret VALUES are never on this object; they live in the agent secret store. */
+export interface AcpAgentProviderConfig {
+  id: string;
+  label: string;
+  command: string;
+  args: string[];
+  /** Env variable NAMES whose values are stored in the agent secret store. */
+  envNames: string[];
+  cwdPolicy: 'workspace' | 'private';
+  permissionProfile: 'bridge-only' | 'read-only';
+  source: 'manual' | 'registry' | 'autodetect';
+  /** Last capability probe verdict; absent until the agent has been probed. */
+  probe?: {
+    ok: boolean;
+    checkedAt: number;
+    protocolVersion?: number;
+    models: string[];
+    agentName?: string;
+    agentVersion?: string;
+    error?: string;
+  };
+}
+
 export interface ProviderConfig {
   name: ProviderName;
   apiKey?: string;
@@ -197,6 +221,8 @@ export interface ProviderConfig {
    * 'verified' or drops them back to unconfigured.
    */
   lastVerificationState?: 'verified' | 'detected';
+  /** Present only on `acp:<id>` providers (user-registered ACP agents). */
+  acpAgent?: AcpAgentProviderConfig;
   /** Runtime-only: material was auto-detected (env/AWS/local server) and verified; never persisted. */
   autoDetected?: boolean;
   /** Ordered list of saved account IDs for automatic fallback on failure. */
