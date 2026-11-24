@@ -1,6 +1,9 @@
 // Koryphaios Backend Server — Bun HTTP + WebSocket server.
 // Main entry point via ElysiaJS.
 
+// Must stay the first import so the launch marker exists while the rest of the
+// import graph evaluates.
+import './runtime/startup-launch-marker';
 import 'reflect-metadata';
 import { Elysia, t } from 'elysia';
 import { cors } from '@elysiajs/cors';
@@ -17,11 +20,7 @@ import { VERSION, ID, RATE_LIMIT, COMPAT, SECURITY } from './constants';
 import { RateLimiter } from './security/rate-limit';
 import { addCorsOrigins } from './security';
 import { PROJECT_ROOT } from './runtime/paths';
-import {
-  clearStartupStatus,
-  markStartupReady,
-  reportStartupPhase,
-} from './runtime/startup-status';
+import { clearStartupStatus, markStartupReady, reportStartupPhase } from './runtime/startup-status';
 import { resolveBundleHash, isBundleHashEnforced } from './config/compat';
 import { createWebSocketHandlers } from './server/websocket-handler';
 import { stopCatalogRefresh } from './providers/catalog-refresh';
@@ -69,6 +68,7 @@ import { feedRoutes } from './routes/v1/feed';
 import { agentMessageRoutes } from './routes/v1/agent-messages';
 import { appearanceRoutes } from './routes/v1/appearance';
 import { desktopUiRoutes } from './routes/v1/desktop-ui';
+import { updateRoutes } from './routes/v1/updates';
 import { cliChatImportRoutes } from './routes/v1/cli-chat-import';
 import { errorHandlingMiddleware, errorHandler } from './middleware/error-handling';
 
@@ -136,6 +136,7 @@ const baseApp = new Elysia()
   .use(agentMessageRoutes)
   .use(appearanceRoutes)
   .use(desktopUiRoutes)
+  .use(updateRoutes)
   .use(cliChatImportRoutes);
 
 export type App = typeof baseApp;
@@ -198,7 +199,10 @@ async function main() {
   // stop is never mistaken for a crash.
   const stoppedOwnerDisplay = killOwnerDisplayProcesses();
   if (stoppedOwnerDisplay.length) {
-    serverLog.warn({ stopped: stoppedOwnerDisplay }, 'Stopped Kory operations processes on the owner desktop');
+    serverLog.warn(
+      { stopped: stoppedOwnerDisplay },
+      'Stopped Kory operations processes on the owner desktop',
+    );
   }
   // A window can also appear after startup, from a helper or an older build, so the rule is enforced
   // for as long as this server runs rather than only once at boot.
@@ -218,7 +222,9 @@ async function main() {
   // The VPS mode is explicit and fail-closed: a headless instance must never
   // appear healthy while its relay host was not actually established.
   await startRemoteInstanceHost();
-  void deviceService.initialize().catch((error) => serverLog.error({ error }, 'Device linking initialization failed'));
+  void deviceService
+    .initialize()
+    .catch((error) => serverLog.error({ error }, 'Device linking initialization failed'));
 
   // Default to 127.0.0.1 for local-only security. A network-exposed server
   // keeps the normal per-client rate limit below; a desktop loopback server

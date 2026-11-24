@@ -3,6 +3,7 @@
   import Activity from 'lucide-svelte/icons/activity';
   import ChevronDown from 'lucide-svelte/icons/chevron-down';
   import Download from 'lucide-svelte/icons/download';
+  import RefreshCw from 'lucide-svelte/icons/refresh-cw';
   import Search from 'lucide-svelte/icons/search';
   import Minus from 'lucide-svelte/icons/minus';
   import Square from 'lucide-svelte/icons/square';
@@ -361,7 +362,10 @@
       </div>
     </div>
 
-    <div class="titlebar-center hidden min-w-0 flex-1 items-center justify-center h-full" data-tauri-drag-region>
+    <div
+      class="titlebar-center hidden min-w-0 flex-1 items-center justify-center h-full"
+      data-tauri-drag-region
+    >
       <!-- Fixed to the viewport center so the project name stays in the top
            middle regardless of sidebar/panel state. -->
       {#if linkedDeviceName}
@@ -369,7 +373,9 @@
           class="titlebar-project flex items-center gap-2 truncate px-3 text-xs font-medium pointer-events-none"
           style="color: var(--color-text-secondary);"
           title={linkedDeviceName}
-        ><Monitor size={14} />{projectName}</div>
+        >
+          <Monitor size={14} />{projectName}
+        </div>
       {:else if projectStore.currentPath}
         <div
           class="titlebar-project truncate px-3 text-xs font-medium pointer-events-none"
@@ -389,27 +395,42 @@
       {:else}
         <span
           class="titlebar-project text-xs pointer-events-none"
-          style="color: var(--color-text-muted);"
-          >No project selected</span
+          style="color: var(--color-text-muted);">No project selected</span
         >
       {/if}
     </div>
 
     <!-- Right: Controls -->
     <div class="titlebar-controls flex items-center gap-1 xl:gap-1.5 min-w-0 shrink-0">
-      {#if updater.updateAvailable}
+      {#if updater.updateAvailable || updater.releaseActivity}
         <button
           type="button"
           class="flex items-center gap-1.5 px-3 py-2 transition-colors bg-[var(--color-accent)]/12 hover:bg-[var(--color-accent)]/20"
           style="color: var(--color-accent); border-radius: var(--radius-lg);"
-          onclick={() => updater.openDialog()}
+          onclick={() =>
+            updater.updateAvailable ? updater.openDialog() : updater.openReleaseRun()}
           data-tauri-drag-region="false"
-          title="Update available · v{updater.updateInfo?.version ?? ''}"
+          title={updater.updateAvailable
+            ? `Update available · v${updater.updateInfo?.version ?? ''}`
+            : updater.releaseActivity?.phase === 'building'
+              ? `GitHub Actions is building ${updater.getReleaseActivityLabel()}`
+              : 'A release is being prepared'}
+          aria-label={updater.updateAvailable
+            ? `Update available: version ${updater.updateInfo?.version ?? 'unknown'}`
+            : updater.getReleaseActivityLabel()}
         >
-          <Download size={14} />
-          <span class="titlebar-wide-label text-xs font-semibold"
-            >Update{updater.updateInfo?.version ? ` v${updater.updateInfo.version}` : ''}</span
-          >
+          {#if updater.updateAvailable}
+            <Download size={14} />
+          {:else}
+            <RefreshCw size={14} class="animate-spin" />
+          {/if}
+          <span class="titlebar-wide-label text-xs font-semibold">
+            {#if updater.updateAvailable}
+              Update{updater.updateInfo?.version ? ` v${updater.updateInfo.version}` : ''}
+            {:else}
+              {updater.getReleaseActivityLabel()}
+            {/if}
+          </span>
         </button>
       {/if}
       {#if notesEnabled}
@@ -464,8 +485,8 @@
           <span
             class="text-xs font-medium leading-none whitespace-nowrap"
             style="color: var(--color-text-secondary);"
-            >{activeAgents.length}<span class="titlebar-wide-label"
-              > agent{activeAgents.length !== 1 ? 's' : ''}</span
+            >{activeAgents.length}<span class="titlebar-wide-label">
+              agent{activeAgents.length !== 1 ? 's' : ''}</span
             ></span
           >
           <ChevronDown

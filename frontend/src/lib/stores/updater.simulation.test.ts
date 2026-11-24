@@ -13,6 +13,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 const invoke = vi.hoisted(() => vi.fn());
 const listen = vi.hoisted(() => vi.fn());
 const open = vi.hoisted(() => vi.fn());
+const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen }));
@@ -36,7 +37,19 @@ function manifest(version: string, notes = '### Fixed\n- a bug') {
 /** The store fires its launch check without awaiting it, so let the microtask
  *  queue drain before asserting on the resulting state. */
 async function settle(): Promise<void> {
-  for (let i = 0; i < 8; i++) await Promise.resolve();
+  for (let i = 0; i < 30; i++) await Promise.resolve();
+}
+
+/** One implementer for every command the store invokes. `launchAutoUpdate` is
+ *  the single launch-only permission the Rust side returns. */
+let launchAutoUpdate = false;
+function mockCheck(result: unknown): void {
+  invoke.mockImplementation(async (command: string) => {
+    if (command === 'should_auto_update_at_launch') return launchAutoUpdate;
+    if (command === 'check_for_updates') return result;
+    if (command === 'install_update') return undefined;
+    return undefined;
+  });
 }
 
 async function loadStore({ currentVersion = '0.5.0', isTauri = true, dev = false } = {}) {
@@ -71,16 +84,24 @@ beforeEach(() => {
   invoke.mockReset();
   listen.mockReset().mockResolvedValue(() => {});
   open.mockReset().mockResolvedValue(undefined);
+  launchAutoUpdate = false;
+  fetchMock
+    .mockReset()
+    .mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, data: { activity: null } }), { status: 200 }),
+    );
+  vi.stubGlobal('fetch', fetchMock);
 });
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   delete (globalThis as Record<string, unknown>).__TAURI_INTERNALS__;
 });
 
 describe('update simulation: manifest to user-visible state', () => {
   it('offers an update when the release is newer than the running build', async () => {
-    invoke.mockResolvedValue({
+    mockCheck({
       available: true,
       version: '0.6.0',
       notes: '### Fixed\n- a bug',
@@ -97,7 +118,7 @@ describe('update simulation: manifest to user-visible state', () => {
   it('stays quiet when the release is older than the running build', async () => {
     // This is the real-world 0.5.0-local vs 0.1.0-published case.
     expect(tauriWouldOfferUpdate('0.1.0', '0.5.0')).toBe(false);
-    invoke.mockResolvedValue({ available: false, version: null, notes: null, pub_date: null });
+    mockCheck({ available: false, version: null, notes: null, pub_date: null });
     const { updater } = await loadStore();
 
     expect(updater.updateAvailable).toBe(false);
@@ -107,7 +128,7 @@ describe('update simulation: manifest to user-visible state', () => {
   it('offers an update from 0.1.0 to 0.5.0 — the actual pending release', async () => {
     // Users hold 0.1.0 today. This is the comparison that must succeed.
     expect(tauriWouldOfferUpdate('0.5.0', '0.1.0')).toBe(true);
-    invoke.mockResolvedValue({
+    mockCheck({
       available: true,
       version: '0.5.0',
       notes: '### Fixed\n- a bug',
@@ -119,18 +140,58 @@ describe('update simulation: manifest to user-visible state', () => {
     expect(updater.updateInfo?.version).toBe('0.5.0');
   });
 
-  it('never auto-installs: the manifest alone must not trigger install_update', async () => {
-    invoke.mockResolvedValue({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
+  it('never auto-installs from an in-session check', async () => {
+    mockCheck({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
     const { updater } = await loadStore();
 
     // Discovery happened...
     expect(invoke).toHaveBeenCalledWith('check_for_updates');
-    // ...but nothing was installed. This is the documented guarantee.
+    // ...but an in-session check never installs. Only the launch gate can.
+    expect(invoke).not.toHaveBeenCalledWith('install_update');
+  });
+
+  it('auto-installs once when an interactive launch finds an update', async () => {
+    launchAutoUpdate = true;
+    mockCheck({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
+    const { updater } = await loadStore();
+
+    expect(invoke).toHaveBeenCalledWith('should_auto_update_at_launch');
+    expect(invoke).toHaveBeenCalledWith('install_update');
+    expect(updater.launchInstalling).toBe(true);
+  });
+
+  it('surfaces a GitHub Actions release that is still building', async () => {
+    mockCheck({ available: false, version: null, notes: null, pub_date: null });
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          data: {
+            activity: {
+              phase: 'building',
+              version: '0.6.0',
+              tag: 'v0.6.0',
+              status: 'in_progress',
+              conclusion: null,
+              runUrl: 'https://github.com/Sylorlabs/Koryphaios/actions/runs/1',
+              workflow: 'release-desktop.yml',
+              trigger: 'tag',
+              startedAt: null,
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const { updater } = await loadStore();
+
+    expect(updater.releaseActivity?.version).toBe('0.6.0');
+    expect(updater.getReleaseActivityLabel()).toBe('v0.6.0 building');
     expect(invoke).not.toHaveBeenCalledWith('install_update');
   });
 
   it('installs only after the user confirms, then restarts', async () => {
-    invoke.mockResolvedValue({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
+    mockCheck({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
     const { updater } = await loadStore();
 
     await updater.installUpdateAndRestart();
@@ -139,7 +200,7 @@ describe('update simulation: manifest to user-visible state', () => {
   });
 
   it('refuses to install when no update is available', async () => {
-    invoke.mockResolvedValue({ available: false, version: null, notes: null, pub_date: null });
+    mockCheck({ available: false, version: null, notes: null, pub_date: null });
     const { updater } = await loadStore();
 
     expect(await updater.installUpdateAndRestart()).toBe(false);
@@ -154,7 +215,7 @@ describe('update simulation: manifest to user-visible state', () => {
       handler = cb;
       return Promise.resolve(() => {});
     });
-    invoke.mockResolvedValue({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
+    mockCheck({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
     const { updater } = await loadStore();
     await vi.waitFor(() => expect(handler).toBeDefined());
 
@@ -179,7 +240,7 @@ describe('update simulation: manifest to user-visible state', () => {
       handler = cb;
       return Promise.resolve(() => {});
     });
-    invoke.mockResolvedValue({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
+    mockCheck({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
     const { updater } = await loadStore();
     await vi.waitFor(() => expect(handler).toBeDefined());
 
@@ -201,7 +262,7 @@ describe('update simulation: manifest to user-visible state', () => {
       handler = cb;
       return Promise.resolve(() => {});
     });
-    invoke.mockResolvedValue({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
+    mockCheck({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
     const { updater } = await loadStore();
     await vi.waitFor(() => expect(handler).toBeDefined());
 
@@ -219,7 +280,7 @@ describe('update simulation: manifest to user-visible state', () => {
       handler = cb;
       return Promise.resolve(() => {});
     });
-    invoke.mockResolvedValue({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
+    mockCheck({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
     const { updater } = await loadStore();
     await vi.waitFor(() => expect(handler).toBeDefined());
 
@@ -228,7 +289,7 @@ describe('update simulation: manifest to user-visible state', () => {
   });
 
   it('checks on launch so an already-running user finds out without asking', async () => {
-    invoke.mockResolvedValue({ available: false, version: null, notes: null, pub_date: null });
+    mockCheck({ available: false, version: null, notes: null, pub_date: null });
     await loadStore();
 
     expect(invoke).toHaveBeenCalledWith('check_for_updates');
@@ -237,19 +298,57 @@ describe('update simulation: manifest to user-visible state', () => {
   it('re-checks on the 30 minute cadence for users already running', async () => {
     vi.useFakeTimers();
     try {
-      invoke.mockResolvedValue({ available: false, version: null, notes: null, pub_date: null });
+      mockCheck({ available: false, version: null, notes: null, pub_date: null });
       const { updater } = await loadStore();
       const afterLaunch = invoke.mock.calls.length;
 
       vi.advanceTimersByTime(30 * 60 * 1000);
       expect(invoke.mock.calls.length).toBeGreaterThan(afterLaunch);
 
-      // Having found an update, it must stop hammering the endpoint.
-      invoke.mockResolvedValue({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
+      // Keep checking after an offer so a withdrawn or superseded release can
+      // clear the title-bar pill instead of leaving a stale update forever.
+      mockCheck({ available: true, version: '0.6.0', notes: 'x', pub_date: null });
       await updater.checkForUpdates(true);
       const afterFound = invoke.mock.calls.length;
       vi.advanceTimersByTime(30 * 60 * 1000);
-      expect(invoke.mock.calls.length).toBe(afterFound);
+      expect(invoke.mock.calls.length).toBeGreaterThan(afterFound);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('polls release activity every five minutes and never installs it', async () => {
+    vi.useFakeTimers();
+    try {
+      mockCheck({ available: false, version: null, notes: null, pub_date: null });
+      const { updater } = await loadStore();
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            ok: true,
+            data: {
+              activity: {
+                phase: 'building',
+                version: '0.6.0',
+                tag: 'v0.6.0',
+                status: 'in_progress',
+                conclusion: null,
+                runUrl: 'https://github.com/Sylorlabs/Koryphaios/actions/runs/1',
+                workflow: 'release-desktop.yml',
+                trigger: 'tag',
+                startedAt: null,
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+
+      vi.advanceTimersByTime(5 * 60 * 1000);
+      await settle();
+
+      expect(updater.releaseActivity?.version).toBe('0.6.0');
+      expect(invoke).not.toHaveBeenCalledWith('install_update');
     } finally {
       vi.useRealTimers();
     }
@@ -264,7 +363,7 @@ describe('update simulation: manifest to user-visible state', () => {
       '**macOS** · **Windows** — download below or update automatically on next launch.',
       '<!-- CHANGES_JSON [{"type":"fix"}] -->',
     ].join('\n');
-    invoke.mockResolvedValue({ available: true, version: '0.6.0', notes, pub_date: null });
+    mockCheck({ available: true, version: '0.6.0', notes, pub_date: null });
     const { updater } = await loadStore();
 
     const clean = updater.getCleanNotes();
@@ -275,7 +374,7 @@ describe('update simulation: manifest to user-visible state', () => {
   });
 
   it('is inert outside Tauri and in dev builds', async () => {
-    invoke.mockResolvedValue({ available: true, version: '9.9.9', notes: 'x', pub_date: null });
+    mockCheck({ available: true, version: '9.9.9', notes: 'x', pub_date: null });
 
     const { updater: notauri } = await loadStore({ isTauri: false });
     expect(await notauri.checkForUpdates()).toBeNull();

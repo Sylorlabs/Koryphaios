@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-shell';
 import { listen } from '@tauri-apps/api/event';
+import type { UpdateReleaseActivity, UpdateReleaseStatus } from '@koryphaios/shared';
+import { apiUrl } from '$lib/utils/api-url';
 
 export interface UpdateInfo {
   available: boolean;
@@ -19,8 +21,11 @@ export interface UpdateState {
   downloadProgress: number;
 }
 
-// Update check interval: 30 minutes in milliseconds
+// Signed-manifest update check interval: 30 minutes in milliseconds.
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000;
+// Release-activity poll: 5 minutes, so a newly triggered GitHub Actions run
+// shows up promptly without re-downloading the signed manifest every time.
+const RELEASE_ACTIVITY_INTERVAL = 5 * 60 * 1000;
 
 // Create updater store using Svelte 5 runes
 function createUpdaterStore() {
@@ -34,9 +39,14 @@ function createUpdaterStore() {
   let downloadProgress = $state(0);
   let showUpdateBanner = $state(false);
   let dialogOpen = $state(false);
+  /** A GitHub Actions release that is preparing/building but not installable yet. */
+  let releaseActivity = $state<UpdateReleaseActivity | null>(null);
+  /** True only while the one launch-time auto-install is in flight. */
+  let launchInstalling = $state(false);
 
   // Private
   let checkInterval: ReturnType<typeof setInterval> | null = null;
+  let activityInterval: ReturnType<typeof setInterval> | null = null;
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   const updaterEnabled = isTauri && !import.meta.env.DEV;
   let updateDownloaded = false;
@@ -71,9 +81,33 @@ function createUpdaterStore() {
   }
 
   /**
+   * Ask the local backend whether the configured GitHub Actions release
+   * trigger is preparing or building a version. This is additive: the signed
+   * manifest check below is still the only thing that can offer an install.
+   */
+  async function fetchReleaseActivity(): Promise<UpdateReleaseActivity | null> {
+    try {
+      const response = await fetch(apiUrl('/api/updates/status'), {
+        headers: { accept: 'application/json' },
+        signal: AbortSignal.timeout(6_000),
+      });
+      if (!response.ok) return null;
+      const body = (await response.json()) as { ok?: boolean; data?: UpdateReleaseStatus };
+      return body.ok && body.data ? body.data.activity : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Check for updates
    * @param silent - If true, don't show error toasts for failed checks
    */
+  /** Refresh only the GitHub Actions activity, leaving the signed check alone. */
+  async function refreshReleaseActivity(): Promise<void> {
+    releaseActivity = await fetchReleaseActivity();
+  }
+
   async function checkForUpdates(silent = false): Promise<UpdateInfo | null> {
     if (!updaterEnabled) {
       return null;
@@ -83,12 +117,21 @@ function createUpdaterStore() {
     error = null;
 
     try {
-      const result = await invoke<{
-        available: boolean;
-        version: string | null;
-        notes: string | null;
-        pub_date: string | null;
-      }>('check_for_updates');
+      const [tauriCheck, activityResult] = await Promise.allSettled([
+        invoke<{
+          available: boolean;
+          version: string | null;
+          notes: string | null;
+          pub_date: string | null;
+        }>('check_for_updates'),
+        fetchReleaseActivity(),
+      ]);
+      // The release-activity probe is independent of the signed manifest. A
+      // manifest failure must not hide a release that GitHub Actions is still
+      // building, and vice versa.
+      if (activityResult.status === 'fulfilled') releaseActivity = activityResult.value;
+      if (tauriCheck.status === 'rejected') throw tauriCheck.reason;
+      const result = tauriCheck.value;
 
       const info: UpdateInfo = {
         available: result.available,
@@ -193,11 +236,21 @@ function createUpdaterStore() {
     }
 
     checkInterval = setInterval(() => {
-      // Only check if we haven't shown an update yet
-      if (!updateAvailable) {
-        checkForUpdates(true);
-      }
+      // Keep checking even after an update is offered. A release can be
+      // withdrawn or superseded, and the title-bar pill must disappear when
+      // that happens rather than staying on a stale offer forever.
+      checkForUpdates(true);
     }, UPDATE_CHECK_INTERVAL);
+
+    activityInterval = setInterval(() => {
+      if (updateAvailable) return;
+      const hadActivity = releaseActivity !== null;
+      void refreshReleaseActivity().then(() => {
+        // A finished run is the moment the signed manifest may have appeared.
+        // Check it immediately instead of waiting for the 30-minute tick.
+        if (hadActivity && !releaseActivity) void checkForUpdates(true);
+      });
+    }, RELEASE_ACTIVITY_INTERVAL);
   }
 
   /**
@@ -208,6 +261,10 @@ function createUpdaterStore() {
       clearInterval(checkInterval);
       checkInterval = null;
     }
+    if (activityInterval) {
+      clearInterval(activityInterval);
+      activityInterval = null;
+    }
   }
 
   /**
@@ -215,6 +272,18 @@ function createUpdaterStore() {
    */
   async function openChangelog(): Promise<void> {
     await open('https://koryphaios.com/changelog');
+  }
+
+  /** Open the GitHub Actions run for a release that is not installable yet. */
+  async function openReleaseRun(): Promise<void> {
+    if (releaseActivity?.runUrl) await open(releaseActivity.runUrl);
+  }
+
+  /** Compact title-bar label for the release-activity pill. */
+  function getReleaseActivityLabel(): string {
+    if (!releaseActivity) return '';
+    const verb = releaseActivity.phase === 'building' ? 'building' : 'preparing';
+    return releaseActivity.version ? `v${releaseActivity.version} ${verb}` : `Release ${verb}`;
   }
 
   /**
@@ -260,14 +329,29 @@ function createUpdaterStore() {
 
   // Initialize
   if (updaterEnabled) {
-    // Check immediately on startup
-    checkForUpdates(true);
+    void (async () => {
+      // Progress must be observable before an automatic launch install starts.
+      await setupEventListeners();
 
-    // Set up periodic checks every 30 minutes
-    startPeriodicChecks();
+      // Auto-install is a launch-only decision. Background/login-item launches,
+      // dev builds, and KORY_DISABLE_AUTO_UPDATE=1 return false from Rust.
+      let autoUpdateAtLaunch = false;
+      try {
+        autoUpdateAtLaunch = await invoke<boolean>('should_auto_update_at_launch');
+      } catch {
+        autoUpdateAtLaunch = false;
+      }
 
-    // Listen for update download progress
-    setupEventListeners();
+      const info = await checkForUpdates(true);
+      if (autoUpdateAtLaunch && info?.available) {
+        launchInstalling = true;
+        const installed = await installUpdateAndRestart();
+        if (!installed) launchInstalling = false;
+      }
+
+      // In-session checks only notify; they never install.
+      startPeriodicChecks();
+    })();
   }
 
   function openDialog(): void {
@@ -326,6 +410,12 @@ function createUpdaterStore() {
     get showUpdateBanner() {
       return showUpdateBanner;
     },
+    get releaseActivity() {
+      return releaseActivity;
+    },
+    get launchInstalling() {
+      return launchInstalling;
+    },
 
     // Methods
     checkForUpdates,
@@ -335,6 +425,8 @@ function createUpdaterStore() {
     startPeriodicChecks,
     stopPeriodicChecks,
     openChangelog,
+    openReleaseRun,
+    getReleaseActivityLabel,
     openDialog,
     closeDialog,
     getCleanNotes,

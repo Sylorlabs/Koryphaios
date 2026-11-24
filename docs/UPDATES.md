@@ -6,9 +6,9 @@ Koryphaios uses Tauri's updater plugin with a static manifest hosted on GitHub R
 https://github.com/Sylorlabs/Koryphaios/releases/latest/download/latest.json
 ```
 
-Updates are not server-pushed or silently installed. A production desktop build checks on launch and every 30 minutes while running. When a newer release is found, the title bar shows an update notification. Installation starts only after the user opens the dialog and clicks **Install & Restart**.
+Updates are never server-pushed. A production desktop build checks for an installable release on launch and every 30 minutes while running, and polls release activity every 5 minutes so a newly triggered Actions run appears promptly. If a newer release is found during an **interactive launch**, the app installs it before the workspace becomes usable and relaunches. If a newer release is found **while the app is already in use**, nothing changes automatically: the title bar shows an update pill to the left of Feedback, and installation starts only when the user opens it and clicks **Install & Restart**.
 
-Updater checks and installation are disabled in development builds.
+A `--background` / login-item launch, a development build, and `KORY_DISABLE_AUTO_UPDATE=1` never auto-install. In-session checks only notify.
 
 ## Installed-app flow
 
@@ -21,6 +21,26 @@ Updater checks and installation are disabled in development builds.
 7. The package is installed and the application relaunches.
 
 Downloads have a 30-minute timeout. This accommodates the current AppImage size on slow connections while still terminating stalled downloads.
+
+## Release activity (GitHub Actions)
+
+The title-bar pill can appear before a release is installable. The local backend polls the configured release workflows through `GET /api/updates/status` and reports one of two phases:
+
+- **preparing** — `auto-release.yml` was triggered by a `/update` commit or a manual **Prepare Release** dispatch, and the version is read from `tauri.conf.json` at the run's commit.
+- **building** — `release-desktop.yml` is queued or in progress on a `v*` tag.
+
+Only queued/in-progress runs newer than the running build are reported. A failed probe is a soft miss and never an update. The signed `latest.json` manifest remains the only source of truth for installability; a preparing/building pill opens the Actions run and cannot install anything.
+
+Configuration:
+
+| Variable                       | Default                | Purpose                                      |
+| ------------------------------ | ---------------------- | -------------------------------------------- |
+| `KORY_UPDATE_REPO`             | `Sylorlabs/Koryphaios` | Repository to inspect                        |
+| `KORY_UPDATE_WORKFLOW`         | `release-desktop.yml`  | Workflow that builds a tagged release        |
+| `KORY_UPDATE_PREPARE_WORKFLOW` | `auto-release.yml`     | Workflow that validates and tags a release   |
+| `KORY_UPDATE_GITHUB_TOKEN`     | unset                  | Optional read-only token for API rate limits |
+
+Successful probes are cached for five minutes; failures for one minute. `?refresh=1` forces a probe.
 
 ## Manifest targets
 
@@ -87,17 +107,20 @@ A repository-level `SHELL_BUILD_RUN_ID` variable is not required. Both release w
 
 ## Files involved
 
-| File                                              | Purpose                                                                  |
-| ------------------------------------------------- | ------------------------------------------------------------------------ |
-| `.github/workflows/build-shell.yml`               | Builds native shell binaries on all supported platforms                  |
-| `.github/workflows/auto-release.yml`              | Validates the prepared release and creates the tag after shell preflight |
-| `.github/workflows/release-desktop.yml`           | Assembles, signs, uploads, and generates `latest.json`                   |
-| `.github/workflows/smoke-test.yml`                | Fresh-install smoke tests, promotion, and old-to-new upgrade checks      |
-| `scripts/assemble-windows-installer.sh`           | Builds the custom updater-compatible NSIS installer                      |
-| `desktop/src-tauri/tauri.conf.json`               | Updater endpoint, public key, and packaged version                       |
-| `desktop/src-tauri/src/lib.rs`                    | Native check, download, verification, installation, and restart commands |
-| `frontend/src/lib/stores/updater.svelte.ts`       | Launch/manual/periodic checks and UI state                               |
-| `frontend/src/lib/components/UpdateDialog.svelte` | User-confirmed installation UI                                           |
+| File                                                     | Purpose                                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `.github/workflows/build-shell.yml`                      | Builds native shell binaries on all supported platforms                  |
+| `.github/workflows/auto-release.yml`                     | Validates the prepared release and creates the tag after shell preflight |
+| `.github/workflows/release-desktop.yml`                  | Assembles, signs, uploads, and generates `latest.json`                   |
+| `.github/workflows/smoke-test.yml`                       | Fresh-install smoke tests, promotion, and old-to-new upgrade checks      |
+| `scripts/assemble-windows-installer.sh`                  | Builds the custom updater-compatible NSIS installer                      |
+| `desktop/src-tauri/tauri.conf.json`                      | Updater endpoint, public key, and packaged version                       |
+| `desktop/src-tauri/src/lib.rs`                           | Native check, download, verification, installation, and restart commands |
+| `frontend/src/lib/stores/updater.svelte.ts`              | Launch/manual/periodic checks and UI state                               |
+| `frontend/src/lib/components/UpdateDialog.svelte`        | User-confirmed installation UI                                           |
+| `frontend/src/lib/components/LaunchUpdateOverlay.svelte` | Blocking launch-time install UI                                          |
+| `backend/src/services/update-release-status.ts`          | Cached GitHub Actions release-activity probe                             |
+| `backend/src/routes/v1/updates.ts`                       | `GET /api/updates/status`                                                |
 
 ## Troubleshooting
 

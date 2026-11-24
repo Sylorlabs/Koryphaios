@@ -1360,6 +1360,17 @@ fn prepare_desktop_update() {
     background_service::prepare_for_update();
 }
 
+/// Launch-time auto-install is allowed only for an interactive packaged launch.
+/// Background/login-item launches, development builds, and the explicit
+/// `KORY_DISABLE_AUTO_UPDATE=1` opt-out must never restart underneath a user.
+#[tauri::command]
+fn should_auto_update_at_launch() -> bool {
+    if cfg!(debug_assertions) || desktop_lifecycle::starts_in_background() {
+        return false;
+    }
+    !matches!(std::env::var("KORY_DISABLE_AUTO_UPDATE").as_deref(), Ok("1"))
+}
+
 #[tauri::command]
 async fn check_for_updates(app: tauri::AppHandle) -> Result<UpdateCheckResult, String> {
     if cfg!(debug_assertions) {
@@ -3197,6 +3208,7 @@ pub fn run() {
             get_backend_startup_status,
             get_websocket_url,
             get_app_version,
+            should_auto_update_at_launch,
             show_main_window,
             is_window_expanded,
             #[cfg(target_os = "macos")]
