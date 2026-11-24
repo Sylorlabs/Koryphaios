@@ -2183,6 +2183,33 @@ export const MIGRATIONS: Migration[] = [
       ALTER TABLE notes DROP COLUMN content_hash;
     `,
   },
+  {
+    version: '0060',
+    description: 'Persist inline review comments on a chat diff',
+    up: `
+      CREATE TABLE IF NOT EXISTS session_review_comments (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        line INTEGER NOT NULL CHECK (line >= 1),
+        side TEXT NOT NULL CHECK (side IN ('old', 'new')),
+        staged INTEGER NOT NULL CHECK (staged IN (0, 1)),
+        body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 8000),
+        hunk_header TEXT,
+        status TEXT NOT NULL CHECK (status IN ('open', 'resolved')),
+        sent_batch_id TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        resolved_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_session_review_comments_session
+        ON session_review_comments(session_id, status, created_at);
+    `,
+    down: `
+      DROP INDEX IF EXISTS idx_session_review_comments_session;
+      DROP TABLE IF EXISTS session_review_comments;
+    `,
+  },
 ];
 
 // ─── Migration Runner ────────────────────────────────────────────────────────

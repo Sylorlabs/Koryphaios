@@ -612,6 +612,29 @@ export const agentSteeringCommands = sqliteTable(
   }),
 );
 
+/** Inline diff comments. Rows are session-owned and erased with the chat. */
+export const sessionReviewComments = sqliteTable(
+  'session_review_comments',
+  {
+    id: text('id').primaryKey(),
+    sessionId: text('session_id').notNull(),
+    filePath: text('file_path').notNull(),
+    line: integer('line').notNull(),
+    side: text('side', { enum: ['old', 'new'] }).notNull(),
+    staged: integer('staged').notNull(),
+    body: text('body').notNull(),
+    hunkHeader: text('hunk_header'),
+    status: text('status', { enum: ['open', 'resolved'] }).notNull(),
+    sentBatchId: text('sent_batch_id'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    resolvedAt: integer('resolved_at'),
+  },
+  (t) => ({
+    bySession: index('idx_session_review_comments_session').on(t.sessionId, t.status, t.createdAt),
+  }),
+);
+
 // ============================================================================
 // Collaboration Tables
 // ============================================================================
