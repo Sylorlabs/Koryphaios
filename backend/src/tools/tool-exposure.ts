@@ -66,6 +66,8 @@ const EXPOSURE_HINTS: Readonly<Record<string, string>> = Object.freeze({
   git_switch:
     'Switch this chat only, requiring clean files and no workers. params: expectedHead, expectedBranch, target (kind, ref/number, branch?, expectedHash?)',
   get_resource_budget: 'Report remaining provider credit and rate limits.',
+  get_model_pricing: 'Read per-model prices before choosing a route. params: models, provider',
+  get_usage_summary: 'Read spend so far, spend caps and quota states. params: scope, sessionId',
   load_skill_detail: 'Load the full instructions for one skill. params: name',
   recall_notes: 'Load full bodies for selected notes. params: query, titles, ids',
   retrieve_note_context:

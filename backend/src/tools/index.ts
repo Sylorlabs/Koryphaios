@@ -70,6 +70,7 @@ export {
   CreateWorkflowDraftTool,
 } from './workflows';
 export { GetResourceBudgetTool } from './resource-budget';
+export { GetModelPricingTool, GetUsageSummaryTool } from './cost-awareness';
 export { ScheduleMonitorTool } from './monitors';
 export { registerGitTools } from './git';
 export { GhostCommitTool, registerCheckpointTools } from './checkpoint';
