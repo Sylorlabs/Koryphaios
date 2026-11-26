@@ -24,7 +24,11 @@ const CONCURRENT_SAVE = 'concurrency-debugging-full-task-1';
 const DEADLOCK = 'concurrency-debugging-full-task-2';
 const PRE_DISPATCH_PATH = '.kory-eval/original-source-observation.json';
 const PRE_DISPATCH_SCRIPT = 'scripts/observe-original.ts';
-const PRE_DISPATCH_COMMAND = ['npx', '--no-install', 'bun', 'run', PRE_DISPATCH_SCRIPT] as const;
+// Run the observer with the runtime already executing this evaluator. The
+// original npx form depended on npm resolving 'bun' from PATH, which current
+// npm versions no longer do — npx attempts an interactive registry install
+// and every observation dies on TTY-less runners.
+const PRE_DISPATCH_COMMAND = [process.execPath, 'run', PRE_DISPATCH_SCRIPT] as const;
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
 interface OriginalSourceObservation {
