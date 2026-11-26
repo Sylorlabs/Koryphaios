@@ -17,6 +17,11 @@ const DIRECT_SESSION_TABLES = [
   'session_run_continuations',
   'session_run_handoffs',
   'session_runs',
+  // Durable run-resumption rows are owned by the chat they continue: erasing
+  // the chat must drop its re-arm state too, or a restart would resurrect
+  // work for a session the user deleted.
+  'session_pending_resumes',
+  'session_run_resumes',
   'session_event_causes',
   'session_event_cursors',
   'session_tags',
