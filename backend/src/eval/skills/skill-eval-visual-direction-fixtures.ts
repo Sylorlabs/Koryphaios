@@ -257,14 +257,12 @@ function buildSurface(root: string): string | undefined {
   writeFixtureFile(
     root,
     'build.sh',
-    '#!/bin/sh\nset -eu\n: "${DEVELOPER_DIR:=/Applications/Xcode-beta.app/Contents/Developer}"\nexport DEVELOPER_DIR\nxcrun swiftc -O Surface.swift -o surface\n',
+    '#!/bin/sh\nset -eu\n: "${DEVELOPER_DIR:=$(xcode-select -p 2>/dev/null || echo /Applications/Xcode.app/Contents/Developer)}"\nexport DEVELOPER_DIR\nxcrun swiftc -O Surface.swift -o surface\n',
   );
   const result = spawnSync('sh', ['build.sh'], {
     cwd: root,
     env: {
       ...process.env,
-      DEVELOPER_DIR:
-        process.env.DEVELOPER_DIR?.trim() || '/Applications/Xcode-beta.app/Contents/Developer',
     },
     timeout: 180_000,
     encoding: 'utf8',
