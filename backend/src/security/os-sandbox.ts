@@ -545,7 +545,13 @@ function spawnWindowsSandbox(
   return spawnBwrap(
     'bwrap',
     translatedArgv,
-    opts,
+    // `detached` must not reach the Windows spawn: a detached wsl.exe loses
+    // its stdio piping (CREATE_NEW_PROCESS_GROUP detaches the console the
+    // Linux-side stdout forwarding depends on), so every fast sandboxed
+    // command returned empty output. Process-tree cleanup is unaffected —
+    // Windows termination already falls back to the direct process kill, and
+    // bwrap's own --die-with-parent reaps the Linux descendants.
+    { ...opts, detached: false },
     translatedRoots,
     translatedReadOnly,
     translatedEnv,
