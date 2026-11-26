@@ -343,7 +343,7 @@ describe('KoryManager Orchestration', () => {
 
   test('manager controls persist per session and apply to the manager snapshot', async () => {
     const managerId = manager.agentControlSnapshots('session-controls')[0]!.agentId;
-    (mockProviderRegistry.resolveProvider as any).mockImplementation(async (model: string) =>
+    (mockProviderRegistry.resolveProvider as any).mockImplementation((model: string) =>
       model === 'controlled-manager' || model === 'fallback-manager'
         ? { name: 'openai' }
         : undefined,
@@ -352,14 +352,14 @@ describe('KoryManager Orchestration', () => {
     const updated = await manager.updateAgentControls('session-controls', managerId, {
       model: 'openai:controlled-manager',
       reasoningLevel: 'high',
-      fallbacks: [{ model: 'openai:fallback-manager', reasoningLevel: 'low' }],
+      fallbacks: [{ model: 'fallback-manager', provider: 'openai', reasoningLevel: 'low' }],
     });
 
     expect(updated).toMatchObject({
       model: 'controlled-manager',
       provider: 'openai',
       reasoningLevel: 'high',
-      fallbacks: [{ model: 'openai:fallback-manager', reasoningLevel: 'low' }],
+      fallbacks: [{ model: 'fallback-manager', provider: 'openai', reasoningLevel: 'low' }],
     });
     expect(
       manager['runtimes'].peek('session-controls')?.managerControls.get(managerId),
@@ -373,20 +373,20 @@ describe('KoryManager Orchestration', () => {
       model: 'controlled-manager',
       provider: 'openai',
       reasoningLevel: 'high',
-      fallbacks: [{ model: 'openai:fallback-manager', reasoningLevel: 'low' }],
+      fallbacks: [{ model: 'fallback-manager', provider: 'openai', reasoningLevel: 'low' }],
     });
     expect(manager.agentControlSnapshots('session-controls')[0]).toMatchObject({
       agentId: managerId,
       controllable: true,
       model: 'controlled-manager',
       reasoningLevel: 'high',
-      fallbacks: [{ model: 'openai:fallback-manager', reasoningLevel: 'low' }],
+      fallbacks: [{ model: 'fallback-manager', provider: 'openai', reasoningLevel: 'low' }],
     });
   });
 
   test('manager controls survive a new manager instance and empty runtime cache', async () => {
     const managerId = manager.agentControlSnapshots('session-controls-restart')[0]!.agentId;
-    (mockProviderRegistry.resolveProvider as any).mockImplementation(async (model: string) =>
+    (mockProviderRegistry.resolveProvider as any).mockImplementation((model: string) =>
       model === 'restart-manager' ? { name: 'openai' } : undefined,
     );
     await manager.updateAgentControls('session-controls-restart', managerId, {
@@ -419,7 +419,7 @@ describe('KoryManager Orchestration', () => {
   });
 
   test('worker follow-up advances to its fallback after a provider failure', async () => {
-    (mockProviderRegistry.resolveProvider as any).mockImplementation(async (model: string) =>
+    (mockProviderRegistry.resolveProvider as any).mockImplementation((model: string) =>
       model === 'fallback-worker' ? { name: 'openai' } : { name: 'openai' },
     );
     const thread = {
@@ -443,7 +443,7 @@ describe('KoryManager Orchestration', () => {
       promptCache: undefined,
       toolRole: 'worker',
       reasoningLevel: 'medium',
-      fallbacks: [{ model: 'openai:fallback-worker', reasoningLevel: 'high' }],
+      fallbacks: [{ model: 'fallback-worker', provider: 'openai', reasoningLevel: 'high' }],
       maxTurns: 2,
       maxTokens: 1000,
       messages: [{ role: 'user', content: 'Continue' }],

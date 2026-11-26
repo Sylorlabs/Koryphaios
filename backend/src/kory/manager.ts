@@ -11540,7 +11540,9 @@ export class KoryManager implements WorkerPipelineHost {
   agentControlSnapshots(sessionId: string): AgentControlsSnapshot[] {
     const settings = this.settingsForSession(sessionId);
     const worktreeMode = this.getWorktreeMode(sessionId);
-    const managerRouting = this.resolveActiveRouting(undefined, 'general', true);
+    const managerRouting =
+      this.runtimes.peek(sessionId)?.managerRouting ??
+      this.resolveActiveRouting(undefined, 'general', true);
     const managerControl = this.runtimes.peek(sessionId)?.managerControls.get(KORY_IDENTITY.id);
     const manager: AgentControlsSnapshot = {
       agentId: KORY_IDENTITY.id,
