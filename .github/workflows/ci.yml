@@ -30,6 +30,17 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # The backend's kernel sandbox is mandatory for owned chat workspaces, so
+      # the git-workspace suites cannot run without a working bubblewrap. The
+      # probe catches container images where unprivileged user namespaces are
+      # seccomp-blocked even when the binary exists.
+      - name: Install bubblewrap for sandboxed-workspace tests
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
+          if ! bwrap --unshare-user --unshare-pid --ro-bind / / -- true 2>/tmp/bwrap-probe.err; then
+            echo "::warning::bubblewrap user namespaces are blocked in this container: $(cat /tmp/bwrap-probe.err)"
+          fi
+
       - name: Check for exposed secrets
         run: |
           echo "Scanning for exposed API keys in committed files..."
