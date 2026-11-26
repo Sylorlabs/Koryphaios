@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'bun:test';
+import { join } from 'node:path';
 import { DevinCliBridge, getDevinUserConfigDir } from '../devin-bridge';
 import { sandboxToScopes, roleToPermissionMode } from '../cli-bridge';
 import {
@@ -203,7 +204,9 @@ describe('DevinCliBridge.buildAgentConfig', () => {
   });
 
   test('uses the isolated XDG user config instead of a project config path', () => {
-    expect(getDevinUserConfigDir('/managed/devin/session')).toBe('/managed/devin/session/devin');
+    expect(getDevinUserConfigDir('/managed/devin/session')).toBe(
+      join('/managed/devin/session', 'devin'),
+    );
   });
 
   test('parseTrajectory handles malformed JSON gracefully', () => {

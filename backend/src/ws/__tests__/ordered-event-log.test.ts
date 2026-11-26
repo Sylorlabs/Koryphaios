@@ -157,7 +157,10 @@ describe('OrderedEventLog', () => {
         payload: { error: 'Provider failed before relaunch.' },
       });
     } finally {
-      await rm(root, { recursive: true, force: true });
+      // Windows: bun:sqlite releases the file handle on GC, not at close(),
+      // so a plain rm hits EBUSY. Collect first, then retry the remove.
+      if (process.platform === 'win32') Bun.gc(true);
+      await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
 

@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const isolatedDirectory = process.env.DATABASE_URL
@@ -12,15 +12,26 @@ const { getDb, initDb } = await import('../../db');
 const { getGraphData, invalidateNotesCache } = await import('../notes-service');
 
 afterAll(() => {
-  if (isolatedDirectory) rmSync(isolatedDirectory, { recursive: true, force: true });
+  if (isolatedDirectory) {
+    // Windows locks an open SQLite file; close the handle before deleting.
+    try {
+      getDb().close();
+    } catch {
+      // Already closed.
+    }
+    rmSync(isolatedDirectory, { recursive: true, force: true });
+  }
 });
 
 describe('project-scoped graph link limits', () => {
   test('an unrelated project cannot consume the 50k link envelope', async () => {
     await initDb();
     const raw = getDb();
-    const noisyProject = '/test/noisy-project';
-    const selectedProject = '/test/selected-project';
+    // Production stores resolve()d roots, so the SQL scope filter compares
+    // platform-native paths (C:\... on Windows). Seed resolved roots the same
+    // way or the scope condition matches nothing on Windows.
+    const noisyProject = resolve('/test/noisy-project');
+    const selectedProject = resolve('/test/selected-project');
     const now = Math.floor(Date.now() / 1000);
     const insertNote = raw.prepare(`
       INSERT INTO notes (

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { sandboxHome } from '../../collaboration/sandbox-runner';
 import { buildDevinProcessEnv, sanitizeDevinOutput, selectDevinResponseEvents } from '../devin';
 
@@ -24,9 +25,9 @@ describe('Devin CLI provider', () => {
       HOME: '/managed/devin',
       USERPROFILE: '/managed/devin',
       XDG_CONFIG_HOME: '/managed/devin',
-      XDG_DATA_HOME: '/managed/devin/.local/share',
-      XDG_CACHE_HOME: '/managed/devin/.cache',
-      XDG_STATE_HOME: '/managed/devin/.local/state',
+      XDG_DATA_HOME: join('/managed/devin', '.local', 'share'),
+      XDG_CACHE_HOME: join('/managed/devin', '.cache'),
+      XDG_STATE_HOME: join('/managed/devin', '.local', 'state'),
       DEVIN_CONFIG_DIR: '/managed/devin',
       NO_COLOR: '1',
       TERM: 'dumb',

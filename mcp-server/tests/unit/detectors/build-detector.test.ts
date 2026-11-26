@@ -79,7 +79,7 @@ src/utils.ts(25,12): warning TS6133: 'unused' is declared but its value is never
       expect(errors).toHaveLength(2);
 
       expect(errors[0]).toEqual({
-        file: expect.stringContaining('src/index.ts'),
+        file: expect.stringMatching(/src[/\\]index\.ts/),
         line: 10,
         column: 5,
         code: 'TS2304',
@@ -88,7 +88,7 @@ src/utils.ts(25,12): warning TS6133: 'unused' is declared but its value is never
       });
 
       expect(errors[1]).toEqual({
-        file: expect.stringContaining('src/utils.ts'),
+        file: expect.stringMatching(/src[/\\]utils\.ts/),
         line: 25,
         column: 12,
         code: 'TS6133',

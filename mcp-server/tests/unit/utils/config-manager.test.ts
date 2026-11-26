@@ -1,4 +1,5 @@
 import { readFile, writeFile, access } from 'fs/promises';
+import { join } from 'node:path';
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
@@ -296,7 +297,7 @@ describe('ConfigManager', () => {
       mockReadFile.mockResolvedValue('{bad');
 
       await expect(configManager.loadWorkspaceConfig('/project')).rejects.toThrow(
-        'Invalid JSON in /project/.error-debugging.json; the existing file was preserved'
+        `Invalid JSON in ${join('/project', '.error-debugging.json')}; the existing file was preserved`
       );
       expect(mockWriteFile).not.toHaveBeenCalled();
     });
@@ -305,7 +306,7 @@ describe('ConfigManager', () => {
       mockReadFile.mockResolvedValue(JSON.stringify({ projectName: 'missing required fields' }));
 
       await expect(configManager.loadWorkspaceConfig('/project')).rejects.toThrow(
-        'Invalid workspace configuration in /project/.error-debugging.json'
+        `Invalid workspace configuration in ${join('/project', '.error-debugging.json')}`
       );
       expect(mockWriteFile).not.toHaveBeenCalled();
     });

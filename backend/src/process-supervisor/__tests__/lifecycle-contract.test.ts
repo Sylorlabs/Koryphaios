@@ -16,8 +16,16 @@ const { serializeProcess } = await import('../serialize');
 
 let supervisor: ProcessSupervisor | undefined;
 
-afterAll(() => {
+afterAll(async () => {
   if (lifecycleDatabaseDir) {
+    // Windows locks an open SQLite file and refuses the delete. Close the
+    // handle first; on POSIX this is a no-op we can still do unconditionally.
+    const { getDb } = await import('../../db');
+    try {
+      getDb().close();
+    } catch {
+      // Already closed by an earlier test in this file — nothing to do.
+    }
     rmSync(lifecycleDatabaseDir, { recursive: true, force: true });
   }
 });
