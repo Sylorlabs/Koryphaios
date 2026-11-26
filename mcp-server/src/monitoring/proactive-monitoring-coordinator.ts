@@ -21,6 +21,17 @@ import type { WorkspaceEvent } from '@/types/index.js';
 import { FileWatcher } from '@/utils/file-watcher.js';
 import { Logger } from '@/utils/logger.js';
 
+/**
+ * Compile a simple config-file pattern ('package.json', 'tsconfig*.json')
+ * into a basename matcher. Only `*` is treated as a wildcard; every other
+ * character is literal, so nested or backup manifests never match.
+ */
+function configBasenameMatcher(pattern: string): (basename: string) => boolean {
+  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\*/g, '[^/]*');
+  const regex = new RegExp(`^${escaped}$`);
+  return (value: string) => regex.test(value);
+}
+
 export interface ProactiveMonitoringConfig {
   enabled: boolean;
   workspaceRoot: string;
@@ -74,6 +85,7 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
   private configFileWatcher: FileWatcher | null = null;
   private unifiedFileWatcher: UnifiedFileWatcher | null = null;
   private configWatchers = new Map<string, { close: () => void | Promise<void> }>();
+  private lastConfigEmitAt = new Map<string, number>();
   private buildProcesses: Map<string, BuildProcessInfo> = new Map();
   private compilationStatuses: Map<string, CompilationStatus> = new Map();
 
@@ -273,23 +285,35 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
       return;
     }
 
-    const watcherPatterns = this.expandConfigWatchPattern(pattern);
-    const watcher = watch(watcherPatterns, {
+    // Watch the workspace root non-recursively and match basenames ourselves.
+    // Chokidar glob patterns are unreliable across platforms here: on Windows
+    // event paths carry backslashes that never satisfy a forward-slash glob,
+    // and on macOS a literal watch of a not-yet-existing file can bind to an
+    // unresolved /var alias. Watching the always-existing parent directory
+    // avoids both failure modes while keeping exact-match semantics (no
+    // nested or backup manifests).
+    const basenameMatcher = configBasenameMatcher(pattern);
+    const watcher = watch('.', {
       cwd: this.config.workspaceRoot,
       persistent: true,
       ignoreInitial: true,
       ignorePermissionErrors: true,
+      depth: 0,
     });
     this.configWatchers.set(pattern, watcher);
 
     const emitConfigFileChange = (filePath: string) => {
-      const absolutePath = join(this.config.workspaceRoot, filePath);
-      this.logger.info(`Configuration file changed: ${type}`, { path: filePath });
+      // depth:0 keeps events at the root level, so the emitted path is the
+      // bare basename on every platform; normalize separators defensively.
+      const normalized = filePath.replace(/\\/g, '/');
+      if (!basenameMatcher(normalized)) return;
+      const absolutePath = join(this.config.workspaceRoot, normalized);
+      this.logger.info(`Configuration file changed: ${type}`, { path: normalized });
       const event: FileChangeEvent = {
         type: 'config-changed',
         path: absolutePath,
-        relativePath: filePath,
-        extension: extname(filePath),
+        relativePath: normalized,
+        extension: extname(normalized),
         language: null,
         category: 'config',
         timestamp: new Date(),
@@ -393,14 +417,6 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
     });
   }
 
-  private expandConfigWatchPattern(pattern: string): string | string[] {
-    // A literal missing file can reach Chokidar's ready event before realpath
-    // resolution, leaving its native event filter on an unresolved alias (e.g.
-    // /var instead of /private/var). Use an exact glob so it resolves and watches
-    // the existing parent directory, without matching nested or backup manifests.
-    return pattern === 'package.json' ? '[p]ackage.json' : pattern;
-  }
-
   private handleFileChange(event: WorkspaceEvent): void {
     const { path: filePath, type } = event;
     if (type !== 'workspace:file-changed') {
@@ -470,6 +486,15 @@ export class ProactiveMonitoringCoordinator extends EventEmitter {
 
   private handleConfigFileChange(event: FileChangeEvent): void {
     const { relativePath } = event;
+
+    // Windows file creation often surfaces as an `add` immediately followed
+    // by a `change` for the same write (the close flush updates metadata).
+    // That is one logical change, not two — collapse same-path events that
+    // land within a small window so listeners see a single notification.
+    const now = Date.now();
+    const last = this.lastConfigEmitAt.get(relativePath) ?? 0;
+    if (now - last < 250) return;
+    this.lastConfigEmitAt.set(relativePath, now);
 
     this.logger.info('Configuration file changed', { path: relativePath });
 

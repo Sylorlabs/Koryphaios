@@ -500,9 +500,24 @@ function spawnWindowsSandbox(
   const translatedReadOnly = readOnlyRoots.map((root) => translate('a read grant', root));
   const translatedCwd = translate('the working directory', cwd);
   const translatedArgv = argv.map((part, index) => {
-    // Only the program is translated; arguments may legitimately be flags,
-    // relative paths or text, and rewriting those would change the command.
-    if (index !== 0) return part;
+    if (index !== 0) {
+      // Arguments that are absolute Windows paths (or `--flag=<path>` inline
+      // forms such as --git-dir=C:\...) must be translated too: inside the
+      // distribution a drive-letter path is meaningless text, and git
+      // operations receive working-tree and git-dir locations exclusively
+      // through arguments. Free-text arguments (commit messages, refs) do
+      // not start with a drive-letter pattern, so this rewrite is safe.
+      const inline = /^(--[\w-]+=)([A-Za-z]:[\\/].*)$/.exec(part);
+      if (inline) {
+        const translatedValue = windowsPathToWsl(inline[2]);
+        if (translatedValue) return `${inline[1]}${translatedValue}`;
+        return part;
+      }
+      if (/^[A-Za-z]:[\\/]/.test(part)) {
+        return windowsPathToWsl(part) ?? part;
+      }
+      return part;
+    }
     // A bare program name (`git`, `sh`, `bash`) must stay bare: execvp
     // inside the Linux namespace resolves it against the distribution's own
     // system paths. Resolving it against the *Windows* PATH instead finds a
