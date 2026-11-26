@@ -12,6 +12,7 @@ import {
   PERFORMANCE_TESTING_LOAD_VALID_PLAN,
 } from '../../eval/skills/skill-eval-performance-testing-load-fixtures';
 import { loadV5SkillPackages } from '../skill-packages';
+import { isWindows } from '../../runtime/platform';
 
 const SCENARIO = 'performance-testing-full-task-1';
 const RESULT_ARTIFACT = 'evaluation/performance-testing-scenario-1-result.json';
@@ -97,7 +98,11 @@ function writePlan(root: string, plan: unknown): void {
 }
 
 describe('performance-testing open-model load fixture', () => {
-  test('starts red, then passes only with a real open-model load run', async () => {
+  // Windows CPU accounting only advances on the ~15.6 ms clock tick, so a
+  // few-milliseconds-per-repetition service measures 0 user+system time no
+  // matter how precisely userland asks; the resource-separation proof the
+  // scorer demands is unattainable there. Linux accounting is microsecond-fine.
+  test.skipIf(isWindows())('starts red, then passes only with a real open-model load run', async () => {
     const subject = await fixture();
     const red = await subject.score();
     expect(red.passed).toBe(false);
@@ -229,7 +234,9 @@ describe('performance-testing open-model load fixture', () => {
     expect(serviceScore.integrityFailure).toBe(true);
   }, 60_000);
 
-  test('bounds a nonterminating service child and fails closed', async () => {
+  // The nontermination proof inspects the service child with /usr/bin/pgrep,
+  // which does not exist on Windows.
+  test.skipIf(isWindows())('bounds a nonterminating service child and fails closed', async () => {
     const subject = await fixture();
     writePlan(subject.root, PERFORMANCE_TESTING_LOAD_VALID_PLAN);
     writeFixtureFile(subject.root, 'src/service.ts', 'while (true) {}\n');
