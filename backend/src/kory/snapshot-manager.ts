@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { koryLog } from '../logger';
+import { isWindows } from '../runtime/platform';
 
 interface SnapshotManifest {
   version: 1;
@@ -104,7 +105,7 @@ export class SnapshotManager {
    */
   private renameSnapshotDir(temporary: string, snapshotDir: string): void {
     const transient = new Set(['EPERM', 'EACCES', 'EBUSY', 'ENOTEMPTY']);
-    const maxAttempts = process.platform === 'win32' ? 40 : 1;
+    const maxAttempts = isWindows() ? 40 : 1;
     for (let attempt = 1; ; attempt++) {
       try {
         renameSync(temporary, snapshotDir);
