@@ -259,11 +259,7 @@ for (const number of [1, 2] as const) {
           expect(receipt.exitStatus).toBe(0);
           // The canonical pre-dispatch vector invokes the current Bun binary
           // directly, since npx can no longer resolve 'bun' from PATH.
-          expect(receipt.command).toEqual([
-            process.execPath,
-            'run',
-            'scripts/observe-original.ts',
-          ]);
+          expect(receipt.command).toEqual([process.execPath, 'run', 'scripts/observe-original.ts']);
           checked.push(readFileSync(path, 'utf8'));
           return { output: 'inspected', evidence: [], artifacts: [], durationMs: 0 };
         },

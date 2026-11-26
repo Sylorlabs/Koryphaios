@@ -129,65 +129,74 @@ describe('visual direction real-source fixtures', () => {
 
   // The reference surface is rendered through a real SwiftUI capture binary,
   // which only exists on macOS; every other platform has nothing to materialize.
-  test.skipIf(!isMac())('materialization supplies real source, tokens and seven measured captures', async () => {
-    const { root } = await materialized(EDITOR_DIRECTION_SCENARIO);
-    expect(existsSync(join(root, 'Surface.swift'))).toBe(true);
-    expect(existsSync(join(root, 'tokens.json'))).toBe(true);
-    const captures = readdirSync(join(root, 'captures')).filter((name) => name.endsWith('.png'));
-    expect(captures).toHaveLength(DIRECTION_CONTEXTS.length);
-    for (const context of DIRECTION_CONTEXTS) {
-      expect(existsSync(join(root, 'geometry', `${context.id}.json`))).toBe(true);
-    }
-    // The large-text German minimum width is the condition the fixture exists to expose.
-    expect(truncatedIds(root, 'min-dark-de-large').length).toBeGreaterThan(0);
-  });
+  test.skipIf(!isMac())(
+    'materialization supplies real source, tokens and seven measured captures',
+    async () => {
+      const { root } = await materialized(EDITOR_DIRECTION_SCENARIO);
+      expect(existsSync(join(root, 'Surface.swift'))).toBe(true);
+      expect(existsSync(join(root, 'tokens.json'))).toBe(true);
+      const captures = readdirSync(join(root, 'captures')).filter((name) => name.endsWith('.png'));
+      expect(captures).toHaveLength(DIRECTION_CONTEXTS.length);
+      for (const context of DIRECTION_CONTEXTS) {
+        expect(existsSync(join(root, 'geometry', `${context.id}.json`))).toBe(true);
+      }
+      // The large-text German minimum width is the condition the fixture exists to expose.
+      expect(truncatedIds(root, 'min-dark-de-large').length).toBeGreaterThan(0);
+    },
+  );
 
   // The reference surface is rendered through a real SwiftUI capture binary,
   // which only exists on macOS; every other platform has nothing to materialize.
-  test.skipIf(!isMac())('the untouched placeholder fails closed and scores no verification', async () => {
-    const { score } = await materialized(EDITOR_DIRECTION_SCENARIO);
-    const red = await score();
-    expect(red.passed).toBe(false);
-    expect(red.integrityFailure).toBe(false);
-    // Supplied-evidence integrity and the toolchain build still verify, so the score is
-    // small but not zero; every authored requirement must still fail.
-    expect(red.verification).toBeLessThan(0.5);
-    expect(red.quality).toBeLessThan(0.3);
-    expect(red.evidence).toContain(
-      'evaluator supplied source, tokens and captures: pass — all seven captures and the source are present',
-    );
-    expect(
-      red.evidence.some((line) => line.startsWith('surface identity recorded honestly: fail')),
-    ).toBe(true);
-  });
+  test.skipIf(!isMac())(
+    'the untouched placeholder fails closed and scores no verification',
+    async () => {
+      const { score } = await materialized(EDITOR_DIRECTION_SCENARIO);
+      const red = await score();
+      expect(red.passed).toBe(false);
+      expect(red.integrityFailure).toBe(false);
+      // Supplied-evidence integrity and the toolchain build still verify, so the score is
+      // small but not zero; every authored requirement must still fail.
+      expect(red.verification).toBeLessThan(0.5);
+      expect(red.quality).toBeLessThan(0.3);
+      expect(red.evidence).toContain(
+        'evaluator supplied source, tokens and captures: pass — all seven captures and the source are present',
+      );
+      expect(
+        red.evidence.some((line) => line.startsWith('surface identity recorded honestly: fail')),
+      ).toBe(true);
+    },
+  );
 
   // The reference surface is rendered through a real SwiftUI capture binary,
   // which only exists on macOS; every other platform has nothing to materialize.
-  test.skipIf(!isMac())('a complete artifact passes only when every truncation claim matches the render', async () => {
-    const { root, score } = await materialized(EDITOR_DIRECTION_SCENARIO);
-    const artifact = completeDirection(root);
-    writeFileSync(join(root, 'direction.json'), JSON.stringify(artifact, null, 2));
-    const green = await score();
-    expect(green.passed).toBe(true);
-    expect(green.quality).toBe(1);
-    expect(green.verification).toBe(1);
+  test.skipIf(!isMac())(
+    'a complete artifact passes only when every truncation claim matches the render',
+    async () => {
+      const { root, score } = await materialized(EDITOR_DIRECTION_SCENARIO);
+      const artifact = completeDirection(root);
+      writeFileSync(join(root, 'direction.json'), JSON.stringify(artifact, null, 2));
+      const green = await score();
+      expect(green.passed).toBe(true);
+      expect(green.quality).toBe(1);
+      expect(green.verification).toBe(1);
 
-    // Claiming fewer clipped elements than were measured must fail, not silently pass.
-    const understated = {
-      ...artifact,
-      stateReviews: artifact.stateReviews.map((review) =>
-        review.context === 'min-dark-de-large' ? { ...review, truncated: [] } : review,
-      ),
-    };
-    writeFileSync(join(root, 'direction.json'), JSON.stringify(understated, null, 2));
-    const overstated = await score();
-    expect(overstated.passed).toBe(false);
-    expect(
-      overstated.evidence.some((line) =>
-        line.startsWith('per context truncation claims match a fresh render: fail'),
-      ),
-    ).toBe(true);
-  });
+      // Claiming fewer clipped elements than were measured must fail, not silently pass.
+      const understated = {
+        ...artifact,
+        stateReviews: artifact.stateReviews.map((review) =>
+          review.context === 'min-dark-de-large' ? { ...review, truncated: [] } : review,
+        ),
+      };
+      writeFileSync(join(root, 'direction.json'), JSON.stringify(understated, null, 2));
+      const overstated = await score();
+      expect(overstated.passed).toBe(false);
+      expect(
+        overstated.evidence.some((line) =>
+          line.startsWith('per context truncation claims match a fresh render: fail'),
+        ),
+      ).toBe(true);
+    },
+  );
 
   // The reference surface is rendered through a real SwiftUI capture binary,
   // which only exists on macOS; every other platform has nothing to materialize.

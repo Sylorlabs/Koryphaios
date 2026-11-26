@@ -169,9 +169,7 @@ export function isAntigravityInternalReadPath(rawPath: unknown): boolean {
   // `resolve()` produces backslash paths, which the forward-slash pattern
   // would never approve no matter how legitimate the read.
   const matchesInternalSubtree = (candidate: string): boolean =>
-    /(?:^|\/)\.gemini\/antigravity-cli\/(?:mcp|brain)\/[^/]/.test(
-      candidate.replace(/\\/g, '/'),
-    );
+    /(?:^|\/)\.gemini\/antigravity-cli\/(?:mcp|brain)\/[^/]/.test(candidate.replace(/\\/g, '/'));
   if (!matchesInternalSubtree(resolved)) return false;
   const canonical = canonicalizeExistingAncestor(resolved);
   return canonical !== null && matchesInternalSubtree(canonical);
