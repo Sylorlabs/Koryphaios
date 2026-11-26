@@ -42,16 +42,12 @@ case "$1" in
     printf 'queue-released\n'
     ;;
   flood)
-    i=0
-    while [ "$i" -lt "$FAKE_GIT_FLOOD_BYTES" ]; do
-      printf 'o'
-      i=$((i + 1))
-    done
-    i=0
-    while [ "$i" -lt "$FAKE_GIT_FLOOD_BYTES" ]; do
-      printf 'e' >&2
-      i=$((i + 1))
-    done
+    # Both streams flood concurrently: the executor closes an over-limit pipe
+    # so the writer dies on its next write, and a sequential flood would never
+    # reach the second stream at all.
+    ( i=0; while [ "$i" -lt "$FAKE_GIT_FLOOD_BYTES" ]; do printf 'o'; i=$((i + 1)); done ) &
+    ( i=0; while [ "$i" -lt "$FAKE_GIT_FLOOD_BYTES" ]; do printf 'e' >&2; i=$((i + 1)); done ) &
+    wait
     ;;
   *)
     printf 'unexpected fake git command\n' >&2
@@ -148,10 +144,10 @@ esac
 
       expect(flooded.success).toBe(false);
       // The executor deliberately cancels the reader once the cap is crossed,
-      // which closes the pipe so the flooding helper dies on its next write —
-      // 141 (128+SIGPIPE) through the shell. If the bounded flood happens to
-      // finish before the cancel lands, the helper instead exits 0. Either is
-      // the bounded-output contract; what must never happen is success.
+      // which closes the pipe so the flooding writer dies on its next write —
+      // 141 (128+SIGPIPE) through the shell. If a loop happens to finish into
+      // the pipe buffer before the cancel lands, the helper instead exits 0.
+      // Either is the bounded-output contract; what must never happen is success.
       expect([0, 141]).toContain(flooded.exitCode);
       expect(flooded.outputLimitExceeded).toBe(true);
       expect(flooded.stdout).toBe('');
@@ -253,7 +249,10 @@ done
 
         expect(result.success).toBe(false);
         expect(result.outputLimitExceeded).toBe(true);
-        expect(result.exitCode).toBe(0);
+        // The helper writes ~196 KB, far beyond the pipe buffer, so once the
+        // over-limit reader closes the pipe the helper must die on its next
+        // write and git reports the external diff failure with exit 128.
+        expect(result.exitCode).toBe(128);
         expect(result.stdout).toBe('');
         expect(result.stderr).toContain('stdout exceeded the 1024-byte safety limit');
         expect(result.stdoutBytes).toBeGreaterThan(1_024);
