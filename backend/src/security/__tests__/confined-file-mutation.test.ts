@@ -170,10 +170,13 @@ describe.skipIf(!osSandboxAvailable())('kernel-confined file mutation integratio
         // macOS denies the write (EPERM/EROFS) because the profile leaves the
         // filesystem visible. Linux bubblewrap hides everything outside the
         // granted roots from the mount namespace, so the same escape resolves
-        // to a nonexistent path (ENOENT). Both prove the write never landed;
-        // the unchanged external file below is the invariant that matters.
+        // to a nonexistent path (ENOENT) — or the recursive parent mkdir finds
+        // the swapped symlink itself in the way, cannot stat through it into
+        // the hidden filesystem, and aborts with EEXIST before any write is
+        // attempted. All three prove the write never landed; the unchanged
+        // external file below is the invariant that matters.
         expect(result.output).toMatch(
-          /EPERM|EACCES|EROFS|ENOENT|[Oo]peration not permitted|[Rr]ead-only/,
+          /EPERM|EACCES|EROFS|ENOENT|EEXIST|[Oo]peration not permitted|[Rr]ead-only/,
         );
         expect(completed).toBe(false);
         expect(recorded).toBe(false);

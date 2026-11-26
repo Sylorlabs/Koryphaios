@@ -147,7 +147,12 @@ esac
       }
 
       expect(flooded.success).toBe(false);
-      expect(flooded.exitCode).toBe(0);
+      // The executor deliberately cancels the reader once the cap is crossed,
+      // which closes the pipe so the flooding helper dies on its next write —
+      // 141 (128+SIGPIPE) through the shell. If the bounded flood happens to
+      // finish before the cancel lands, the helper instead exits 0. Either is
+      // the bounded-output contract; what must never happen is success.
+      expect([0, 141]).toContain(flooded.exitCode);
       expect(flooded.outputLimitExceeded).toBe(true);
       expect(flooded.stdout).toBe('');
       expect(flooded.stderr).toContain('stdout exceeded the 1024-byte safety limit');
