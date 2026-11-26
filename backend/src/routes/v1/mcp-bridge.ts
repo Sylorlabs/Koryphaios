@@ -193,7 +193,8 @@ export function privateTmpNativeReadDecision(
     if (isContainedBy(canonicalRoot, canonicalTarget)) {
       return {
         decision: 'approve',
-        reason: 'Native read of the CLI turn private temp output; content originated from managed tools.',
+        reason:
+          'Native read of the CLI turn private temp output; content originated from managed tools.',
       };
     }
   }
