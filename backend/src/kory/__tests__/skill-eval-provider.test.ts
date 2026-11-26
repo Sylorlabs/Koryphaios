@@ -9,6 +9,7 @@ import {
   createOpenRouterTextOnlyPatchSkillEvalExecutor,
 } from '../../eval/skills/skill-eval-provider';
 import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
+import { isWindows } from '../../runtime/platform';
 
 const workspaceScenario = (
   kind: 'synthetic' | 'repository' | 'cli' | 'browser' | 'public-web' | 'device' = 'synthetic',
@@ -378,7 +379,9 @@ describe('direct provider skill evaluation text patch executor', () => {
     }
   });
 
-  test('qualification executor keeps the captured OmniRush launcher after PATH changes', async () => {
+  // The fixture launcher is a suffixless shebang script, which Windows can
+  // never resolve as an executable (PATHEXT), so the binding probe fails closed.
+  test.skipIf(isWindows())('qualification executor keeps the captured OmniRush launcher after PATH changes', async () => {
     const testRoot = mkdtempSync(join(tmpdir(), 'kory-provider-omnirush-binding-'));
     const launcherA = join(testRoot, 'a', 'omnirush');
     const launcherB = join(testRoot, 'b', 'omnirush');
