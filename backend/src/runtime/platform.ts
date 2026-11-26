@@ -254,6 +254,21 @@ export function canonicalizePath(target: string): string {
  * grant somewhere the user never approved.
  */
 export function windowsPathToWsl(target: string): string | null {
+  // Canonicalize before translating: Windows hands out 8.3 short names for
+  // userprofile-derived paths (`C:\Users\ADMINI~1\...` — os.tmpdir() returns
+  // one wherever TEMP is factory-set), and while the 9p mount resolves those
+  // aliases at its root, a path built from them is not the canonical mount
+  // location the sandbox bind-mounts — git then fails to recognize repos
+  // fetched through it. `realpathSync` without `.native` does not expand
+  // short names on Windows; the native variant does. Non-existent paths keep
+  // their original spelling.
+  if (isWindows()) {
+    try {
+      target = realpathSync.native(target);
+    } catch {
+      // Path does not exist yet — translate it as spelled.
+    }
+  }
   const drive = /^([A-Za-z]):(?:[\\/](.*))?$/.exec(target);
   if (drive) {
     const rest = (drive[2] ?? '').replace(/\\/g, '/').replace(/\/+$/, '');
