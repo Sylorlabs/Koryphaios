@@ -6,6 +6,7 @@ import type {
   SkillEvalFixtureMaterializer,
 } from './skill-eval-execution';
 import { readFixtureText, readJsonArtifact, writeFixtureFile } from './skill-eval-fixture-helpers';
+import { swiftRuntimeReadiness } from './skill-eval-swift-runtime';
 import {
   EDITOR_DIRECTION_SCENARIO,
   materializeRealDirectionFixture,
@@ -539,11 +540,17 @@ export const VISUAL_DESIGN_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtureMa
   // original materializer and scorer identities, and a new id would strand old evidence.
   {
     id: 'visual-interface-design/cross-platform-system@2',
+    get readinessBlockers() {
+      return swiftRuntimeReadiness().reasons;
+    },
     matches: (s) => s.id === EDITOR,
     materialize: (root) => materializeRealDirectionFixture(root, EDITOR_DIRECTION_SCENARIO),
   },
   {
     id: 'visual-interface-design/dense-operations-system@2',
+    get readinessBlockers() {
+      return swiftRuntimeReadiness().reasons;
+    },
     matches: (s) => s.id === OPS,
     materialize: (root) => materializeRealDirectionFixture(root, OPS),
   },
