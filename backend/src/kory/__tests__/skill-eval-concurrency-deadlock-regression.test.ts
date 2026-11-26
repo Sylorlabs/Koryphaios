@@ -257,10 +257,10 @@ for (const number of [1, 2] as const) {
           const receipt = JSON.parse(readFileSync(path, 'utf8'));
           expect(receipt.scenarioId).toBe(`concurrency-debugging-full-task-${number}`);
           expect(receipt.exitStatus).toBe(0);
+          // The canonical pre-dispatch vector invokes the current Bun binary
+          // directly, since npx can no longer resolve 'bun' from PATH.
           expect(receipt.command).toEqual([
-            'npx',
-            '--no-install',
-            'bun',
+            process.execPath,
             'run',
             'scripts/observe-original.ts',
           ]);
