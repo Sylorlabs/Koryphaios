@@ -434,7 +434,9 @@ else process.exit(1);
         // The sandboxed print-mode request now provisions box helpers from the
         // probed CLI version; pre-seed the exact helper files so the test never
         // reaches the registry.
-        for (const architecture of ['arm64', 'x64']) {
+        // Product layout keys helpers by the container architecture
+        // (amd64/arm64), not the npm package suffix (x64/arm64).
+        for (const architecture of ['arm64', 'amd64']) {
           const helperRoot = join(
             stateRoot,
             'box-helpers',
