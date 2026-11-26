@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isMac } from '../../runtime/platform';
 
 import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
@@ -126,7 +127,9 @@ describe('visual direction real-source fixtures', () => {
     }
   });
 
-  test('materialization supplies real source, tokens and seven measured captures', async () => {
+  // The reference surface is rendered through a real SwiftUI capture binary,
+  // which only exists on macOS; every other platform has nothing to materialize.
+  test.skipIf(!isMac())('materialization supplies real source, tokens and seven measured captures', async () => {
     const { root } = await materialized(EDITOR_DIRECTION_SCENARIO);
     expect(existsSync(join(root, 'Surface.swift'))).toBe(true);
     expect(existsSync(join(root, 'tokens.json'))).toBe(true);
@@ -139,7 +142,9 @@ describe('visual direction real-source fixtures', () => {
     expect(truncatedIds(root, 'min-dark-de-large').length).toBeGreaterThan(0);
   });
 
-  test('the untouched placeholder fails closed and scores no verification', async () => {
+  // The reference surface is rendered through a real SwiftUI capture binary,
+  // which only exists on macOS; every other platform has nothing to materialize.
+  test.skipIf(!isMac())('the untouched placeholder fails closed and scores no verification', async () => {
     const { score } = await materialized(EDITOR_DIRECTION_SCENARIO);
     const red = await score();
     expect(red.passed).toBe(false);
@@ -156,7 +161,9 @@ describe('visual direction real-source fixtures', () => {
     ).toBe(true);
   });
 
-  test('a complete artifact passes only when every truncation claim matches the render', async () => {
+  // The reference surface is rendered through a real SwiftUI capture binary,
+  // which only exists on macOS; every other platform has nothing to materialize.
+  test.skipIf(!isMac())('a complete artifact passes only when every truncation claim matches the render', async () => {
     const { root, score } = await materialized(EDITOR_DIRECTION_SCENARIO);
     const artifact = completeDirection(root);
     writeFileSync(join(root, 'direction.json'), JSON.stringify(artifact, null, 2));
@@ -182,7 +189,9 @@ describe('visual direction real-source fixtures', () => {
     ).toBe(true);
   });
 
-  test('a missing supplied capture is reported instead of credited', async () => {
+  // The reference surface is rendered through a real SwiftUI capture binary,
+  // which only exists on macOS; every other platform has nothing to materialize.
+  test.skipIf(!isMac())('a missing supplied capture is reported instead of credited', async () => {
     const { root, score } = await materialized(OPS_DIRECTION_SCENARIO);
     writeFileSync(join(root, 'direction.json'), JSON.stringify(completeDirection(root), null, 2));
     rmSync(join(root, 'captures', 'empty-selection.png'));

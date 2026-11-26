@@ -2710,7 +2710,7 @@ for (const term of QUERIES) {
 const identity = {
   runtime: 'Bun',
   runtimeVersion: Bun.version,
-  platform: hostOS(),
+  platform: process.platform,
   architecture: process.arch,
   cpuModel: cpus()[0]?.model || 'unknown',
   cpuCount: cpus().length,
