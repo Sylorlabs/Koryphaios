@@ -19,7 +19,10 @@ env:
 jobs:
   lint-and-test:
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 15
+    # The isolated backend runner executes ~450 test files serially and the
+    # skill-evaluation fixtures alone cost minutes each on a 2-vCPU runner;
+    # 15 minutes cancels the suite in the final letters of the alphabet.
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -116,7 +119,7 @@ jobs:
           - os: blacksmith-6vcpu-macos-latest
             platform: macos
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
