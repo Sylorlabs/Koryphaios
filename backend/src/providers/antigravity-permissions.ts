@@ -160,10 +160,18 @@ function canonicalizeExistingAncestor(targetPath: string): string | null {
 export function isAntigravityInternalReadPath(rawPath: unknown): boolean {
   if (typeof rawPath !== 'string' || !rawPath.trim()) return false;
   const trimmed = rawPath.trim();
-  if (!trimmed.startsWith('/') || trimmed.includes('\0')) return false;
+  // Absolute-path gate accepts both POSIX roots and Windows drive letters —
+  // agy reports AbsolutePath in the host's own form.
+  if (!trimmed.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(trimmed)) return false;
+  if (trimmed.includes('\0')) return false;
   const resolved = resolve(trimmed);
+  // Path separators are normalized before matching: on a Windows backend
+  // `resolve()` produces backslash paths, which the forward-slash pattern
+  // would never approve no matter how legitimate the read.
   const matchesInternalSubtree = (candidate: string): boolean =>
-    /(?:^|\/)\.gemini\/antigravity-cli\/(?:mcp|brain)\/[^/]/.test(candidate);
+    /(?:^|\/)\.gemini\/antigravity-cli\/(?:mcp|brain)\/[^/]/.test(
+      candidate.replace(/\\/g, '/'),
+    );
   if (!matchesInternalSubtree(resolved)) return false;
   const canonical = canonicalizeExistingAncestor(resolved);
   return canonical !== null && matchesInternalSubtree(canonical);

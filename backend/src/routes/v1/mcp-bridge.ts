@@ -119,6 +119,13 @@ const NATIVE_TO_KORY: Record<string, string> = {
   web_fetch: 'kory__web_fetch',
   web_search: 'kory__web_search',
   read_page_content: 'kory__web_fetch',
+  // Native question tools would either prompt on a headless terminal or leak
+  // the conversation outside the session transcript. All spellings route to
+  // the bridge question tool, which surfaces in the chat UI.
+  ask_user_question: 'kory__ask_user',
+  AskUserQuestion: 'kory__ask_user',
+  askuserquestion: 'kory__ask_user',
+  request_user_input: 'kory__ask_user',
 };
 
 /** Native tools that only mutate the CLI's own bookkeeping and therefore carry
