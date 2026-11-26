@@ -10,6 +10,11 @@ on:
 # Bun release shipped breaking changes overnight. Bump this deliberately.
 env:
   BUN_VERSION: '1.3.14'
+  # The skill-evaluation fixtures execute real `npx bun@<version>` commands as
+  # part of their original-source observations. Without this, npx stops to
+  # confirm the package install on a TTY-less runner and every fixture errors
+  # with "npx canceled due to missing packages and no YES option".
+  npm_config_yes: 'true'
 
 jobs:
   lint-and-test:
