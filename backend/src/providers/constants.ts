@@ -57,6 +57,9 @@ for (const [name, keys] of Object.entries(EXTRA_ENV_API_KEYS)) {
  *  Providers not listed here use the baseUrl from PROVIDER_CONFIGS. */
 export const OPENCODE_DEFAULT_BASE_URL: Partial<Record<string, string>> = {
   '302ai': 'https://api.302.ai/v1',
+  // Retired from the product catalog but still selectable in the eval harness,
+  // whose operators configure the CLI directly against the upstream endpoint.
+  vyceai: 'https://vyceai.com/v1',
   opencodezen: 'https://opencode.ai/zen/v1',
   opencodego: 'https://opencode.ai/zen/go/v1',
   baseten: 'https://inference.baseten.co/v1',
