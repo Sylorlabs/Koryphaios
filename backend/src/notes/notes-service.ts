@@ -324,7 +324,15 @@ const fileIdentityCache = new Map<string, string>(); // absolute path -> dev:ino
 function fileObjectIdentity(fileStat: Stats): string | null {
   const dev = Number(fileStat.dev);
   const ino = Number(fileStat.ino);
-  return Number.isSafeInteger(dev) && Number.isSafeInteger(ino) && ino > 0 ? `${dev}:${ino}` : null;
+  // NTFS file-index numbers are 64-bit and can exceed 2^53, so a
+  // safe-integer check would disable move detection entirely on Windows.
+  // Some Windows filesystems (ReFS, Dev Drive volumes, sandboxed CI runners)
+  // report file indices that are not unique per file, so dev:ino alone can
+  // match a copy to the row its source was deleted from. Creation time is
+  // preserved by a rename but not by a fresh write, so it disambiguates;
+  // where birthtime is unsupported it stays a stable per-file constant.
+  const birthtime = Number.isFinite(fileStat.birthtimeMs) ? fileStat.birthtimeMs : 0;
+  return Number.isSafeInteger(dev) && ino > 0 ? `${dev}:${ino}:${birthtime}` : null;
 }
 /** Tracks whether the initial sync has completed for a given project root.
  * The notes catalog is empty until this resolves — skipping catalog assembly

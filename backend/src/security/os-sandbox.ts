@@ -99,10 +99,19 @@ export function detectOsSandbox(): OsSandboxAvailability {
 
   // The Windows probe is one short process, cached for the life of the process,
   // because it answers a configuration question (is there a distribution with
-  // bwrap?) rather than a per-command one.
+  // bwrap?) rather than a per-command one. A negative answer is NOT cached: a
+  // cold WSL virtual machine takes longer than the probe timeout to boot, so
+  // a negative at process start would otherwise disable confinement for the
+  // process lifetime even though the engine is installed.
   const wslBwrap = isWindows() && wslBwrapAvailable();
 
   availabilityCache = { landlock, seccomp, sandboxExec, wslBwrap };
+  if (isWindows() && !wslBwrap) {
+    // Re-probe on the next call rather than trusting a negative that may
+    // only mean the VM was still booting.
+    availabilityCache = undefined;
+    return { landlock, seccomp, sandboxExec, wslBwrap };
+  }
   return availabilityCache;
 }
 
@@ -363,18 +372,28 @@ function spawnBwrap(
     '/etc',
   ];
 
-  // Handle /lib64 on systems that have it (most x86_64 Linux).
-  if (existsSync('/lib64')) {
-    args.push('--ro-bind', '/lib64', '/lib64');
-  }
-  // /sbin is needed for some tools on systemd-based distros.
-  if (existsSync('/sbin')) {
-    args.push('--ro-bind', '/sbin', '/sbin');
-  }
+  // /lib64 (the ELF interpreter root on x86_64) and /sbin exist on most
+  // Linux distros but not all — and on Windows the existsSync probe would
+  // ask the *Windows* filesystem, which never has them, so the WSL
+  // distribution's /lib64 symlink target would be missing inside the
+  // namespace and every exec fails with ENOENT. `--ro-bind-try` binds them
+  // when the sandboxed environment has them and skips them when it does
+  // not, which is exactly the intended conditional.
+  args.push('--ro-bind-try', '/lib64', '/lib64');
+  args.push('--ro-bind-try', '/sbin', '/sbin');
 
   // Expose only the runtime executable (not the user's home or credentials)
   // when Bun/Node/Git is installed outside the system mounts.
-  const executable = isAbsolute(argv[0]) ? argv[0] : findExecutableOnPath(argv[0]);
+  // In WSL mode (launch prefix non-empty) the payload runs inside the Linux
+  // distribution, so nothing resolved against the *Windows* host PATH is a
+  // valid sandbox path — probing it would bind a Windows PE path that does
+  // not exist inside the namespace and abort the launch.
+  const executable =
+    launch.prefix.length === 0
+      ? isAbsolute(argv[0])
+        ? argv[0]
+        : findExecutableOnPath(argv[0])
+      : null;
   const systemRoots = ['/usr', '/lib', '/lib64', '/bin', '/etc', '/sbin'];
   const extraExecutable =
     executable &&
@@ -483,17 +502,30 @@ function spawnWindowsSandbox(
   const translatedArgv = argv.map((part, index) => {
     // Only the program is translated; arguments may legitimately be flags,
     // relative paths or text, and rewriting those would change the command.
-    if (index === 0 && !part.startsWith('/')) {
+    if (index !== 0) return part;
+    // A bare program name (`git`, `sh`, `bash`) must stay bare: execvp
+    // inside the Linux namespace resolves it against the distribution's own
+    // system paths. Resolving it against the *Windows* PATH instead finds a
+    // Windows PE binary (e.g. Git Bash's sh.exe), and Windows executables
+    // cannot run inside the sandbox — WSL binfmt interop depends on the
+    // distro's /init, which the mount namespace does not carry.
+    if (!part.includes('/') && !part.includes('\\')) return part;
+    if (!part.startsWith('/')) {
       const absolute = findExecutableOnPath(part);
       return absolute ? translate('the program', absolute) : part;
     }
-    return index === 0 ? translate('the program', part) : part;
+    return translate('the program', part);
   });
   const translatedEnv: NodeJS.ProcessEnv = { ...env };
   for (const key of ['HOME', 'TMPDIR', 'TMP', 'TEMP']) {
     const value = translatedEnv[key];
     if (value && !value.startsWith('/')) translatedEnv[key] = translate(key, value);
   }
+  // The host PATH is Windows-shaped (drive letters, semicolon separators) and
+  // meaningless inside the Linux namespace — bwrap runs with --clearenv, so
+  // execvp would search it verbatim and find nothing. Substitute the
+  // distribution's standard search path.
+  translatedEnv.PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
 
   return spawnBwrap(
     'bwrap',
