@@ -229,7 +229,7 @@ for (let index = 0; index < plan.repetitions; index += 1) {
 }
 
 const powerSnapshot = () => {
-  if (!isMac()) return 'power-settings-observation-not-supported-on-' + hostOS();
+  if (!${isMac()}) return 'power-settings-observation-not-supported-on-' + ${JSON.stringify(hostOS())};
   const result = spawnSync('/usr/bin/pmset', ['-g', 'custom'], { encoding: 'utf8', timeout: 2_000 });
   return result.status === 0 ? result.stdout : 'pmset-unavailable';
 };
@@ -252,7 +252,7 @@ const result = {
   environment: {
     runtime: 'Bun',
     runtimeVersion: Bun.version,
-    platform: hostOS(),
+    platform: ${JSON.stringify(hostOS())},
     architecture: process.arch,
     cpuModel: cpus()[0]?.model ?? 'unknown',
     osRelease: release(),
