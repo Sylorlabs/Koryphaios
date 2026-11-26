@@ -102,87 +102,93 @@ describe('performance-testing open-model load fixture', () => {
   // few-milliseconds-per-repetition service measures 0 user+system time no
   // matter how precisely userland asks; the resource-separation proof the
   // scorer demands is unattainable there. Linux accounting is microsecond-fine.
-  test.skipIf(isWindows())('starts red, then passes only with a real open-model load run', async () => {
-    const subject = await fixture();
-    const red = await subject.score();
-    expect(red.passed).toBe(false);
-    expect(red.integrityFailure).toBe(false);
-    expect(red.evidence.join('\n')).toMatch(/must model arrivals independently of response time/i);
+  test.skipIf(isWindows())(
+    'starts red, then passes only with a real open-model load run',
+    async () => {
+      const subject = await fixture();
+      const red = await subject.score();
+      expect(red.passed).toBe(false);
+      expect(red.integrityFailure).toBe(false);
+      expect(red.evidence.join('\n')).toMatch(
+        /must model arrivals independently of response time/i,
+      );
 
-    writePlan(subject.root, PERFORMANCE_TESTING_LOAD_VALID_PLAN);
-    const green = await subject.score();
-    expect(green.passed).toBe(true);
-    expect(green.integrityFailure).toBe(false);
-    expect(green.quality).toBe(1);
-    expect(green.verification).toBe(1);
+      writePlan(subject.root, PERFORMANCE_TESTING_LOAD_VALID_PLAN);
+      const green = await subject.score();
+      expect(green.passed).toBe(true);
+      expect(green.integrityFailure).toBe(false);
+      expect(green.quality).toBe(1);
+      expect(green.verification).toBe(1);
 
-    const result = readJsonArtifact<LoadResultArtifact>(subject.root, RESULT_ARTIFACT)!;
-    expect(result.schemaVersion).toBe(1);
-    expect(result.scenarioId).toBe(SCENARIO);
-    expect(result.receipt.startsWith('KORY_PERF_LOAD_')).toBe(true);
-    expect(result.warmup.discarded).toBe(true);
-    expect(result.warmup.offered).toBe(180);
-    expect(result.warmup.started + result.warmup.dropped).toBe(result.warmup.offered);
-    expect(result.service.datasetRecords).toBe(1_000_000);
-    expect(result.service.datasetFingerprint).toBe(
-      result.identityFingerprint.length > 0 ? result.service.datasetFingerprint : '',
-    );
-    expect(result.service.pid).not.toBe(result.generator.pid);
-    expect(result.repetitions).toHaveLength(3);
-    expect(result.rawArtifacts).toHaveLength(3);
-    expect(result.generatorHeadroom.generatorLimited).toBe(false);
+      const result = readJsonArtifact<LoadResultArtifact>(subject.root, RESULT_ARTIFACT)!;
+      expect(result.schemaVersion).toBe(1);
+      expect(result.scenarioId).toBe(SCENARIO);
+      expect(result.receipt.startsWith('KORY_PERF_LOAD_')).toBe(true);
+      expect(result.warmup.discarded).toBe(true);
+      expect(result.warmup.offered).toBe(180);
+      expect(result.warmup.started + result.warmup.dropped).toBe(result.warmup.offered);
+      expect(result.service.datasetRecords).toBe(1_000_000);
+      expect(result.service.datasetFingerprint).toBe(
+        result.identityFingerprint.length > 0 ? result.service.datasetFingerprint : '',
+      );
+      expect(result.service.pid).not.toBe(result.generator.pid);
+      expect(result.repetitions).toHaveLength(3);
+      expect(result.rawArtifacts).toHaveLength(3);
+      expect(result.generatorHeadroom.generatorLimited).toBe(false);
 
-    for (const [index, repetition] of result.repetitions.entries()) {
-      expect(repetition.index).toBe(index + 1);
-      expect(repetition.arrivalModel).toBe('open');
-      expect(repetition.arrivalRatePerSecond).toBe(300);
-      // Open model: offered is a pure function of arrival rate and phase length.
-      expect(repetition.offered).toBe(300);
-      expect(repetition.started + repetition.dropped).toBe(repetition.offered);
-      // A loaded machine may drop a few iterations, but the schedule must never silently
-      // re-send them late, and the dropped fraction must stay far below maxDroppedFraction.
-      expect(repetition.started).toBeGreaterThanOrEqual(295);
-      expect(repetition.dropped).toBeLessThanOrEqual(5);
-      expect(repetition.completed).toBe(repetition.started);
-      expect(repetition.errors).toBe(0);
-      expect(repetition.errorRate).toBe(0);
-      // Latency is measured from the actual send, so no sample can be negative.
-      expect(repetition.latencySamplesMs).toHaveLength(repetition.correctness.validated);
-      expect(repetition.latencySamplesMs.every((value) => value >= 0)).toBe(true);
-      expect(repetition.minMs).toBeGreaterThanOrEqual(0);
-      expect(repetition.p50Ms).toBeGreaterThan(0);
-      expect(repetition.p50Ms).toBeLessThanOrEqual(repetition.p95Ms);
-      expect(repetition.p95Ms).toBeLessThanOrEqual(repetition.p99Ms);
-      expect(repetition.throughputRequestsPerSecond).toBeGreaterThan(0);
-      expect(repetition.correctness.validated).toBe(repetition.started);
-      expect(repetition.correctness.mismatches).toBe(0);
-      expect(repetition.correctness.failedResponses).toBe(0);
-      expect(repetition.correctness.oracleMatched).toBe(true);
-      expect(repetition.saturation.maxInFlight).toBeGreaterThan(0);
-      expect(repetition.resources.service.pid).toBe(result.service.pid);
-      expect(repetition.resources.generator.pid).toBe(result.generator.pid);
-      expect(repetition.resources.service.cpuUserMicros).toBeGreaterThan(0);
-      expect(repetition.resources.service.rssBytes).toBeGreaterThan(0);
-      expect(repetition.identityFingerprint).toBe(result.identityFingerprint);
-      expect(repetition.resources.generator.generatorLimited).toBe(false);
+      for (const [index, repetition] of result.repetitions.entries()) {
+        expect(repetition.index).toBe(index + 1);
+        expect(repetition.arrivalModel).toBe('open');
+        expect(repetition.arrivalRatePerSecond).toBe(300);
+        // Open model: offered is a pure function of arrival rate and phase length.
+        expect(repetition.offered).toBe(300);
+        expect(repetition.started + repetition.dropped).toBe(repetition.offered);
+        // A loaded machine may drop a few iterations, but the schedule must never silently
+        // re-send them late, and the dropped fraction must stay far below maxDroppedFraction.
+        expect(repetition.started).toBeGreaterThanOrEqual(295);
+        expect(repetition.dropped).toBeLessThanOrEqual(5);
+        expect(repetition.completed).toBe(repetition.started);
+        expect(repetition.errors).toBe(0);
+        expect(repetition.errorRate).toBe(0);
+        // Latency is measured from the actual send, so no sample can be negative.
+        expect(repetition.latencySamplesMs).toHaveLength(repetition.correctness.validated);
+        expect(repetition.latencySamplesMs.every((value) => value >= 0)).toBe(true);
+        expect(repetition.minMs).toBeGreaterThanOrEqual(0);
+        expect(repetition.p50Ms).toBeGreaterThan(0);
+        expect(repetition.p50Ms).toBeLessThanOrEqual(repetition.p95Ms);
+        expect(repetition.p95Ms).toBeLessThanOrEqual(repetition.p99Ms);
+        expect(repetition.throughputRequestsPerSecond).toBeGreaterThan(0);
+        expect(repetition.correctness.validated).toBe(repetition.started);
+        expect(repetition.correctness.mismatches).toBe(0);
+        expect(repetition.correctness.failedResponses).toBe(0);
+        expect(repetition.correctness.oracleMatched).toBe(true);
+        expect(repetition.saturation.maxInFlight).toBeGreaterThan(0);
+        expect(repetition.resources.service.pid).toBe(result.service.pid);
+        expect(repetition.resources.generator.pid).toBe(result.generator.pid);
+        expect(repetition.resources.service.cpuUserMicros).toBeGreaterThan(0);
+        expect(repetition.resources.service.rssBytes).toBeGreaterThan(0);
+        expect(repetition.identityFingerprint).toBe(result.identityFingerprint);
+        expect(repetition.resources.generator.generatorLimited).toBe(false);
 
-      const raw = readJsonArtifact<{
-        receipt: string;
-        repetitionIndex: number;
-        record: { offered: number };
-      }>(subject.root, result.rawArtifacts[index]!)!;
-      expect(raw.receipt).toBe(result.receipt);
-      expect(raw.repetitionIndex).toBe(index + 1);
-      expect(raw.record.offered).toBe(repetition.offered);
-    }
+        const raw = readJsonArtifact<{
+          receipt: string;
+          repetitionIndex: number;
+          record: { offered: number };
+        }>(subject.root, result.rawArtifacts[index]!)!;
+        expect(raw.receipt).toBe(result.receipt);
+        expect(raw.repetitionIndex).toBe(index + 1);
+        expect(raw.record.offered).toBe(repetition.offered);
+      }
 
-    const verification = readJsonArtifact<{
-      passed: boolean;
-      checks: Record<string, boolean>;
-    }>(subject.root, VERIFICATION_ARTIFACT)!;
-    expect(verification.passed).toBe(true);
-    expect(Object.values(verification.checks).every(Boolean)).toBe(true);
-  }, 120_000);
+      const verification = readJsonArtifact<{
+        passed: boolean;
+        checks: Record<string, boolean>;
+      }>(subject.root, VERIFICATION_ARTIFACT)!;
+      expect(verification.passed).toBe(true);
+      expect(Object.values(verification.checks).every(Boolean)).toBe(true);
+    },
+    120_000,
+  );
 
   test('rejects a plausible closed-model plan on the substantive protocol check and ignores candidate claims', async () => {
     const subject = await fixture();
@@ -236,43 +242,47 @@ describe('performance-testing open-model load fixture', () => {
 
   // The nontermination proof inspects the service child with /usr/bin/pgrep,
   // which does not exist on Windows.
-  test.skipIf(isWindows())('bounds a nonterminating service child and fails closed', async () => {
-    const subject = await fixture();
-    writePlan(subject.root, PERFORMANCE_TESTING_LOAD_VALID_PLAN);
-    writeFixtureFile(subject.root, 'src/service.ts', 'while (true) {}\n');
-    const started = Date.now();
-    const run = spawnSync(
-      process.execPath,
-      ['run', '--no-env-file', 'harness/load-core.mjs', 'load-plan.json', RESULT_ARTIFACT],
-      {
-        cwd: subject.root,
-        env: {
-          PATH: process.env.PATH ?? '',
-          HOME: subject.root,
-          TMPDIR: subject.root,
-          TEMP: subject.root,
-          TMP: subject.root,
-          NO_COLOR: '1',
-          TERM: 'dumb',
-          KORY_PERF_LOAD_RECEIPT: 'KORY_PERF_LOAD_NONTERMINATION_TEST',
+  test.skipIf(isWindows())(
+    'bounds a nonterminating service child and fails closed',
+    async () => {
+      const subject = await fixture();
+      writePlan(subject.root, PERFORMANCE_TESTING_LOAD_VALID_PLAN);
+      writeFixtureFile(subject.root, 'src/service.ts', 'while (true) {}\n');
+      const started = Date.now();
+      const run = spawnSync(
+        process.execPath,
+        ['run', '--no-env-file', 'harness/load-core.mjs', 'load-plan.json', RESULT_ARTIFACT],
+        {
+          cwd: subject.root,
+          env: {
+            PATH: process.env.PATH ?? '',
+            HOME: subject.root,
+            TMPDIR: subject.root,
+            TEMP: subject.root,
+            TMP: subject.root,
+            NO_COLOR: '1',
+            TERM: 'dumb',
+            KORY_PERF_LOAD_RECEIPT: 'KORY_PERF_LOAD_NONTERMINATION_TEST',
+          },
+          encoding: 'utf8',
+          timeout: 25_000,
+          killSignal: 'SIGKILL',
+          maxBuffer: 2_000_000,
         },
+      );
+      const elapsed = Date.now() - started;
+      const output = `${run.stdout ?? ''}\n${run.stderr ?? ''}`;
+      expect(run.error).toBeUndefined();
+      expect(run.status).not.toBe(0);
+      expect(elapsed).toBeLessThan(20_000);
+      expect(output).toMatch(/timed out|service readiness|load harness failed/i);
+      expect(readJsonArtifact(subject.root, RESULT_ARTIFACT)).toBeNull();
+      await Bun.sleep(300);
+      const lingering = spawnSync('/usr/bin/pgrep', ['-f', 'harness/service-runner.mjs'], {
         encoding: 'utf8',
-        timeout: 25_000,
-        killSignal: 'SIGKILL',
-        maxBuffer: 2_000_000,
-      },
-    );
-    const elapsed = Date.now() - started;
-    const output = `${run.stdout ?? ''}\n${run.stderr ?? ''}`;
-    expect(run.error).toBeUndefined();
-    expect(run.status).not.toBe(0);
-    expect(elapsed).toBeLessThan(20_000);
-    expect(output).toMatch(/timed out|service readiness|load harness failed/i);
-    expect(readJsonArtifact(subject.root, RESULT_ARTIFACT)).toBeNull();
-    await Bun.sleep(300);
-    const lingering = spawnSync('/usr/bin/pgrep', ['-f', 'harness/service-runner.mjs'], {
-      encoding: 'utf8',
-    });
-    expect(lingering.stdout.trim()).toBe('');
-  }, 60_000);
+      });
+      expect(lingering.stdout.trim()).toBe('');
+    },
+    60_000,
+  );
 });
