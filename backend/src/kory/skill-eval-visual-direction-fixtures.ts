@@ -9,6 +9,7 @@ import type {
 import { readJsonArtifact, writeFixtureFile } from './skill-eval-fixture-helpers';
 import { finishChecks, runBounded } from './skill-eval-real-web-runtime';
 import { INSPECTOR_SWIFT } from './skill-eval-visual-native-fixtures';
+import { swiftRuntimeReadiness } from './skill-eval-swift-runtime';
 
 /**
  * visual-interface-design is blocked without evaluator supplied product identity
@@ -333,12 +334,18 @@ export const VISUAL_DIRECTION_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtur
   {
     id: 'visual-interface-design/native-direction-editor@1',
     realRuntime: true,
+    get readinessBlockers() {
+      return swiftRuntimeReadiness().reasons;
+    },
     matches: (scenario) => scenario.id === EDITOR_DIRECTION_SCENARIO,
     materialize: (root) => materializeRealDirectionFixture(root, EDITOR_DIRECTION_SCENARIO),
   },
   {
     id: 'visual-interface-design/native-direction-ops@1',
     realRuntime: true,
+    get readinessBlockers() {
+      return swiftRuntimeReadiness().reasons;
+    },
     matches: (scenario) => scenario.id === OPS_DIRECTION_SCENARIO,
     materialize: (root) => materializeRealDirectionFixture(root, OPS_DIRECTION_SCENARIO),
   },
