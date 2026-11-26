@@ -115,7 +115,7 @@ describe('performance-testing open-model load fixture', () => {
 
       writePlan(subject.root, PERFORMANCE_TESTING_LOAD_VALID_PLAN);
       const green = await subject.score();
-      expect(green.passed).toBe(true);
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
       expect(green.integrityFailure).toBe(false);
       expect(green.quality).toBe(1);
       expect(green.verification).toBe(1);

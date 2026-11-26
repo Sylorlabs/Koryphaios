@@ -122,8 +122,15 @@ describe('visual direction real-source fixtures', () => {
     );
     expect(readiness).toHaveLength(2);
     for (const scenario of readiness) {
-      expect(scenario.ready, scenario.scenarioId).toBe(true);
-      expect(scenario.reasons.join(' ')).not.toMatch(/synthetic requirements only/iu);
+      if (isMac()) {
+        expect(scenario.ready, scenario.scenarioId).toBe(true);
+        expect(scenario.reasons.join(' ')).not.toMatch(/synthetic requirements only/iu);
+      } else {
+        // The SwiftUI capture binary only exists on macOS, so on every other
+        // platform the truthful audit is not-ready with the toolchain reason.
+        expect(scenario.ready, scenario.scenarioId).toBe(false);
+        expect(scenario.reasons.join(' ')).toMatch(/swift/iu);
+      }
     }
   });
 
@@ -176,7 +183,7 @@ describe('visual direction real-source fixtures', () => {
       const artifact = completeDirection(root);
       writeFileSync(join(root, 'direction.json'), JSON.stringify(artifact, null, 2));
       const green = await score();
-      expect(green.passed).toBe(true);
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
       expect(green.quality).toBe(1);
       expect(green.verification).toBe(1);
 
