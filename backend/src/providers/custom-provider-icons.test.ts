@@ -98,10 +98,14 @@ describe('custom provider icon storage', () => {
     expect(metadata.shape).toBe('circle');
 
     const assetDirectory = join(iconRoot(), metadata.assetId);
-    expect(lstatSync(iconRoot()).mode & 0o777).toBe(0o700);
-    expect(lstatSync(assetDirectory).mode & 0o777).toBe(0o700);
-    expect(lstatSync(join(assetDirectory, 'icon.png')).mode & 0o777).toBe(0o600);
-    expect(lstatSync(join(assetDirectory, 'metadata.json')).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      // POSIX mode bits are unenforceable on Windows — NTFS ACLs own privacy
+      // there, and chmod/lstat modes are synthetic.
+      expect(lstatSync(iconRoot()).mode & 0o777).toBe(0o700);
+      expect(lstatSync(assetDirectory).mode & 0o777).toBe(0o700);
+      expect(lstatSync(join(assetDirectory, 'icon.png')).mode & 0o777).toBe(0o600);
+      expect(lstatSync(join(assetDirectory, 'metadata.json')).mode & 0o777).toBe(0o600);
+    }
     expect(readFileSync(join(assetDirectory, 'metadata.json'), 'utf8')).not.toContain(
       'custom:seekai',
     );

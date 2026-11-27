@@ -433,6 +433,30 @@ interface GitProcess {
   unref(): unknown;
 }
 
+/**
+ * Convert a Node child-process pipe to a web ReadableStream by hand. Bun's
+ * `Readable.toWeb()` drops buffered pipe data on Windows when the child exits
+ * quickly (the web stream closes before the queued chunks are delivered),
+ * which emptied the stdout of fast sandboxed git reads. Explicit 'data'/'end'
+ * wiring forwards every queued chunk before closing.
+ */
+function nodeStreamToWeb(stream: Readable): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      stream.on('data', (chunk: Buffer | string) => {
+        controller.enqueue(
+          typeof chunk === 'string' ? new TextEncoder().encode(chunk) : new Uint8Array(chunk),
+        );
+      });
+      stream.on('end', () => controller.close());
+      stream.on('error', (error) => controller.error(error));
+    },
+    cancel() {
+      stream.destroy();
+    },
+  });
+}
+
 function adaptSandboxedProcess(child: ChildProcess, stdin?: string): GitProcess {
   const exited = new Promise<number | null>((resolve, reject) => {
     child.once('exit', resolve);
@@ -451,12 +475,8 @@ function adaptSandboxedProcess(child: ChildProcess, stdin?: string): GitProcess 
       return child.exitCode;
     },
     exited,
-    stdout: child.stdout
-      ? (Readable.toWeb(child.stdout) as unknown as ReadableStream<Uint8Array>)
-      : null,
-    stderr: child.stderr
-      ? (Readable.toWeb(child.stderr) as unknown as ReadableStream<Uint8Array>)
-      : null,
+    stdout: child.stdout ? nodeStreamToWeb(child.stdout) : null,
+    stderr: child.stderr ? nodeStreamToWeb(child.stderr) : null,
     kill: (signal) => child.kill(signal),
     unref: () => child.unref(),
   };

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { isMac } from '../../runtime/platform';
 
 import { buildSkillEvalSuiteV3 } from '../../eval/skills/skill-eval-harness';
 import { auditSkillEvalExecutionReadiness } from '../../eval/skills/skill-eval-execution';
@@ -121,68 +122,92 @@ describe('visual direction real-source fixtures', () => {
     );
     expect(readiness).toHaveLength(2);
     for (const scenario of readiness) {
-      expect(scenario.ready, scenario.scenarioId).toBe(true);
-      expect(scenario.reasons.join(' ')).not.toMatch(/synthetic requirements only/iu);
+      if (isMac()) {
+        expect(scenario.ready, scenario.scenarioId).toBe(true);
+        expect(scenario.reasons.join(' ')).not.toMatch(/synthetic requirements only/iu);
+      } else {
+        // The SwiftUI capture binary only exists on macOS, so on every other
+        // platform the truthful audit is not-ready with the toolchain reason.
+        expect(scenario.ready, scenario.scenarioId).toBe(false);
+        expect(scenario.reasons.join(' ')).toMatch(/swift/iu);
+      }
     }
   });
 
-  test('materialization supplies real source, tokens and seven measured captures', async () => {
-    const { root } = await materialized(EDITOR_DIRECTION_SCENARIO);
-    expect(existsSync(join(root, 'Surface.swift'))).toBe(true);
-    expect(existsSync(join(root, 'tokens.json'))).toBe(true);
-    const captures = readdirSync(join(root, 'captures')).filter((name) => name.endsWith('.png'));
-    expect(captures).toHaveLength(DIRECTION_CONTEXTS.length);
-    for (const context of DIRECTION_CONTEXTS) {
-      expect(existsSync(join(root, 'geometry', `${context.id}.json`))).toBe(true);
-    }
-    // The large-text German minimum width is the condition the fixture exists to expose.
-    expect(truncatedIds(root, 'min-dark-de-large').length).toBeGreaterThan(0);
-  });
+  // The reference surface is rendered through a real SwiftUI capture binary,
+  // which only exists on macOS; every other platform has nothing to materialize.
+  test.skipIf(!isMac())(
+    'materialization supplies real source, tokens and seven measured captures',
+    async () => {
+      const { root } = await materialized(EDITOR_DIRECTION_SCENARIO);
+      expect(existsSync(join(root, 'Surface.swift'))).toBe(true);
+      expect(existsSync(join(root, 'tokens.json'))).toBe(true);
+      const captures = readdirSync(join(root, 'captures')).filter((name) => name.endsWith('.png'));
+      expect(captures).toHaveLength(DIRECTION_CONTEXTS.length);
+      for (const context of DIRECTION_CONTEXTS) {
+        expect(existsSync(join(root, 'geometry', `${context.id}.json`))).toBe(true);
+      }
+      // The large-text German minimum width is the condition the fixture exists to expose.
+      expect(truncatedIds(root, 'min-dark-de-large').length).toBeGreaterThan(0);
+    },
+  );
 
-  test('the untouched placeholder fails closed and scores no verification', async () => {
-    const { score } = await materialized(EDITOR_DIRECTION_SCENARIO);
-    const red = await score();
-    expect(red.passed).toBe(false);
-    expect(red.integrityFailure).toBe(false);
-    // Supplied-evidence integrity and the toolchain build still verify, so the score is
-    // small but not zero; every authored requirement must still fail.
-    expect(red.verification).toBeLessThan(0.5);
-    expect(red.quality).toBeLessThan(0.3);
-    expect(red.evidence).toContain(
-      'evaluator supplied source, tokens and captures: pass — all seven captures and the source are present',
-    );
-    expect(
-      red.evidence.some((line) => line.startsWith('surface identity recorded honestly: fail')),
-    ).toBe(true);
-  });
+  // The reference surface is rendered through a real SwiftUI capture binary,
+  // which only exists on macOS; every other platform has nothing to materialize.
+  test.skipIf(!isMac())(
+    'the untouched placeholder fails closed and scores no verification',
+    async () => {
+      const { score } = await materialized(EDITOR_DIRECTION_SCENARIO);
+      const red = await score();
+      expect(red.passed).toBe(false);
+      expect(red.integrityFailure).toBe(false);
+      // Supplied-evidence integrity and the toolchain build still verify, so the score is
+      // small but not zero; every authored requirement must still fail.
+      expect(red.verification).toBeLessThan(0.5);
+      expect(red.quality).toBeLessThan(0.3);
+      expect(red.evidence).toContain(
+        'evaluator supplied source, tokens and captures: pass — all seven captures and the source are present',
+      );
+      expect(
+        red.evidence.some((line) => line.startsWith('surface identity recorded honestly: fail')),
+      ).toBe(true);
+    },
+  );
 
-  test('a complete artifact passes only when every truncation claim matches the render', async () => {
-    const { root, score } = await materialized(EDITOR_DIRECTION_SCENARIO);
-    const artifact = completeDirection(root);
-    writeFileSync(join(root, 'direction.json'), JSON.stringify(artifact, null, 2));
-    const green = await score();
-    expect(green.passed).toBe(true);
-    expect(green.quality).toBe(1);
-    expect(green.verification).toBe(1);
+  // The reference surface is rendered through a real SwiftUI capture binary,
+  // which only exists on macOS; every other platform has nothing to materialize.
+  test.skipIf(!isMac())(
+    'a complete artifact passes only when every truncation claim matches the render',
+    async () => {
+      const { root, score } = await materialized(EDITOR_DIRECTION_SCENARIO);
+      const artifact = completeDirection(root);
+      writeFileSync(join(root, 'direction.json'), JSON.stringify(artifact, null, 2));
+      const green = await score();
+      expect(green.passed, green.evidence.join('\n')).toBe(true);
+      expect(green.quality).toBe(1);
+      expect(green.verification).toBe(1);
 
-    // Claiming fewer clipped elements than were measured must fail, not silently pass.
-    const understated = {
-      ...artifact,
-      stateReviews: artifact.stateReviews.map((review) =>
-        review.context === 'min-dark-de-large' ? { ...review, truncated: [] } : review,
-      ),
-    };
-    writeFileSync(join(root, 'direction.json'), JSON.stringify(understated, null, 2));
-    const overstated = await score();
-    expect(overstated.passed).toBe(false);
-    expect(
-      overstated.evidence.some((line) =>
-        line.startsWith('per context truncation claims match a fresh render: fail'),
-      ),
-    ).toBe(true);
-  });
+      // Claiming fewer clipped elements than were measured must fail, not silently pass.
+      const understated = {
+        ...artifact,
+        stateReviews: artifact.stateReviews.map((review) =>
+          review.context === 'min-dark-de-large' ? { ...review, truncated: [] } : review,
+        ),
+      };
+      writeFileSync(join(root, 'direction.json'), JSON.stringify(understated, null, 2));
+      const overstated = await score();
+      expect(overstated.passed).toBe(false);
+      expect(
+        overstated.evidence.some((line) =>
+          line.startsWith('per context truncation claims match a fresh render: fail'),
+        ),
+      ).toBe(true);
+    },
+  );
 
-  test('a missing supplied capture is reported instead of credited', async () => {
+  // The reference surface is rendered through a real SwiftUI capture binary,
+  // which only exists on macOS; every other platform has nothing to materialize.
+  test.skipIf(!isMac())('a missing supplied capture is reported instead of credited', async () => {
     const { root, score } = await materialized(OPS_DIRECTION_SCENARIO);
     writeFileSync(join(root, 'direction.json'), JSON.stringify(completeDirection(root), null, 2));
     rmSync(join(root, 'captures', 'empty-selection.png'));

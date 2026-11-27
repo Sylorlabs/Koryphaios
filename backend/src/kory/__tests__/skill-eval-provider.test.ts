@@ -9,6 +9,7 @@ import {
   createOpenRouterTextOnlyPatchSkillEvalExecutor,
 } from '../../eval/skills/skill-eval-provider';
 import type { SkillEvalScenarioV3 } from '../../eval/skills/skill-eval-harness';
+import { isWindows } from '../../runtime/platform';
 
 const workspaceScenario = (
   kind: 'synthetic' | 'repository' | 'cli' | 'browser' | 'public-web' | 'device' = 'synthetic',
@@ -378,43 +379,47 @@ describe('direct provider skill evaluation text patch executor', () => {
     }
   });
 
-  test('qualification executor keeps the captured OmniRush launcher after PATH changes', async () => {
-    const testRoot = mkdtempSync(join(tmpdir(), 'kory-provider-omnirush-binding-'));
-    const launcherA = join(testRoot, 'a', 'omnirush');
-    const launcherB = join(testRoot, 'b', 'omnirush');
-    const stateRoot = join(testRoot, 'state');
-    const used = join(testRoot, 'used.log');
-    const previousPath = process.env.PATH;
-    const previousStateRoot = process.env.OMNIRUSH_DIR;
-    try {
-      mkdirSync(join(testRoot, 'a'), { recursive: true, mode: 0o700 });
-      mkdirSync(join(testRoot, 'b'), { recursive: true, mode: 0o700 });
-      mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
-      writeFileSync(join(stateRoot, 'auth.json'), '{}', { mode: 0o600 });
-      writeFileSync(
-        join(stateRoot, 'model-catalog.json'),
-        JSON.stringify({
-          payload: {
-            data: [
-              {
-                id: 'gpt-6-astra',
-                limits: { context: 400_000, output: 128_000 },
-                reasoning_levels: ['low', 'high'],
-                capabilities: { reasoning: true, tool_call: false, image_input: false },
-              },
-            ],
-          },
-        }),
-        { mode: 0o600 },
-      );
-      const patch = '<kory-eval-patch>[]</kory-eval-patch>';
-      for (const [launcher, label] of [
-        [launcherA, 'A'],
-        [launcherB, 'B'],
-      ] as const) {
+  // The fixture launcher is a suffixless shebang script, which Windows can
+  // never resolve as an executable (PATHEXT), so the binding probe fails closed.
+  test.skipIf(isWindows())(
+    'qualification executor keeps the captured OmniRush launcher after PATH changes',
+    async () => {
+      const testRoot = mkdtempSync(join(tmpdir(), 'kory-provider-omnirush-binding-'));
+      const launcherA = join(testRoot, 'a', 'omnirush');
+      const launcherB = join(testRoot, 'b', 'omnirush');
+      const stateRoot = join(testRoot, 'state');
+      const used = join(testRoot, 'used.log');
+      const previousPath = process.env.PATH;
+      const previousStateRoot = process.env.OMNIRUSH_DIR;
+      try {
+        mkdirSync(join(testRoot, 'a'), { recursive: true, mode: 0o700 });
+        mkdirSync(join(testRoot, 'b'), { recursive: true, mode: 0o700 });
+        mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
+        writeFileSync(join(stateRoot, 'auth.json'), '{}', { mode: 0o600 });
         writeFileSync(
-          launcher,
-          `#!${process.execPath}
+          join(stateRoot, 'model-catalog.json'),
+          JSON.stringify({
+            payload: {
+              data: [
+                {
+                  id: 'gpt-6-astra',
+                  limits: { context: 400_000, output: 128_000 },
+                  reasoning_levels: ['low', 'high'],
+                  capabilities: { reasoning: true, tool_call: false, image_input: false },
+                },
+              ],
+            },
+          }),
+          { mode: 0o600 },
+        );
+        const patch = '<kory-eval-patch>[]</kory-eval-patch>';
+        for (const [launcher, label] of [
+          [launcherA, 'A'],
+          [launcherB, 'B'],
+        ] as const) {
+          writeFileSync(
+            launcher,
+            `#!${process.execPath}
 import { appendFileSync } from 'node:fs';
 appendFileSync(${JSON.stringify(used)}, '${label}:' + process.argv.slice(2).join(' ') + '\\n');
 if (process.argv.includes('--version')) process.stdout.write('omnirush ${label} 9.9.9\\n');
@@ -422,68 +427,77 @@ else if (process.argv.includes('whoami')) process.stdout.write('verified\\n');
 else if (process.argv.includes('--print')) process.stdout.write(${JSON.stringify(patch)} + '\\n');
 else process.exit(1);
 `,
-          { mode: 0o700 },
-        );
-        chmodSync(launcher, 0o700);
-      }
-      // The sandboxed print-mode request now provisions box helpers from the
-      // probed CLI version; pre-seed the exact helper files so the test never
-      // reaches the registry.
-      for (const architecture of ['arm64', 'x64']) {
-        const helperRoot = join(stateRoot, 'box-helpers', '9.9.9', 'box', `linux-${architecture}`);
-        mkdirSync(helperRoot, { recursive: true, mode: 0o700 });
-        for (const name of ['boxd', 'boxrun', 'boxsh']) {
-          writeFileSync(join(helperRoot, name), '#!/bin/sh\n', { mode: 0o700 });
+            { mode: 0o700 },
+          );
+          chmodSync(launcher, 0o700);
         }
-      }
+        // The sandboxed print-mode request now provisions box helpers from the
+        // probed CLI version; pre-seed the exact helper files so the test never
+        // reaches the registry.
+        // Product layout keys helpers by the container architecture
+        // (amd64/arm64), not the npm package suffix (x64/arm64).
+        for (const architecture of ['arm64', 'amd64']) {
+          const helperRoot = join(
+            stateRoot,
+            'box-helpers',
+            '9.9.9',
+            'box',
+            `linux-${architecture}`,
+          );
+          mkdirSync(helperRoot, { recursive: true, mode: 0o700 });
+          for (const name of ['boxd', 'boxrun', 'boxsh']) {
+            writeFileSync(join(helperRoot, name), '#!/bin/sh\n', { mode: 0o700 });
+          }
+        }
 
-      process.env.PATH = join(testRoot, 'a');
-      process.env.OMNIRUSH_DIR = stateRoot;
-      const executor = createOmnirushTextOnlyPatchSkillEvalExecutor({
-        reasoningEffort: 'high',
-        wallClockMs: 2_000,
-      });
-      const noReasoningExecutor = createOmnirushTextOnlyPatchSkillEvalExecutor({
-        reasoningEffort: 'none',
-        wallClockMs: 2_000,
-      });
-      process.env.PATH = join(testRoot, 'b');
-      const root = mkdtempSync(join(testRoot, 'workspace-'));
-      writeFileSync(join(root, 'README.md'), 'fixture\n');
-      try {
-        const result = await executor.execute(input(root));
-        expect(result.infrastructureFailure).toBeUndefined();
-        expect(result.output).toContain('<kory-eval-patch>');
-        expect(readFileSync(used, 'utf8')).toContain(
-          'A:--model gpt-6-astra --thinking high --print',
-        );
-        expect(readFileSync(used, 'utf8')).not.toContain('B:');
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-      const noReasoningRoot = mkdtempSync(join(testRoot, 'workspace-no-reasoning-'));
-      try {
-        const result = await noReasoningExecutor.execute(input(noReasoningRoot));
-        expect(result.infrastructureFailure).toBeUndefined();
-        expect(readFileSync(used, 'utf8')).toContain('A:--model gpt-6-astra --print');
-        expect(readFileSync(used, 'utf8')).not.toContain('A:--model gpt-6-astra --thinking none');
-      } finally {
-        rmSync(noReasoningRoot, { recursive: true, force: true });
-      }
-      expect(() =>
-        createOmnirushTextOnlyPatchSkillEvalExecutor({
-          reasoningEffort: 'unsupported',
+        process.env.PATH = join(testRoot, 'a');
+        process.env.OMNIRUSH_DIR = stateRoot;
+        const executor = createOmnirushTextOnlyPatchSkillEvalExecutor({
+          reasoningEffort: 'high',
           wallClockMs: 2_000,
-        }),
-      ).toThrow('does not advertise reasoning level unsupported');
-    } finally {
-      if (previousPath === undefined) delete process.env.PATH;
-      else process.env.PATH = previousPath;
-      if (previousStateRoot === undefined) delete process.env.OMNIRUSH_DIR;
-      else process.env.OMNIRUSH_DIR = previousStateRoot;
-      rmSync(testRoot, { recursive: true, force: true });
-    }
-  });
+        });
+        const noReasoningExecutor = createOmnirushTextOnlyPatchSkillEvalExecutor({
+          reasoningEffort: 'none',
+          wallClockMs: 2_000,
+        });
+        process.env.PATH = join(testRoot, 'b');
+        const root = mkdtempSync(join(testRoot, 'workspace-'));
+        writeFileSync(join(root, 'README.md'), 'fixture\n');
+        try {
+          const result = await executor.execute(input(root));
+          expect(result.infrastructureFailure).toBeUndefined();
+          expect(result.output).toContain('<kory-eval-patch>');
+          expect(readFileSync(used, 'utf8')).toContain(
+            'A:--model gpt-6-astra --thinking high --print',
+          );
+          expect(readFileSync(used, 'utf8')).not.toContain('B:');
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+        const noReasoningRoot = mkdtempSync(join(testRoot, 'workspace-no-reasoning-'));
+        try {
+          const result = await noReasoningExecutor.execute(input(noReasoningRoot));
+          expect(result.infrastructureFailure).toBeUndefined();
+          expect(readFileSync(used, 'utf8')).toContain('A:--model gpt-6-astra --print');
+          expect(readFileSync(used, 'utf8')).not.toContain('A:--model gpt-6-astra --thinking none');
+        } finally {
+          rmSync(noReasoningRoot, { recursive: true, force: true });
+        }
+        expect(() =>
+          createOmnirushTextOnlyPatchSkillEvalExecutor({
+            reasoningEffort: 'unsupported',
+            wallClockMs: 2_000,
+          }),
+        ).toThrow('does not advertise reasoning level unsupported');
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH;
+        else process.env.PATH = previousPath;
+        if (previousStateRoot === undefined) delete process.env.OMNIRUSH_DIR;
+        else process.env.OMNIRUSH_DIR = previousStateRoot;
+        rmSync(testRoot, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 describe('image attachment transport', () => {

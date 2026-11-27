@@ -856,8 +856,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { archiveDestination, converterInvocation, sanitizeDiagnostic, validateArchive, validateFetchChain } from '../src/importer';
 
-function directoryLinkType(): 'junction' | 'dir' {
-  return directoryLinkType();
+function hiddenDirectoryLinkType(): 'junction' | 'dir' {
+  return ${JSON.stringify(directoryLinkType())};
 }
 
 test('hidden: every redirect and resolved address is revalidated', () => {
@@ -877,7 +877,7 @@ test('hidden: archive paths cannot escape the job root', () => {
   const outside = mkdtempSync(join(tmpdir(), 'kory-appsec-outside-'));
   try {
     mkdirSync(join(root, 'nested'));
-    symlinkSync(outside, join(root, 'escape-link'), directoryLinkType());
+    symlinkSync(outside, join(root, 'escape-link'), hiddenDirectoryLinkType());
     expect(() => archiveDestination(root, '../escape.txt')).toThrow();
     expect(() => archiveDestination(root, '/etc/passwd')).toThrow();
     expect(() => archiveDestination(root, 'escape-link/file.wav')).toThrow();

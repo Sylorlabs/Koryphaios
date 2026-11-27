@@ -45,16 +45,20 @@ function resolveDirectory(value: string, variable: 'DEVELOPER_DIR' | 'SDKROOT'):
 }
 
 function resolveToolchain(selection: SwiftToolchain): SwiftToolchain {
-  if (!isMac()) throw new Error('Swift fixture runtime requires macOS with xcrun/Swift installed');
   // An explicit selection (including {}) overrides ambient SDKROOT. The
   // default callerToolchain() already supplies the caller's environment.
+  // Validation of the explicit selection runs before the platform gate so a
+  // malformed SDKROOT is reported for what it is on every host, rather than
+  // being masked by the macOS requirement.
   const sdkRoot = selection.sdkRoot;
-  return {
+  const resolved = {
     ...(selection.developerDir !== undefined
       ? { developerDir: resolveDirectory(selection.developerDir, 'DEVELOPER_DIR') }
       : {}),
     ...(sdkRoot !== undefined ? { sdkRoot: resolveDirectory(sdkRoot, 'SDKROOT') } : {}),
   };
+  if (!isMac()) throw new Error('Swift fixture runtime requires macOS with xcrun/Swift installed');
+  return resolved;
 }
 
 const environment = (root: string): NodeJS.ProcessEnv => ({

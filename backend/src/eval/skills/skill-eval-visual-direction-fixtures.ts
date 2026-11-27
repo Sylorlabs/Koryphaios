@@ -10,6 +10,7 @@ import type {
 import { readJsonArtifact, writeFixtureFile } from './skill-eval-fixture-helpers';
 import { finishChecks, runBounded } from './skill-eval-real-web-runtime';
 import { INSPECTOR_SWIFT } from './skill-eval-visual-native-fixtures';
+import { swiftRuntimeReadiness } from './skill-eval-swift-runtime';
 
 /**
  * visual-interface-design is blocked without evaluator supplied product identity
@@ -256,14 +257,12 @@ function buildSurface(root: string): string | undefined {
   writeFixtureFile(
     root,
     'build.sh',
-    '#!/bin/sh\nset -eu\n: "${DEVELOPER_DIR:=/Applications/Xcode-beta.app/Contents/Developer}"\nexport DEVELOPER_DIR\nxcrun swiftc -O Surface.swift -o surface\n',
+    '#!/bin/sh\nset -eu\n: "${DEVELOPER_DIR:=$(xcode-select -p 2>/dev/null || echo /Applications/Xcode.app/Contents/Developer)}"\nexport DEVELOPER_DIR\nxcrun swiftc -O Surface.swift -o surface\n',
   );
   const result = spawnSync('sh', ['build.sh'], {
     cwd: root,
     env: {
       ...process.env,
-      DEVELOPER_DIR:
-        process.env.DEVELOPER_DIR?.trim() || '/Applications/Xcode-beta.app/Contents/Developer',
     },
     timeout: 180_000,
     encoding: 'utf8',
@@ -334,12 +333,18 @@ export const VISUAL_DIRECTION_SKILL_EVAL_MATERIALIZERS: readonly SkillEvalFixtur
   {
     id: 'visual-interface-design/native-direction-editor@1',
     realRuntime: true,
+    get readinessBlockers() {
+      return swiftRuntimeReadiness().reasons;
+    },
     matches: (scenario) => scenario.id === EDITOR_DIRECTION_SCENARIO,
     materialize: (root) => materializeRealDirectionFixture(root, EDITOR_DIRECTION_SCENARIO),
   },
   {
     id: 'visual-interface-design/native-direction-ops@1',
     realRuntime: true,
+    get readinessBlockers() {
+      return swiftRuntimeReadiness().reasons;
+    },
     matches: (scenario) => scenario.id === OPS_DIRECTION_SCENARIO,
     materialize: (root) => materializeRealDirectionFixture(root, OPS_DIRECTION_SCENARIO),
   },
@@ -547,11 +552,10 @@ export function scoreRealDirectionFixture(
     // Keep the unused import honest: runBounded proves the toolchain reproduces a render.
     let rebuilt = true;
     try {
-      await runBounded('sh', ['build.sh'], root, 120_000, {
-        ...process.env,
-        DEVELOPER_DIR:
-          process.env.DEVELOPER_DIR?.trim() || '/Applications/Xcode-beta.app/Contents/Developer',
-      });
+      // DEVELOPER_DIR is deliberately not overridden here: build.sh resolves it
+      // from xcode-select so a runner without Xcode-beta still finds the stable
+      // toolchain, and an operator-provided DEVELOPER_DIR passes through process.env.
+      await runBounded('sh', ['build.sh'], root, 120_000, { ...process.env });
     } catch {
       rebuilt = false;
     }

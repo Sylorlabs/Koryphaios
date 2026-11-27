@@ -185,6 +185,7 @@ describe('built-in provider catalog truth', () => {
       providerConfigs: new Map(),
       verificationRecords: new Map(),
       customProviderIds: new Set(),
+      acpAgentIds: new Set(),
     });
     const createProvider = (
       registry as unknown as { createProvider(name: ProviderName, config: ProviderConfig): unknown }
@@ -226,6 +227,7 @@ describe('built-in provider catalog truth', () => {
       providerConfigs: new Map([['deepgram', config]]),
       circuitStates: new Map(),
       customProviderIds: new Set(),
+      acpAgentIds: new Set(),
       autoDetectedSources: new Map(),
       verificationRecords: new Map([
         ['deepgram', { state: 'verified', checkedAt: Date.now(), scope: 'credential' }],
@@ -269,6 +271,7 @@ describe('built-in provider catalog truth', () => {
       providerConfigs: configs,
       circuitStates: new Map(),
       customProviderIds: new Set(),
+      acpAgentIds: new Set(),
       autoDetectedSources: new Map(),
       verificationRecords: new Map(
         [...configs.keys()].map((name) => [

@@ -10,7 +10,7 @@ const databaseDirectory = mkdtempSync(join(tmpdir(), 'kory-vault-route-db-'));
 process.env.DATABASE_URL = `sqlite://${join(databaseDirectory, 'source.sqlite')}`;
 
 const { Elysia } = await import('elysia');
-const { initDb, reopenDatabase } = await import('../../db');
+const { initDb, reopenDatabase, getDb } = await import('../../db');
 const { buildLocalBearerToken } = await import('../../auth/local-route-auth');
 const { localAuth } = await import('../../auth/local-auth');
 const { errorHandler } = await import('../../middleware/error-handling');
@@ -31,6 +31,12 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
+  // Windows: release the open SQLite handle (and its GC-bound file lock)
+  // before deleting the directory, or rmSync hits EBUSY.
+  try {
+    getDb().close();
+  } catch {}
+  if (process.platform === 'win32') Bun.gc(true);
   rmSync(fixtureRoot, { recursive: true, force: true });
   rmSync(databaseDirectory, { recursive: true, force: true });
 });

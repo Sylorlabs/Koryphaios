@@ -185,13 +185,17 @@ describe('packaged native artifact identity', () => {
     );
     const digest = createHash('sha256').update(readFileSync(bundle)).digest('hex');
 
-    // The driver reports the canonical `/private/...` form that `resolve` never produces.
-    const canonical = lstatSync(root).isDirectory() ? join('/private', root) : root;
+    // The driver may report the artifact through an alias of the fixture root —
+    // on macOS `/tmp` resolves into `/private/tmp`, and the same class of
+    // canonical-vs-lexical aliasing exists on every platform through symlinks.
+    // The identity check must compare canonical forms, not lexical spellings.
+    const alias = join(tmpdir(), `kory-tauri-alias-${process.pid}-${Date.now()}`);
+    symlinkSync(root, alias, 'junction');
     expect(packagedArtifactIdentity(root, bundle, digest)).toEqual({ ok: true });
     expect(
       packagedArtifactIdentity(
         root,
-        canonical + '/src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture',
+        join(alias, 'src-tauri/target/release/bundle/macos/app/Contents/MacOS/fixture'),
         digest,
       ),
     ).toEqual({ ok: true });

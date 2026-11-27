@@ -14,8 +14,15 @@ const { getProcessById } = await import('../database');
 const { BashTool } = await import('../../tools/bash');
 const { ShellManageTool } = await import('../../tools/shell-manage');
 
-afterAll(() => {
+afterAll(async () => {
   if (supervisorDatabaseDir) {
+    // Windows locks an open SQLite file; close the handle before deleting.
+    const { getDb } = await import('../../db');
+    try {
+      getDb().close();
+    } catch {
+      // Already closed.
+    }
     rmSync(supervisorDatabaseDir, { recursive: true, force: true });
   }
 });

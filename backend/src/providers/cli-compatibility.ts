@@ -346,9 +346,9 @@ export const CLI_ADAPTER_COMPATIBILITY = [
         'Catalog fetch chain: authenticated api model.list, then --standalone fallback, then the bare id list.',
       ),
       source(
-        'opencode-acp',
+        'acp/client',
         'session/set_config_option',
-        'Model, effort and plan-mode negotiation are ACP-native; no config files are written.',
+        'Model, effort and plan-mode negotiation are ACP-native in the shared transport opencode-acp inherits; no config files are written.',
       ),
       source(
         'opencode-cli',

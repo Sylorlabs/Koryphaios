@@ -67,8 +67,15 @@ const app = new Elysia()
   .use(usageRoutes)
   .use(appearanceRoutes);
 
-afterAll(() => {
+afterAll(async () => {
   if (apiSurfaceDatabaseDir) {
+    // Windows locks an open SQLite file; close the handle before deleting.
+    const { getDb } = await import('../db');
+    try {
+      getDb().close();
+    } catch {
+      // Already closed.
+    }
     rmSync(apiSurfaceDatabaseDir, { recursive: true, force: true });
   }
 });

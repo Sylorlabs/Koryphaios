@@ -20,7 +20,40 @@
  */
 
 import { existsSync } from 'node:fs';
-import { findOnPath, isWindows } from './platform';
+import { delimiter, join } from 'node:path';
+import { isWindows } from './platform';
+
+/**
+ * On Windows, `bash.exe` in the system directory or the per-user WindowsApps
+ * alias directory is the WSL launcher stub — not a POSIX shell. It runs
+ * commands inside a Linux VM (wrong cwd, env, and filesystem) or, with no
+ * distro installed, fails and hangs callers waiting on the child. Only real
+ * POSIX shells (Git Bash, MSYS2, Cygwin) outside those directories are usable.
+ */
+function isWslStub(path: string): boolean {
+  if (!isWindows()) return false;
+  const normalized = path.replace(/\//g, '\\').toLowerCase();
+  if (!normalized.endsWith('bash.exe')) return false;
+  const windir = (process.env.SystemRoot ?? 'C:\\Windows').replace(/\//g, '\\').toLowerCase();
+  return normalized.startsWith(`${windir}\\`) || normalized.includes('\\windowsapps\\');
+}
+
+/**
+ * Locate a shell binary on PATH, skipping WSL launcher stubs on Windows.
+ * Probing the filesystem beats `where` because it costs no subprocess.
+ */
+function findShellOnPath(bin: string): string | null {
+  const PATH = process.env.PATH ?? '';
+  const exts = isWindows() ? ['', '.exe', '.cmd', '.bat'] : [''];
+  for (const dir of PATH.split(delimiter)) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      const full = join(dir, bin + ext);
+      if (existsSync(full) && !isWslStub(full)) return full;
+    }
+  }
+  return null;
+}
 
 export interface ShellInfo {
   /** The shell binary to spawn. */
@@ -42,7 +75,7 @@ export function resolveShell(): ShellInfo {
 
   if (isWindows()) {
     // Try bash first (Git for Windows, WSL, MSYS2 all put it on PATH).
-    const bashPath = findOnPath('bash');
+    const bashPath = findShellOnPath('bash');
     if (bashPath) {
       cached = { command: bashPath, args: ['-c'], isBash: true };
       return cached;
@@ -54,13 +87,13 @@ export function resolveShell(): ShellInfo {
   }
 
   // Unix: prefer bash, fall back to sh.
-  const bashPath = findOnPath('bash') ?? '/bin/bash';
+  const bashPath = findShellOnPath('bash') ?? '/bin/bash';
   if (existsSync(bashPath)) {
     cached = { command: bashPath, args: ['-c'], isBash: true };
     return cached;
   }
 
-  const shPath = findOnPath('sh') ?? '/bin/sh';
+  const shPath = findShellOnPath('sh') ?? '/bin/sh';
   cached = { command: shPath, args: ['-c'], isBash: false };
   return cached;
 }

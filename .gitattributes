@@ -1,0 +1,4 @@
+# Koryphaios is developed and tested with LF line endings on all platforms.
+# Pin LF so a Windows checkout (core.autocrlf=true) never produces CRLF:
+# source-grep tests, prettier, and shell scripts all expect '\n'.
+* text=auto eol=lf

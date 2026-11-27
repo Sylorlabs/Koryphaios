@@ -62,6 +62,7 @@ import {
   antigravityNativeToolRedirectReason,
   isAntigravityInternalReadPath,
 } from '../../providers/antigravity-permissions';
+import { canonicalizePath, isContainedBy } from '../../runtime/platform';
 
 /** Denial text a CLI harness can act on: names the managed-call spelling that
  *  reaches the kory server. Unknown providers get the generic phrasing. */
@@ -119,6 +120,13 @@ const NATIVE_TO_KORY: Record<string, string> = {
   web_fetch: 'kory__web_fetch',
   web_search: 'kory__web_search',
   read_page_content: 'kory__web_fetch',
+  // Native question tools would either prompt on a headless terminal or leak
+  // the conversation outside the session transcript. All spellings route to
+  // the bridge question tool, which surfaces in the chat UI.
+  ask_user_question: 'kory__ask_user',
+  AskUserQuestion: 'kory__ask_user',
+  askuserquestion: 'kory__ask_user',
+  request_user_input: 'kory__ask_user',
 };
 
 /** Native tools that only mutate the CLI's own bookkeeping and therefore carry
@@ -138,6 +146,60 @@ const SAFE_NATIVE_CONTROL_TOOLS = new Set([
   'mcp_list_tools',
   'mcp_list_servers',
 ]);
+
+/** Native read-only inspection tools whose worst case is observing bytes the
+ *  managed turn already produced. Writes, shell and everything else fall
+ *  through to the default-deny pipeline. */
+const PRIVATE_TMP_NATIVE_READ_TOOLS = new Set(['read', 'grep', 'glob', 'ls']);
+
+/**
+ * Approve a native read of the CLI turn's own private temporary output.
+ *
+ * CLI harnesses spill oversized tool output into a per-turn private temp
+ * directory (for example `devin-overflows-<pid>`) and then hand the model a
+ * path it is expected to inspect. That content was produced by the managed
+ * tool pipeline itself, so reading it back carries no new authority — but only
+ * the exact canonical file inside a registered private root qualifies: a
+ * symlink that escapes the jail, a relative spelling, a mismatched pair of
+ * path arguments, or anything outside every registered root falls through to
+ * the normal decision pipeline.
+ */
+export function privateTmpNativeReadDecision(
+  toolName: string,
+  toolInput: Record<string, unknown> = {},
+  privateTmpRoots: readonly string[] = [],
+): { decision: 'approve'; reason: string } | null {
+  if (!PRIVATE_TMP_NATIVE_READ_TOOLS.has(toolName.toLowerCase())) return null;
+  if (privateTmpRoots.length === 0) return null;
+  const spelled = [toolInput.file_path, toolInput.path]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .filter((value, index, all) => all.indexOf(value) === index);
+  if (spelled.length !== 1) return null;
+  const target = spelled[0]!;
+  if (!isAbsolute(target)) return null;
+  let canonicalTarget: string;
+  try {
+    canonicalTarget = canonicalizePath(target);
+  } catch {
+    return null;
+  }
+  for (const root of privateTmpRoots) {
+    let canonicalRoot: string;
+    try {
+      canonicalRoot = canonicalizePath(root);
+    } catch {
+      continue;
+    }
+    if (isContainedBy(canonicalRoot, canonicalTarget)) {
+      return {
+        decision: 'approve',
+        reason:
+          'Native read of the CLI turn private temp output; content originated from managed tools.',
+      };
+    }
+  }
+  return null;
+}
 
 export function managedNativeToolDecision(
   toolName: string,
