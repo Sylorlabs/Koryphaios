@@ -3443,7 +3443,8 @@ async function scoreLoadTest(root: string): Promise<SkillEvalDeterministicScore>
       ['arrivalRate', result.warmup?.arrivalRatePerSecond === BOUNDS.requiredArrivalRatePerSecond],
       [
         'offeredExact',
-        result.warmup?.offered === Math.round((BOUNDS.requiredArrivalRatePerSecond * warmupMs) / 1000),
+        result.warmup?.offered ===
+          Math.round((BOUNDS.requiredArrivalRatePerSecond * warmupMs) / 1000),
       ],
       [
         'startedPlusDropped',
