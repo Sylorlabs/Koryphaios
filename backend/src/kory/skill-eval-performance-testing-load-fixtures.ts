@@ -3394,33 +3394,72 @@ async function scoreLoadTest(root: string): Promise<SkillEvalDeterministicScore>
   const measuredMs = plan!.measuredMs!;
   const maxDroppedFraction = plan!.maxDroppedFraction!;
 
+  const openModelDiagnostics: string[] = [];
   const openModel =
     repetitions.length === BOUNDS.requiredRepetitions &&
     repetitions.every((item, index) => {
       const expectedOffered = Math.round((item.arrivalRatePerSecond! * item.phaseMs!) / 1000);
-      return (
-        item.index === index + 1 &&
-        item.arrivalModel === 'open' &&
-        item.arrivalRatePerSecond === BOUNDS.requiredArrivalRatePerSecond &&
-        item.phaseMs === measuredMs &&
-        typeof item.offered === 'number' &&
-        Math.abs(item.offered - expectedOffered) <= 1 &&
-        (item.started ?? -1) + (item.dropped ?? -1) === item.offered &&
-        (item.started ?? 0) > 0 &&
-        (item.dropped ?? -1) >= 0 &&
-        item.saturation?.dispatchIndependentOfResponseTime === true &&
-        item.saturation?.schedulingBasis === 'phaseStart + index * (1000 / arrivalRatePerSecond)' &&
-        typeof item.saturation?.scheduleLagMs?.max === 'number' &&
-        item.saturation.scheduleLagMs.max >= 0 &&
-        typeof item.saturation?.scheduleLagMs?.p95 === 'number' &&
-        item.saturation.scheduleLagMs.p95 >= 0
-      );
+      const conditions: Array<[string, boolean]> = [
+        ['index', item.index === index + 1],
+        ['arrivalModel', item.arrivalModel === 'open'],
+        ['arrivalRate', item.arrivalRatePerSecond === BOUNDS.requiredArrivalRatePerSecond],
+        ['phaseMs', item.phaseMs === measuredMs],
+        ['offeredType', typeof item.offered === 'number'],
+        ['offeredVsExpected', Math.abs((item.offered ?? -1) - expectedOffered) <= 1],
+        ['startedPlusDropped', (item.started ?? -1) + (item.dropped ?? -1) === item.offered],
+        ['startedPositive', (item.started ?? 0) > 0],
+        ['droppedNonnegative', (item.dropped ?? -1) >= 0],
+        ['dispatchIndependent', item.saturation?.dispatchIndependentOfResponseTime === true],
+        [
+          'schedulingBasis',
+          item.saturation?.schedulingBasis === 'phaseStart + index * (1000 / arrivalRatePerSecond)',
+        ],
+        ['lagMaxType', typeof item.saturation?.scheduleLagMs?.max === 'number'],
+        ['lagMaxNonnegative', (item.saturation?.scheduleLagMs?.max ?? -1) >= 0],
+        ['lagP95Type', typeof item.saturation?.scheduleLagMs?.p95 === 'number'],
+        ['lagP95Nonnegative', (item.saturation?.scheduleLagMs?.p95 ?? -1) >= 0],
+      ];
+      const failed = conditions.filter(([, ok]) => !ok).map(([name]) => name);
+      if (failed.length > 0) {
+        openModelDiagnostics.push(
+          `repetition ${String(index + 1)} failed: ${failed.join(', ')} ` +
+            `(index=${String(item.index)} model=${String(item.arrivalModel)} rate=${String(item.arrivalRatePerSecond)} ` +
+            `phaseMs=${String(item.phaseMs)} offered=${String(item.offered)} expected=${String(expectedOffered)} ` +
+            `started=${String(item.started)} dropped=${String(item.dropped)} ` +
+            `lagMax=${String(item.saturation?.scheduleLagMs?.max)} lagP95=${String(item.saturation?.scheduleLagMs?.p95)} ` +
+            `basis=${String(item.saturation?.schedulingBasis)} dispatch=${String(item.saturation?.dispatchIndependentOfResponseTime)})`,
+        );
+      }
+      return failed.length === 0;
     }) &&
     result.warmup?.discarded === true &&
     result.warmup?.arrivalRatePerSecond === BOUNDS.requiredArrivalRatePerSecond &&
     result.warmup?.offered ===
       Math.round((BOUNDS.requiredArrivalRatePerSecond * warmupMs) / 1000) &&
     (result.warmup?.started ?? -1) + (result.warmup?.dropped ?? -1) === result.warmup?.offered;
+  if (repetitions.length === BOUNDS.requiredRepetitions) {
+    const warmupConditions: Array<[string, boolean]> = [
+      ['discarded', result.warmup?.discarded === true],
+      ['arrivalRate', result.warmup?.arrivalRatePerSecond === BOUNDS.requiredArrivalRatePerSecond],
+      [
+        'offeredExact',
+        result.warmup?.offered === Math.round((BOUNDS.requiredArrivalRatePerSecond * warmupMs) / 1000),
+      ],
+      [
+        'startedPlusDropped',
+        (result.warmup?.started ?? -1) + (result.warmup?.dropped ?? -1) === result.warmup?.offered,
+      ],
+    ];
+    const warmupFailed = warmupConditions.filter(([, ok]) => !ok).map(([name]) => name);
+    if (warmupFailed.length > 0) {
+      openModelDiagnostics.push(
+        `warmup failed: ${warmupFailed.join(', ')} ` +
+          `(discarded=${String(result.warmup?.discarded)} rate=${String(result.warmup?.arrivalRatePerSecond)} ` +
+          `offered=${String(result.warmup?.offered)} expected=${String(Math.round((BOUNDS.requiredArrivalRatePerSecond * warmupMs) / 1000))} ` +
+          `started=${String(result.warmup?.started)} dropped=${String(result.warmup?.dropped)})`,
+      );
+    }
+  }
 
   const distribution =
     repetitions.length === BOUNDS.requiredRepetitions &&
@@ -3672,6 +3711,7 @@ async function scoreLoadTest(root: string): Promise<SkillEvalDeterministicScore>
       `Evaluator receipt verified; bounded local run completed within ${LOAD_RUN_TIMEOUT_MS} ms.`,
       ...checks.map(([name, ok]) => `${name}: ${ok ? 'pass' : 'fail'}`),
       ...(firstFailure && !firstFailure[1] ? [`First failing check: ${firstFailure[0]}.`] : []),
+      ...openModelDiagnostics,
       `service pid ${String(servicePid)} vs generator pid ${String(generatorPid)}; offered/started/completed/dropped per repetition: ${summary
         .map(
           (item) =>

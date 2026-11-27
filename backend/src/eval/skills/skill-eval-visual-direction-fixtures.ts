@@ -552,11 +552,10 @@ export function scoreRealDirectionFixture(
     // Keep the unused import honest: runBounded proves the toolchain reproduces a render.
     let rebuilt = true;
     try {
-      await runBounded('sh', ['build.sh'], root, 120_000, {
-        ...process.env,
-        DEVELOPER_DIR:
-          process.env.DEVELOPER_DIR?.trim() || '/Applications/Xcode-beta.app/Contents/Developer',
-      });
+      // DEVELOPER_DIR is deliberately not overridden here: build.sh resolves it
+      // from xcode-select so a runner without Xcode-beta still finds the stable
+      // toolchain, and an operator-provided DEVELOPER_DIR passes through process.env.
+      await runBounded('sh', ['build.sh'], root, 120_000, { ...process.env });
     } catch {
       rebuilt = false;
     }
