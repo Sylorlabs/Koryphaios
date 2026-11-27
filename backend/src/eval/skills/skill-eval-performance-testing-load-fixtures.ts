@@ -3414,10 +3414,15 @@ async function scoreLoadTest(root: string): Promise<SkillEvalDeterministicScore>
           'schedulingBasis',
           item.saturation?.schedulingBasis === 'phaseStart + index * (1000 / arrivalRatePerSecond)',
         ],
+        // Timer granularity means a setTimeout callback can fire fractionally
+        // before its floating-point deadline, so small negative lags are clock
+        // artifacts, not schedule coupling; the check guards large positive lag
+        // (drops) and grossly negative dispatch (a broken clock or a harness
+        // that dispatches ahead of the schedule wholesale).
         ['lagMaxType', typeof item.saturation?.scheduleLagMs?.max === 'number'],
-        ['lagMaxNonnegative', (item.saturation?.scheduleLagMs?.max ?? -1) >= 0],
+        ['lagMaxWithinClockJitter', (item.saturation?.scheduleLagMs?.max ?? -1) >= -2],
         ['lagP95Type', typeof item.saturation?.scheduleLagMs?.p95 === 'number'],
-        ['lagP95Nonnegative', (item.saturation?.scheduleLagMs?.p95 ?? -1) >= 0],
+        ['lagP95WithinClockJitter', (item.saturation?.scheduleLagMs?.p95 ?? -1) >= -2],
       ];
       const failed = conditions.filter(([, ok]) => !ok).map(([name]) => name);
       if (failed.length > 0) {
